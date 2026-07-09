@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Pipeline · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content">
+
+      <div class="page-head">
+        <h1>Sales <span class="em-italic">pipeline</span></h1>
+        <p class="sub">Every deal, lab by lab, stage by stage. Lead → Discovery → Proposal Sent → Negotiating → Closed.</p>
+      </div>
+
+      <div class="controls">
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.5-4.5"/></svg>
+          <input id="fSearch" type="search" placeholder="Search deals by client…" aria-label="Search deals">
+        </div>
+        <select id="fLab" aria-label="Filter by lab"></select>
+        <select id="fOwner" aria-label="Filter by lab leader"></select>
+      </div>
+      <p class="count-note" id="pipeCount"></p>
+
+      <div class="board" id="board"></div>
+
+      <p class="footnote">
+        Per the PRD: Lab Leaders see and edit their own lab's deals only; Admins see all labs.
+        Deal reassignment across labs is admin-only. Deals flagged <b>↻ recurring</b> generate a
+        monthly instance and feed MRR reporting. Sample data for now.
+      </p>
+    </main>
+  </div>
+</div>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/portal.js"></script>
+<script src="assets/ui.js"></script>
+<script>buildShell("Pipeline"); renderPipeline();</script>
+</body>
+</html>

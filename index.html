@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Dashboard · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content">
+
+      <section class="banner" style="margin-bottom:22px">
+        <div>
+          <h1>Welcome back, <span class="em-italic" id="helloName">Liz</span></h1>
+          <p>One place for deals, proposals, invoices, and the bench: everything that used to live in Notion, email, and ad hoc tools.</p>
+        </div>
+        <div class="banner-stats" id="bannerStats"></div>
+      </section>
+
+      <section class="grid grid-4" id="stats" style="margin-bottom:22px" aria-label="Key numbers"></section>
+
+      <section class="grid grid-main" style="margin-bottom:22px">
+        <div class="card">
+          <div class="card-head"><h2>Open pipeline by stage</h2><a class="more" href="pipeline.html">View pipeline →</a></div>
+          <div class="bars" id="stageBars"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Pipeline by lab</h2></div>
+          <div id="labDonut"></div>
+        </div>
+      </section>
+
+      <section class="grid grid-main">
+        <div class="card">
+          <div class="card-head"><h2>Deals closing soonest</h2><a class="more" href="pipeline.html">All deals →</a></div>
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr><th>Client</th><th>Lab</th><th>Owner</th><th>Stage</th><th>Amount</th><th>Close</th></tr></thead>
+              <tbody id="recentDeals"></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Needs attention</h2></div>
+          <div id="todos"></div>
+        </div>
+      </section>
+
+      <p class="footnote">
+        <span class="em-italic">Prototype.</span> This portal is a separate build from the Optimistic Labs website.
+        All numbers are sample data, and your edits save in this browser only. Use "Viewing as" up top
+        to preview each role's scoped view (Admin sees all labs; Lab Leaders their own; Subcontractors the bench).
+        Real sign-in, invites, and server-enforced permissions arrive with the backend.
+      </p>
+    </main>
+  </div>
+</div>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/portal.js"></script>
+<script src="assets/ui.js"></script>
+<script>buildShell("Dashboard"); renderDashboard();</script>
+</body>
+</html>

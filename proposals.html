@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Proposals · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content">
+
+      <div class="page-head">
+        <h1>Proposals</h1>
+        <p class="sub">Built from the OL template, versioned on every save. One version at a time is
+          marked <b>★ Final</b>: the single source of truth for what the client sees.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>All proposals</h2></div>
+        <div class="tbl-wrap">
+          <table>
+            <thead><tr><th>Proposal</th><th>Lab</th><th>Author</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
+            <tbody id="propRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="footnote">
+        Status flow per the PRD: Draft → In Review → Internally Approved → Sent → Customer Approved /
+        Rejected / Revision Requested. Customer approval is the trigger for contract generation.
+        The <span class="em-italic">AI Proposal Assistant</span> (drafting help grounded in OL's playbooks)
+        ships with the backend phase.
+      </p>
+    </main>
+  </div>
+</div>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/portal.js"></script>
+<script src="assets/ui.js"></script>
+<script>buildShell("Proposals"); renderProposals();</script>
+</body>
+</html>
