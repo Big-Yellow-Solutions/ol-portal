@@ -34,6 +34,9 @@
       <input id="lUser" autocomplete="username" required autofocus></label>
     <label class="field">Password
       <input id="lPass" type="password" autocomplete="current-password" required></label>
+    <label class="field" id="lNewWrap" style="display:none">New password
+      <input id="lNew" type="password" autocomplete="new-password" minlength="8">
+      <small style="font-weight:400;color:#6b655d">First sign-in: choose your own password (8+ chars, upper/lower/number/symbol).</small></label>
     <div class="login-err" id="lErr" role="alert"></div>
     <button class="login-btn" id="lBtn" type="submit">Sign in</button>
   </form>
@@ -47,9 +50,17 @@
     const btn = document.getElementById("lBtn"), err = document.getElementById("lErr");
     btn.disabled = true; err.textContent = "";
     try {
-      await login(document.getElementById("lUser").value.trim(), document.getElementById("lPass").value);
+      const newWrap = document.getElementById("lNewWrap");
+      const newPw = newWrap.style.display === "none" ? undefined : document.getElementById("lNew").value;
+      await login(document.getElementById("lUser").value.trim(), document.getElementById("lPass").value, newPw);
       location.href = "index.html";
     } catch (ex) {
+      if (ex.code === "NEW_PASSWORD_REQUIRED") {
+        document.getElementById("lNewWrap").style.display = "flex";
+        document.getElementById("lNew").required = true;
+        document.getElementById("lNew").focus();
+        btn.textContent = "Set password & sign in";
+      }
       err.textContent = ex.message;
       btn.disabled = false;
     }

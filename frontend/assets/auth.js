@@ -31,13 +31,28 @@ function saveTokens(result, username) {
   }));
 }
 
-async function login(username, password) {
+async function login(username, password, newPassword) {
   const r = await cognito("InitiateAuth", {
     AuthFlow: "USER_PASSWORD_AUTH",
     ClientId: CONFIG.clientId,
     AuthParameters: { USERNAME: username, PASSWORD: password }
   });
-  if (r.ChallengeName) throw new Error("Password reset required — ask your admin.");
+  if (r.ChallengeName === "NEW_PASSWORD_REQUIRED") {
+    if (!newPassword) {
+      const e = new Error("Set a new password to finish signing in.");
+      e.code = "NEW_PASSWORD_REQUIRED";
+      throw e;
+    }
+    const c = await cognito("RespondToAuthChallenge", {
+      ClientId: CONFIG.clientId,
+      ChallengeName: "NEW_PASSWORD_REQUIRED",
+      Session: r.Session,
+      ChallengeResponses: { USERNAME: username, NEW_PASSWORD: newPassword }
+    });
+    saveTokens(c.AuthenticationResult, username.toLowerCase());
+    return;
+  }
+  if (r.ChallengeName) throw new Error("Unsupported sign-in challenge: " + r.ChallengeName);
   saveTokens(r.AuthenticationResult, username.toLowerCase());
 }
 
