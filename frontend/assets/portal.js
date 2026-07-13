@@ -23,8 +23,7 @@ const NAV = [
 ];
 const NAV_SOON = [
   { icon: "doc",  label: "Contracts" },
-  { icon: "gear", label: "Admin & Invites" },
-  { icon: "lock", label: "Sign In / 2FA" }
+  { icon: "gear", label: "Admin & Invites" }
 ];
 
 function buildShell(pageTitle) {
@@ -39,24 +38,19 @@ function buildShell(pageTitle) {
     <div class="side-tag">The Portal</div>
     <div class="side-label">Workspace</div>${nav}
     <div class="side-label">Coming with auth</div>${soon}
-    <div class="side-foot">Prototype build · sample data<br>No sign-in until real users onboard<br>
-      <a href="#" id="resetData" style="color:var(--violet-light);font-weight:600">Reset sample data</a></div>`;
+    <div class="side-foot">Signed in as ${PEOPLE[ME].name}<br>
+      <a href="#" id="signOut" style="color:var(--violet-light);font-weight:600">Sign out</a></div>`;
 
   const me = PEOPLE[ME];
   document.getElementById("top").innerHTML = `
     <button class="burger" id="burger" aria-label="Open menu"><span></span><span></span><span></span></button>
     <span class="top-title">${pageTitle}</span>
-    <span class="top-env">Preview · sample data</span>
     <div class="top-right">
-      <label class="top-role">Viewing as
-        <select id="roleSel">${["Admin", "Lab Leader", "Subcontractor"].map(r =>
-          `<option${r === ROLE ? " selected" : ""}>${r}</option>`).join("")}</select>
-      </label>
+      <span class="top-role">${ROLE}</span>
       <span class="top-ava" title="${me.name} (${ROLE})">${faceHTML(me)}</span>
     </div>`;
 
-  document.getElementById("roleSel").addEventListener("change", e => setRole(e.target.value));
-  document.getElementById("resetData").addEventListener("click", e => { e.preventDefault(); resetState(); });
+  document.getElementById("signOut").addEventListener("click", e => { e.preventDefault(); logout(); });
 
   document.getElementById("burger").addEventListener("click", () => {
     document.getElementById("side").classList.toggle("open");
@@ -259,13 +253,19 @@ function renderProposals() {
     }).join("") : '<tr><td colspan="6" class="empty">No proposals visible for this role.</td></tr>';
   };
   const tbody = document.getElementById("propRows");
-  tbody.addEventListener("change", e => {
+  tbody.addEventListener("change", async e => {
     const sel = e.target.closest(".row-sel");
-    if (sel) { setProposalStatus(sel.dataset.id, sel.value); draw(); }
+    if (!sel) return;
+    sel.disabled = true;
+    try { await setProposalStatus(sel.dataset.id, sel.value); } catch (ex) { alert(ex.message); }
+    draw();
   });
-  tbody.addEventListener("click", e => {
+  tbody.addEventListener("click", async e => {
     const b = e.target.closest("[data-final]");
-    if (b) { toggleProposalFinal(b.dataset.final); draw(); }
+    if (!b) return;
+    b.disabled = true;
+    try { await toggleProposalFinal(b.dataset.final); } catch (ex) { alert(ex.message); }
+    draw();
   });
   draw();
 }
@@ -289,9 +289,12 @@ function renderInvoices() {
       </tr>`;
     }).join("") : '<tr><td colspan="7" class="empty">No invoice requests visible for this role.</td></tr>';
   };
-  document.getElementById("invRows").addEventListener("click", e => {
+  document.getElementById("invRows").addEventListener("click", async e => {
     const b = e.target.closest("[data-inv]");
-    if (b) { setInvoiceStatus(b.dataset.inv, b.dataset.next); draw(); }
+    if (!b) return;
+    b.disabled = true;
+    try { await setInvoiceStatus(b.dataset.inv, b.dataset.next); } catch (ex) { alert(ex.message); }
+    draw();
   });
   draw();
 }

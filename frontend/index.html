@@ -56,18 +56,19 @@
       </section>
 
       <p class="footnote">
-        <span class="em-italic">Prototype.</span> This portal is a separate build from the Optimistic Labs website.
-        All numbers are sample data, and your edits save in this browser only. Use "Viewing as" up top
-        to preview each role's scoped view (Admin sees all labs; Lab Leaders their own; Subcontractors the bench).
-        Real sign-in, invites, and server-enforced permissions arrive with the backend.
+        This portal is a separate build from the Optimistic Labs website. Data is live and shared —
+        edits sync for everyone through the portal API, and what you can see and do is enforced
+        server-side by your role (Admin sees all labs; Lab Leaders their own; Subcontractors the bench).
       </p>
     </main>
   </div>
 </div>
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
 <script src="assets/data.js"></script>
 <script src="assets/store.js"></script>
 <script src="assets/portal.js"></script>
 <script src="assets/ui.js"></script>
-<script>buildShell("Dashboard"); renderDashboard();</script>
+<script>initPage("Dashboard", renderDashboard);</script>
 </body>
 </html>

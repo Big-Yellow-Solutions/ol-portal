@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Sign in · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+<style>
+  .login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--violet, #3D2FD4); }
+  .login-card { background: #fff; border-radius: 16px; padding: 40px 36px; width: min(400px, 92vw); box-shadow: 0 24px 60px rgba(0,0,0,.25); }
+  .login-card img { height: 34px; margin-bottom: 18px; }
+  .login-card h1 { font-size: 26px; margin: 0 0 4px; }
+  .login-card p { color: var(--ink-mute, #6b655d); margin: 0 0 22px; font-size: 14px; }
+  .login-card .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+  .login-card input { padding: 11px 12px; border: 1.5px solid #ddd7ce; border-radius: 9px; font: inherit; }
+  .login-card input:focus { outline: 2px solid var(--violet, #3D2FD4); border-color: transparent; }
+  .login-err { color: #C0392B; font-size: 13px; min-height: 18px; margin-bottom: 10px; }
+  .login-btn { width: 100%; padding: 12px; border: 0; border-radius: 99px; background: var(--violet, #3D2FD4); color: #fff; font: 600 15px Inter, sans-serif; cursor: pointer; }
+  .login-btn:disabled { opacity: .6; cursor: wait; }
+</style>
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" id="loginForm">
+    <img src="assets/ol-logo.svg" alt="Optimistic Labs">
+    <h1>The Portal</h1>
+    <p>Sign in with the account your admin created for you.</p>
+    <label class="field">Username
+      <input id="lUser" autocomplete="username" required autofocus></label>
+    <label class="field">Password
+      <input id="lPass" type="password" autocomplete="current-password" required></label>
+    <div class="login-err" id="lErr" role="alert"></div>
+    <button class="login-btn" id="lBtn" type="submit">Sign in</button>
+  </form>
+</div>
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script>
+  if (getAuth()) location.href = "index.html";
+  document.getElementById("loginForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const btn = document.getElementById("lBtn"), err = document.getElementById("lErr");
+    btn.disabled = true; err.textContent = "";
+    try {
+      await login(document.getElementById("lUser").value.trim(), document.getElementById("lPass").value);
+      location.href = "index.html";
+    } catch (ex) {
+      err.textContent = ex.message;
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

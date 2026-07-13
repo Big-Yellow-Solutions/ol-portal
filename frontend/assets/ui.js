@@ -86,10 +86,11 @@ function openNewDeal(onDone) {
     </div>`, "modal");
   wireOutcomeToggle(back);
   back.querySelector(".x").onclick = back.querySelector("#dfCancel").onclick = () => back.remove();
-  back.querySelector("#dfSave").onclick = () => {
+  back.querySelector("#dfSave").onclick = async e => {
     const f = readDealForm();
     if (!f) return;
-    addDeal(f);
+    e.target.disabled = true;
+    try { await addDeal(f); } catch (ex) { alert(ex.message); e.target.disabled = false; return; }
     back.remove();
     onDone && onDone();
   };
@@ -124,23 +125,27 @@ function openDealDrawer(id, onDone) {
   if (editable) wireOutcomeToggle(back);
   back.querySelector(".x").onclick = back.querySelector("#dfCancel").onclick = () => back.remove();
   const invBtn = back.querySelector("#dfInvoice");
-  if (invBtn) invBtn.onclick = () => {
-    requestInvoice(d.id, d.recurring);
-    invBtn.textContent = "Requested ✓ (sent to admin review)";
+  if (invBtn) invBtn.onclick = async () => {
     invBtn.disabled = true;
+    try {
+      await requestInvoice(d.id, d.recurring);
+      invBtn.textContent = "Requested ✓ (sent to admin review)";
+    } catch (ex) { alert(ex.message); invBtn.disabled = false; }
   };
   const delBtn = back.querySelector("#dfDelete");
-  if (delBtn) delBtn.onclick = () => {
-    if (confirm(`Delete ${d.client} (${d.id})? Per the PRD this is admin-only and permanent.`)) {
-      deleteDeal(d.id); back.remove(); onDone && onDone();
-    }
+  if (delBtn) delBtn.onclick = async () => {
+    if (!confirm(`Delete ${d.client} (${d.id})? Per the PRD this is admin-only and permanent.`)) return;
+    delBtn.disabled = true;
+    try { await deleteDeal(d.id); } catch (ex) { alert(ex.message); delBtn.disabled = false; return; }
+    back.remove(); onDone && onDone();
   };
   const saveBtn = back.querySelector("#dfSave");
-  if (saveBtn) saveBtn.onclick = () => {
+  if (saveBtn) saveBtn.onclick = async () => {
     const f = readDealForm();
     if (!f) return;
     if (!can.changeLab()) f.lab = d.lab;
-    updateDeal(d.id, f);
+    saveBtn.disabled = true;
+    try { await updateDeal(d.id, f); } catch (ex) { alert(ex.message); saveBtn.disabled = false; return; }
     back.remove();
     onDone && onDone();
   };

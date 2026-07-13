@@ -99,12 +99,30 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
       Events:
-        AnyRoute:
+        GetRoute:
           Type: HttpApi
           Properties:
             ApiId: !Ref PortalApi
             Path: /{proxy+}
-            Method: ANY
+            Method: GET
+        PostRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /{proxy+}
+            Method: POST
+        PatchRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /{proxy+}
+            Method: PATCH
+        DeleteRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /{proxy+}
+            Method: DELETE
 
 Outputs:
   ApiUrl:
