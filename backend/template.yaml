@@ -10,6 +10,50 @@ Globals:
     MemorySize: 256
 
 Resources:
+  FilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ol-portal-files-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedOrigins:
+              - https://main.d2rvkunvze2ixv.amplifyapp.com
+              - http://localhost:8761
+            AllowedMethods: [PUT, GET]
+            AllowedHeaders: ["*"]
+            MaxAge: 3600
+
+  AnalyzerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-analyzer
+      CodeUri: src/
+      Handler: analyzer.handler
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+          ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+        - S3ReadPolicy:
+            BucketName: !Sub ol-portal-files-${AWS::AccountId}
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/anthropic-api-key
+      Events:
+        FileUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref FilesBucket
+            Events: s3:ObjectCreated:*
+
   PortalTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -97,9 +141,12 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref PortalTable
+          FILES_BUCKET: !Ref FilesBucket
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
+        - S3CrudPolicy:
+            BucketName: !Sub ol-portal-files-${AWS::AccountId}
       Events:
         GetRoute:
           Type: HttpApi

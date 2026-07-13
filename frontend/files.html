@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Files · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content">
+
+      <div class="page-head">
+        <h1>Files &amp; <span class="em-italic">analysis</span></h1>
+        <p class="sub">Upload proposals, contracts, and documents. Every file is stored securely and
+          analyzed automatically — the summary and key points show up here and on the dashboard.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>All files</h2>
+          <div class="controls" style="display:flex;gap:10px;align-items:center">
+            <select id="fileLab" class="row-sel" aria-label="Lab for upload"></select>
+            <button class="pill pill-primary" id="uploadBtn">+ Upload file</button>
+            <input type="file" id="filePick" hidden>
+          </div>
+        </div>
+        <div id="fileList"></div>
+      </div>
+
+      <p class="footnote">
+        Files are private to the portal. Lab-tagged files are visible to that lab's leader and admins;
+        untagged files are visible to everyone signed in.
+      </p>
+    </main>
+  </div>
+</div>
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/portal.js"></script>
+<script src="assets/ui.js"></script>
+<script>initPage("Files", renderFiles);</script>
+</body>
+</html>

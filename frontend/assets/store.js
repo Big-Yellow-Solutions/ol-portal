@@ -15,9 +15,10 @@ async function api(path, opts = {}) {
 }
 
 async function loadPortalData() {
-  const [boot, deals, proposals, invoices] = await Promise.all([
-    api("/bootstrap"), api("/deals"), api("/proposals"), api("/invoices")
+  const [boot, deals, proposals, invoices, files] = await Promise.all([
+    api("/bootstrap"), api("/deals"), api("/proposals"), api("/invoices"), api("/files")
   ]);
+  FILES.length = 0; FILES.push(...files);
   LABS = boot.labs;
   PEOPLE = boot.people;
   ROLE = boot.role;
@@ -99,6 +100,33 @@ async function setProposalStatus(id, status) {
   const i = PROPOSALS.findIndex(x => x.id === id);
   if (i > -1) PROPOSALS[i] = p;
 }
+/* ---------- files ---------- */
+async function uploadFile(file, lab) {
+  const { id, uploadUrl } = await api("/files", {
+    method: "POST",
+    body: { name: file.name, size: file.size, type: file.type || "application/octet-stream", ...(lab ? { lab } : {}) }
+  });
+  const putRes = await fetch(uploadUrl, {
+    method: "PUT",
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: file
+  });
+  if (!putRes.ok) throw new Error("Upload to storage failed (" + putRes.status + ")");
+  return id;
+}
+async function refreshFiles() {
+  const files = await api("/files");
+  FILES.length = 0; FILES.push(...files);
+}
+async function downloadFileUrl(id) {
+  return (await api(`/files/${id}/download`)).url;
+}
+async function deleteFileApi(id) {
+  await api(`/files/${id}`, { method: "DELETE" });
+  const i = FILES.findIndex(x => x.id === id);
+  if (i > -1) FILES.splice(i, 1);
+}
+
 async function toggleProposalFinal(id) {
   const cur = PROPOSALS.find(x => x.id === id);
   if (!cur) return;

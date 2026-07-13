@@ -6,8 +6,13 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand
 } from "@aws-sdk/lib-dynamodb";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const TABLE = process.env.TABLE_NAME;
+const FILES_BUCKET = process.env.FILES_BUCKET;
+const s3 = new S3Client({});
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -190,6 +195,61 @@ async function updateProposal(ctx, id, body) {
   return resp(200, { id: sk, ...rest });
 }
 
+/* ---------- files ---------- */
+const canSeeFile = (ctx, f) =>
+  ctx.role === "Admin" || !f.lab || (ctx.role === "Lab Leader" && ctx.can.inMyLabs(f.lab)) || f.uploader === ctx.me.sk;
+
+async function listFiles(ctx) {
+  const items = await listType("FILE");
+  const visible = items.filter(f => canSeeFile(ctx, f));
+  visible.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return resp(200, visible.map(({ pk, sk, key, ...rest }) => ({ id: sk, ...rest })));
+}
+
+async function createFile(ctx, body) {
+  const { name, size, type, lab, deal } = body || {};
+  if (typeof name !== "string" || !name.trim()) return resp(400, { error: "name is required" });
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES)
+    return resp(400, { error: "size must be 1 byte to 50 MB" });
+  if (typeof type !== "string" || !type) return resp(400, { error: "type is required" });
+  if (lab && !(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
+  if (lab && !ctx.can.seesLab(lab)) return resp(403, { error: "lab not visible to you" });
+
+  const id = await nextId("FILE", "F-");
+  const key = `uploads/${id}/${name.trim().replace(/[^\w.\- ]/g, "_")}`;
+  const record = {
+    pk: "FILE", sk: id, name: name.trim(), key, size, type,
+    ...(lab ? { lab } : {}), ...(deal ? { deal } : {}),
+    uploader: ctx.me.sk, date: new Date().toISOString(), status: "Uploading"
+  };
+  await put(record);
+  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
+    Bucket: FILES_BUCKET, Key: key, ContentType: type, ContentLength: size
+  }), { expiresIn: 900 });
+  return resp(201, { id, uploadUrl });
+}
+
+async function downloadFile(ctx, id) {
+  const f = await get("FILE", id);
+  if (!f) return resp(404, { error: "file not found" });
+  if (!canSeeFile(ctx, f)) return resp(403, { error: "Not allowed to access this file" });
+  const url = await getSignedUrl(s3, new GetObjectCommand({
+    Bucket: FILES_BUCKET, Key: f.key,
+    ResponseContentDisposition: `attachment; filename="${f.name.replace(/"/g, "")}"`
+  }), { expiresIn: 300 });
+  return resp(200, { url });
+}
+
+async function deleteFile(ctx, id) {
+  const f = await get("FILE", id);
+  if (!f) return resp(404, { error: "file not found" });
+  if (ctx.role !== "Admin" && f.uploader !== ctx.me.sk)
+    return resp(403, { error: "Only the uploader or an admin can delete a file" });
+  await s3.send(new DeleteObjectCommand({ Bucket: FILES_BUCKET, Key: f.key })).catch(() => {});
+  await doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk: "FILE", sk: id } }));
+  return resp(200, { deleted: id });
+}
+
 /* ---------- router ---------- */
 export const handler = async event => {
   try {
@@ -214,6 +274,10 @@ export const handler = async event => {
     if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
     if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
     if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
+    if (method === "GET" && path === "/files") return await listFiles(ctx);
+    if (method === "POST" && path === "/files") return await createFile(ctx, body);
+    if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);
+    if (method === "DELETE" && seg[0] === "files" && seg[1]) return await deleteFile(ctx, seg[1]);
     if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
     if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
     if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await updateProposal(ctx, seg[1], body);

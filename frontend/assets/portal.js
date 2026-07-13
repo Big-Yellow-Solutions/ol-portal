@@ -19,6 +19,7 @@ const NAV = [
   { href: "pipeline.html",  icon: "pipeline", label: "Pipeline" },
   { href: "proposals.html", icon: "doc",      label: "Proposals" },
   { href: "invoices.html",  icon: "invoice",  label: "Invoice Requests" },
+  { href: "files.html",     icon: "doc",      label: "Files" },
   { href: "bench.html",     icon: "people",   label: "Bench Directory" }
 ];
 const NAV_SOON = [
@@ -99,15 +100,16 @@ function renderDashboard() {
     <div class="banner-chip"><b>${open.length}</b><span>Open deals</span></div>
     <div class="banner-chip"><b>${fmtK(pipelineVal)}</b><span>In pipeline</span></div>`;
 
+  const liveLabs = Object.values(LABS).filter(l => l.status === "live").length;
   document.getElementById("stats").innerHTML = [
-    { ic: "trend",  cls: "ic-violet", num: fmtK(pipelineVal), lbl: "Open pipeline value", d: ["up", "+18% vs June"] },
-    { ic: "dollar", cls: "ic-green",  num: fmtK(wonVal),      lbl: "Closed won (all time)", d: ["up", "+" + won.length + " deals"] },
-    { ic: "repeat", cls: "ic-amber",  num: fmt$(mrr),         lbl: "MRR from recurring deals", d: ["flat", String(deals.filter(x => x.recurring).length) + " recurring"] },
-    { ic: "people", cls: "ic-red",    num: String(BENCH.length), lbl: "People on the bench", d: ["flat", Object.values(LABS).filter(l => l.status === "live").length + " lab live"] }
+    { ic: "trend",  cls: "ic-violet", num: fmtK(pipelineVal), lbl: "Open pipeline value", d: open.length + " open deal" + (open.length === 1 ? "" : "s") },
+    { ic: "dollar", cls: "ic-green",  num: fmtK(wonVal),      lbl: "Closed won (all time)", d: won.length + " deal" + (won.length === 1 ? "" : "s") + " won" },
+    { ic: "repeat", cls: "ic-amber",  num: fmt$(mrr),         lbl: "MRR from recurring deals", d: deals.filter(x => x.recurring).length + " recurring" },
+    { ic: "people", cls: "ic-red",    num: String(BENCH.length), lbl: "People on the bench", d: liveLabs + " lab" + (liveLabs === 1 ? "" : "s") + " live" }
   ].map(s => `<div class="card stat">
       <div class="ic ${s.cls}">${ICONS[s.ic]}</div>
       <div class="num">${s.num}</div><div class="lbl">${s.lbl}</div>
-      <span class="delta ${s.d[0]}">${s.d[1]}</span>
+      <span class="delta flat">${s.d}</span>
     </div>`).join("");
 
   // pipeline by stage bars
@@ -169,6 +171,103 @@ function renderDashboard() {
   document.getElementById("todos").innerHTML = todos.length
     ? todos.map(t => `<div class="todo"><span class="dot" style="background:${t.c}"></span><span><b>${t.t}</b><small>${t.s}</small></span></div>`).join("")
     : '<div class="empty">Nothing needs attention. Enjoy it.</div>';
+
+  // recent files with analysis
+  const rf = document.getElementById("recentFiles");
+  if (rf) {
+    const recentFiles = FILES.slice(0, 3);
+    rf.innerHTML = recentFiles.length ? recentFiles.map(f => `
+      <div class="todo" style="align-items:flex-start">
+        <span class="dot" style="background:${f.status === "Analyzed" ? "var(--green, #3B6D11)" : "var(--amber, #BA7517)"};margin-top:6px"></span>
+        <span style="min-width:0">
+          <b>${f.name}</b> <span class="badge ${FILE_CLASS[f.status] || "b-draft"}" style="margin-left:6px"><i></i>${f.status}</span>
+          <small style="display:block">${f.analysis ? f.analysis.summary : "Uploaded by " + (PEOPLE[f.uploader]?.name || f.uploader)}</small>
+        </span>
+      </div>`).join("") + '<a class="more" href="files.html" style="display:inline-block;margin-top:10px">All files →</a>'
+      : '<div class="empty">No files yet. <a href="files.html">Upload the first one</a> and the analysis will appear here.</div>';
+  }
+}
+
+/* ---------- files ---------- */
+const FILE_CLASS = {
+  "Uploading": "b-draft", "Analyzing": "b-review", "Analyzed": "b-won",
+  "Stored": "b-sent", "Analysis failed": "b-lost"
+};
+const fmtBytes = n => n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+
+function renderFiles() {
+  const labSel = document.getElementById("fileLab");
+  const labChoices = ROLE === "Admin" ? Object.keys(LABS) : MY_LABS;
+  labSel.innerHTML = '<option value="">Everyone (no lab)</option>' +
+    labChoices.map(k => `<option value="${k}">${LABS[k].name}</option>`).join("");
+
+  let pollTimer = null;
+  const draw = () => {
+    const list = document.getElementById("fileList");
+    list.innerHTML = FILES.length ? FILES.map(f => `
+      <div class="todo" style="align-items:flex-start;gap:12px">
+        <span style="flex:1;min-width:0">
+          <b>${f.name}</b>
+          <span class="badge ${FILE_CLASS[f.status] || "b-draft"}" style="margin-left:8px"><i></i>${f.status}</span>
+          ${f.lab && LABS[f.lab] ? `<span class="lab-dot" style="margin-left:8px"><i style="background:${LABS[f.lab].color}"></i>${LABS[f.lab].name}</span>` : ""}
+          <small style="display:block;color:var(--ink-mute)">
+            ${fmtBytes(f.size)} · uploaded by ${PEOPLE[f.uploader]?.name || f.uploader} · ${(f.date || "").slice(0, 10)}
+            ${f.analysis?.docType ? " · " + f.analysis.docType : ""}
+          </small>
+          ${f.analysis?.summary ? `<small style="display:block;margin-top:4px">${f.analysis.summary}</small>` : ""}
+          ${f.analysis?.keyPoints?.length ? `<small style="display:block;margin-top:2px;color:var(--ink-mute)">${f.analysis.keyPoints.map(k => "• " + k).join("<br>")}</small>` : ""}
+        </span>
+        <span style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn-mini" data-dl="${f.id}">Download</button>
+          ${(ROLE === "Admin" || f.uploader === ME) ? `<button class="btn-mini" data-del="${f.id}">Delete</button>` : ""}
+        </span>
+      </div>`).join("")
+      : '<div class="empty">No files yet. Upload the first one.</div>';
+
+    const pending = FILES.some(f => f.status === "Uploading" || f.status === "Analyzing");
+    if (pending && !pollTimer) {
+      pollTimer = setInterval(async () => {
+        try { await refreshFiles(); } catch { }
+        if (!FILES.some(f => f.status === "Uploading" || f.status === "Analyzing")) {
+          clearInterval(pollTimer); pollTimer = null;
+        }
+        draw();
+      }, 4000);
+    }
+  };
+
+  document.getElementById("uploadBtn").onclick = () => document.getElementById("filePick").click();
+  document.getElementById("filePick").addEventListener("change", async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const btn = document.getElementById("uploadBtn");
+    btn.disabled = true; btn.textContent = "Uploading…";
+    try {
+      await uploadFile(file, labSel.value || undefined);
+      await refreshFiles();
+    } catch (ex) { alert(ex.message); }
+    btn.disabled = false; btn.textContent = "+ Upload file";
+    e.target.value = "";
+    draw();
+  });
+
+  document.getElementById("fileList").addEventListener("click", async e => {
+    const dl = e.target.closest("[data-dl]");
+    if (dl) {
+      dl.disabled = true;
+      try { location.href = await downloadFileUrl(dl.dataset.dl); } catch (ex) { alert(ex.message); }
+      dl.disabled = false;
+      return;
+    }
+    const del = e.target.closest("[data-del]");
+    if (del && confirm("Delete this file permanently?")) {
+      del.disabled = true;
+      try { await deleteFileApi(del.dataset.del); } catch (ex) { alert(ex.message); }
+      draw();
+    }
+  });
+
+  draw();
 }
 
 /* ---------- pipeline board ---------- */

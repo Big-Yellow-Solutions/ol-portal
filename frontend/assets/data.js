@@ -2,7 +2,7 @@
    Data arrays are empty shells here — store.js fills them from the API at page load. */
 
 let LABS = {}, PEOPLE = {}, BENCH = [];
-const DEALS = [], PROPOSALS = [], INVOICES = [];
+const DEALS = [], PROPOSALS = [], INVOICES = [], FILES = [];
 let ROLE = null, ME = null, MY_LABS = [];
 
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
