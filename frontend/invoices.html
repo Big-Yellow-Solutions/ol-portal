@@ -34,10 +34,12 @@
         </div>
       </div>
 
+      <div class="card" id="qboCard" hidden></div>
+
       <p class="footnote">
-        Open decision from the PRD: <b>Option A</b> auto-drafts in QuickBooks then routes to Liz for review;
-        <b>Option B</b> emails Liz the deal details and she drafts the invoice outside the portal.
-        Recurring deals can auto-trigger a request monthly. Sample data for now.
+        PRD <b>Option A</b> (QuickBooks path): the card above connects the portal to QuickBooks Online,
+        so admins see real invoices next to the requests. Auto-drafting an approved request in QuickBooks
+        is the natural next step. Recurring deals can auto-trigger a request monthly.
       </p>
     </main>
   </div>
@@ -48,6 +50,7 @@
 <script src="assets/store.js"></script>
 <script src="assets/portal.js"></script>
 <script src="assets/ui.js"></script>
-<script>initPage("Invoice Requests", renderInvoices);</script>
+<script src="assets/qbo.js"></script>
+<script>initPage("Invoice Requests", () => { renderInvoices(); renderQboCard(); });</script>
 </body>
 </html>

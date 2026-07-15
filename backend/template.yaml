@@ -142,11 +142,20 @@ Resources:
         Variables:
           TABLE_NAME: !Ref PortalTable
           FILES_BUCKET: !Ref FilesBucket
+          FRONTEND_URL: https://main.d2rvkunvze2ixv.amplifyapp.com
+          QBO_CREDS_PARAM: /ol-portal/qbo-credentials
+          QBO_ENV: sandbox
+          # Hardcoded (like the frontend's config.js): !Sub ${PortalApi} here would
+          # be circular, since the HttpApi routes already reference this function.
+          # Must exactly match a redirect URI registered in the Intuit dashboard.
+          QBO_REDIRECT_URI: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/qbo/callback
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
         - S3CrudPolicy:
             BucketName: !Sub ol-portal-files-${AWS::AccountId}
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/qbo-credentials
       Events:
         GetRoute:
           Type: HttpApi
@@ -172,6 +181,16 @@ Resources:
             ApiId: !Ref PortalApi
             Path: /{proxy+}
             Method: DELETE
+        # Intuit's OAuth redirect cannot carry a Cognito JWT; the handler's
+        # state check (CSRF) protects this route instead.
+        QboCallbackRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /qbo/callback
+            Method: GET
+            Auth:
+              Authorizer: NONE
 
 Outputs:
   ApiUrl:

@@ -8,6 +8,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import * as qbo from "./qbo.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -250,9 +251,56 @@ async function deleteFile(ctx, id) {
   return resp(200, { deleted: id });
 }
 
+/* ---------- QuickBooks (ported from Bookspark; connection is admin-only) ---------- */
+async function qboConnect(ctx) {
+  if (!ctx.can.reviewInvoices()) return resp(403, { error: "QuickBooks connection is admin-only" });
+  if (!(await qbo.isConfigured()))
+    return resp(409, { error: "QuickBooks credentials are not configured yet" });
+  return resp(200, { url: await qbo.buildAuthorizeUrl() });
+}
+
+async function qboStatus(ctx) {
+  if (!ctx.can.reviewInvoices()) return resp(403, { error: "QuickBooks status is admin-only" });
+  return resp(200, await qbo.status());
+}
+
+async function qboDisconnect(ctx) {
+  if (!ctx.can.reviewInvoices()) return resp(403, { error: "QuickBooks disconnect is admin-only" });
+  await qbo.disconnect();
+  return resp(200, { disconnected: true });
+}
+
+async function qboInvoices(ctx) {
+  if (!ctx.can.reviewInvoices()) return resp(403, { error: "QuickBooks invoices are admin-only" });
+  if (!(await qbo.isConnected())) return resp(409, { error: "QuickBooks is not connected" });
+  return resp(200, await qbo.listInvoices());
+}
+
+/* Intuit redirects the admin's browser here after consent; there is no JWT on
+   this request, so the route is public (Authorizer NONE in template.yaml). The
+   OAuth state check in exchangeCode is the CSRF protection. */
+async function qboCallback(event) {
+  const back = ok => ({
+    statusCode: 302,
+    headers: { location: `${process.env.FRONTEND_URL}/invoices.html?qbo=${ok ? "connected" : "error"}` }
+  });
+  const { code, realmId, state } = event.queryStringParameters || {};
+  if (!code || !realmId || !state) return back(false);
+  try {
+    await qbo.exchangeCode(code, realmId, state);
+    return back(true);
+  } catch (err) {
+    console.error(JSON.stringify({ level: "error", message: "QBO callback failed", detail: err.message }));
+    return back(false);
+  }
+}
+
 /* ---------- router ---------- */
 export const handler = async event => {
   try {
+    if (event.requestContext.http.method === "GET" &&
+        event.rawPath.replace(/\/+$/, "") === "/qbo/callback") return await qboCallback(event);
+
     const { username, role } = identity(event);
     if (!username || !role) return resp(403, { error: "No portal role on this account" });
     const me = await get("PERSON", username);
@@ -281,6 +329,10 @@ export const handler = async event => {
     if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
     if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
     if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await updateProposal(ctx, seg[1], body);
+    if (method === "GET" && path === "/qbo/status") return await qboStatus(ctx);
+    if (method === "GET" && path === "/qbo/connect") return await qboConnect(ctx);
+    if (method === "POST" && path === "/qbo/disconnect") return await qboDisconnect(ctx);
+    if (method === "GET" && path === "/qbo/invoices") return await qboInvoices(ctx);
 
     return resp(404, { error: "no such route" });
   } catch (err) {
