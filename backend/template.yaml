@@ -104,9 +104,9 @@ Resources:
           RequireNumbers: true
           RequireSymbols: false
           TemporaryPasswordValidityDays: 7
-      # PRD 2.5: TOTP 2FA. OPTIONAL until the frontend that handles the
-      # MFA_SETUP / SOFTWARE_TOKEN_MFA challenges is live, then flip to ON.
-      MfaConfiguration: OPTIONAL
+      # PRD 2.5: TOTP 2FA, mandatory for every account. Users without a token
+      # get the MFA_SETUP challenge (enrollment) at next sign-in.
+      MfaConfiguration: "ON"
       EnabledMfas: [SOFTWARE_TOKEN_MFA]
       # PRD 2.6: audit log of auth events, written by the post-auth trigger.
       LambdaConfig:

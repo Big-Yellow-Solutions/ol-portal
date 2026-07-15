@@ -39,7 +39,7 @@ async function renderAdmin() {
         <td style="white-space:nowrap">
           ${pending ? `<button class="btn-mini" data-resend="${u.username}">Resend invite</button>
             <button class="btn-mini" data-revoke="${u.username}">Revoke</button>` : ""}
-          ${!pending && !self && u.mfaEnrolled ? `<button class="btn-mini" data-mfa="${u.username}">Reset 2FA</button>` : ""}
+          ${!pending && !self ? `<button class="btn-mini" data-mfa="${u.username}">Reset access</button>` : ""}
         </td>
       </tr>`;
     }).join("") || '<tr><td colspan="6" class="empty">No users yet.</td></tr>';
@@ -104,7 +104,7 @@ async function renderAdmin() {
           await api(`/admin/invites/${b.dataset.revoke}`, { method: "DELETE" });
         }
       } else if (b.dataset.mfa) {
-        if (confirm(`Reset two-factor for "${b.dataset.mfa}"? Verify their identity out-of-band first (call or known email thread). They'll re-enroll at next sign-in.`)) {
+        if (confirm(`Reset access for "${b.dataset.mfa}"? Verify their identity out-of-band first (call or known email thread). They get a new emailed temporary password and re-enroll two-factor at next sign-in. Their portal data is untouched.`)) {
           await api(`/admin/users/${b.dataset.mfa}/reset-mfa`, { method: "POST" });
         }
       } else if (b.dataset.email) {

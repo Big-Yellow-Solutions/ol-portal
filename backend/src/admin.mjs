@@ -5,7 +5,7 @@
 import {
   CognitoIdentityProviderClient, AdminCreateUserCommand, AdminDeleteUserCommand,
   AdminAddUserToGroupCommand, AdminGetUserCommand, AdminUpdateUserAttributesCommand,
-  AdminSetUserMFAPreferenceCommand, ListUsersCommand
+  ListUsersCommand
 } from "@aws-sdk/client-cognito-identity-provider";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
@@ -167,15 +167,38 @@ export async function updateUserEmail(ctx, username, body) {
   return resp(200, { username, email });
 }
 
-/* PRD 2.5 lost-device recovery: admin resets 2FA after out-of-band identity
-   check; the user re-enrolls at next sign-in (pool MFA stays mandatory). */
+/* PRD 2.5 lost-device recovery: admin resets access after out-of-band identity
+   check. Cognito has no admin API to detach a verified software token while
+   pool MFA is ON (AdminSetUserMFAPreference leaves the old token challenging),
+   so the reliable reset is delete + recreate: the user gets a fresh emailed
+   temp password and re-enrolls TOTP. The portal profile (PERSON record) is
+   keyed by username and survives untouched. */
 export async function resetUserMfa(ctx, username) {
   if (!isAdmin(ctx)) return forbidden();
-  await idp.send(new AdminSetUserMFAPreferenceCommand({
+  if (username === ctx.me.sk) return resp(400, { error: "you can't reset your own access" });
+  const user = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: username }))
+    .catch(() => null);
+  if (!user) return resp(404, { error: "no such user" });
+  const email = user.UserAttributes?.find(a => a.Name === "email")?.Value;
+  if (!email) return resp(409, { error: "user has no email on file; set one first" });
+  const person = (await doc.send(new GetCommand({
+    TableName: TABLE, Key: { pk: "PERSON", sk: username }
+  }))).Item;
+  const group = GROUP_OF_ROLE[person?.role] || "Contributor";
+
+  await idp.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: username }));
+  await idp.send(new AdminCreateUserCommand({
     UserPoolId: POOL, Username: username,
-    SoftwareTokenMfaSettings: { Enabled: false, PreferredMfa: false }
+    UserAttributes: [
+      { Name: "email", Value: email },
+      { Name: "email_verified", Value: "true" }
+    ],
+    DesiredDeliveryMediums: ["EMAIL"]
   }));
-  await writeAudit(ctx.me.sk, "user.mfa-reset", username);
+  await idp.send(new AdminAddUserToGroupCommand({
+    UserPoolId: POOL, Username: username, GroupName: group
+  }));
+  await writeAudit(ctx.me.sk, "user.access-reset", `${username} → new temp password + 2FA re-enrollment`);
   return resp(200, { mfaReset: username });
 }
 
