@@ -205,6 +205,37 @@ Resources:
           Properties:
             Schedule: cron(15 6 * * ? *)
 
+  # Renders a contract to PDF and stores it as a FILE record (PRD 3.6 follow-on).
+  # Own CodeUri (src/pdf/) so puppeteer-core + @sparticuz/chromium don't bloat
+  # every other function's bundle — see backend/src/pdf/index.mjs.
+  ContractPdfFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-contract-pdf
+      CodeUri: src/pdf/
+      Handler: index.handler
+      # HTTP API caps integrations at 29s; headless-Chromium cold start + render
+      # needs most of it. MemorySize is generous because Lambda CPU scales with
+      # memory — Chromium launches noticeably faster above ~1.5GB.
+      Timeout: 28
+      MemorySize: 2048
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+          FILES_BUCKET: !Ref FilesBucket
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+        - S3CrudPolicy:
+            BucketName: !Sub ol-portal-files-${AWS::AccountId}
+      Events:
+        PdfRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /contracts/{id}/pdf
+            Method: POST
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:

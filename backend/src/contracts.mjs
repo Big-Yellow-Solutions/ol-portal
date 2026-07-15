@@ -25,9 +25,12 @@ export async function createFromProposal(p) {
 }
 
 export async function listContracts(ctx) {
-  if (ctx.role === "Contributor") return resp(200, []);
   const items = await listType("CONTRACT");
-  const visible = items.filter(c => ctx.can.seesLab(c.lab));
+  // Contributors aren't lab-scoped like Lab Leaders — they only ever see the
+  // contract(s) naming their own email (their copy, downloadable as a PDF).
+  const visible = ctx.role === "Contributor"
+    ? items.filter(c => (c.contributorEmail || "").toLowerCase() === (ctx.me.email || "").toLowerCase())
+    : items.filter(c => ctx.can.seesLab(c.lab));
   visible.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   return resp(200, visible.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }

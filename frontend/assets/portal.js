@@ -30,7 +30,7 @@ function buildShell(pageTitle) {
   const here = location.pathname.split("/").pop() || "index.html";
   const navItems = [...NAV];
   if (ROLE !== "Contributor") navItems.splice(3, 0, { href: "optimist.html", icon: "spark", label: "The Optimist" });
-  if (ROLE !== "Contributor") navItems.push(NAV_CONTRACTS);
+  navItems.push(NAV_CONTRACTS);
   if (ROLE === "Admin") navItems.push(NAV_ADMIN);
   const nav = navItems.map(n =>
     `<a class="nav-item${n.href === here ? " active" : ""}" href="${n.href}">${ICONS[n.icon]}${n.label}</a>`).join("");

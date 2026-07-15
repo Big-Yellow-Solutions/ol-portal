@@ -1,0 +1,13 @@
+{
+  "name": "ol-portal-pdf",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.0.0",
+    "@aws-sdk/lib-dynamodb": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@sparticuz/chromium": "^131.0.1",
+    "puppeteer-core": "^23.9.0"
+  }
+}

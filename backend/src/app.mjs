@@ -189,7 +189,10 @@ async function updateInvoice(ctx, id, body) {
 
 /* ---------- files ---------- */
 const canSeeFile = (ctx, f) =>
-  ctx.role === "Admin" || !f.lab || (ctx.role === "Lab Leader" && ctx.can.inMyLabs(f.lab)) || f.uploader === ctx.me.sk;
+  ctx.role === "Admin" || !f.lab || (ctx.role === "Lab Leader" && ctx.can.inMyLabs(f.lab)) || f.uploader === ctx.me.sk ||
+  // Contract PDFs are tagged with the named Contributor's email (pdf/index.mjs)
+  // so they can find their own copy without full lab-scoped file access.
+  (ctx.role === "Contributor" && f.contributorEmail && f.contributorEmail.toLowerCase() === (ctx.me.email || "").toLowerCase());
 
 async function listFiles(ctx) {
   const items = await listType("FILE");

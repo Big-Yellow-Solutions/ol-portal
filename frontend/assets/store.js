@@ -173,6 +173,12 @@ async function updateContractApi(id, patch) {
   if (i > -1) CONTRACTS[i] = c;
   return c;
 }
+async function generateContractPdf(id) {
+  const out = await api(`/contracts/${id}/pdf`, { method: "POST" });
+  const c = CONTRACTS.find(x => x.id === id);
+  if (c) c.pdfFileId = out.fileId;
+  return out;
+}
 async function inviteContributor(fields) {
   return api("/admin/invites", { method: "POST", body: { ...fields, role: "Contributor" } });
 }
