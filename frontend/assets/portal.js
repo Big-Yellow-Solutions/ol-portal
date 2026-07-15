@@ -22,14 +22,15 @@ const NAV = [
   { href: "files.html",     icon: "doc",      label: "Files" },
   { href: "bench.html",     icon: "people",   label: "Bench Directory" }
 ];
+const NAV_ADMIN = { href: "admin.html", icon: "gear", label: "Admin & Invites" };
 const NAV_SOON = [
-  { icon: "doc",  label: "Contracts" },
-  { icon: "gear", label: "Admin & Invites" }
+  { icon: "doc",  label: "Contracts" }
 ];
 
 function buildShell(pageTitle) {
   const here = location.pathname.split("/").pop() || "index.html";
-  const nav = NAV.map(n =>
+  const navItems = ROLE === "Admin" ? [...NAV, NAV_ADMIN] : NAV;
+  const nav = navItems.map(n =>
     `<a class="nav-item${n.href === here ? " active" : ""}" href="${n.href}">${ICONS[n.icon]}${n.label}</a>`).join("");
   const soon = NAV_SOON.map(n =>
     `<a class="nav-item" href="#" onclick="return false" aria-disabled="true">${ICONS[n.icon]}${n.label}<span class="soon">Soon</span></a>`).join("");

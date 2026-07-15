@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Admin &amp; Invites · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+<style>
+  .invite-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .invite-grid .field, .invite-labs { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+  .invite-grid input, .invite-grid select { padding: 10px 12px; border: 1.5px solid #ddd7ce; border-radius: 9px; font: inherit; }
+  .invite-msg { font-size: 13px; min-height: 18px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="shell">
+  <aside class="side" id="side"></aside>
+  <div class="main">
+    <header class="top" id="top"></header>
+    <main class="content" id="adminWrap">
+
+      <div class="page-head">
+        <h1>Admin &amp; <span class="em-italic">invites</span></h1>
+        <p class="sub">Invite people to the portal, manage accounts and two-factor,
+          and review the authentication audit log. The portal is invite-only;
+          self-registration is never allowed.</p>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <h2 style="margin-top:0">Invite someone</h2>
+        <form id="inviteForm">
+          <div class="invite-grid">
+            <label class="field">Full name<input id="invName" name="invName" required></label>
+            <label class="field">Username<input id="invUser" name="invUser" required pattern="[a-z][a-z0-9._-]{1,30}"></label>
+            <label class="field">Email<input name="invEmail" type="email" required></label>
+            <label class="field">Role
+              <select name="invRole">
+                <option>Lab Leader</option>
+                <option>Contributor</option>
+                <option>Admin</option>
+              </select></label>
+          </div>
+          <div class="invite-labs" style="margin-bottom:12px">Labs (for Lab Leaders / Contributors)
+            <span id="inviteLabs" style="font-weight:400"></span></div>
+          <button class="pill pill-primary" type="submit">Send invite</button>
+          <div class="invite-msg" id="inviteMsg" role="status"></div>
+        </form>
+        <p class="footnote" style="margin-bottom:0">
+          Cognito emails a temporary password valid for 7 days. First sign-in forces a new
+          password (12+ chars, breach-checked) and two-factor enrollment. Lab-Leader-initiated
+          Contributor invites stay admin-only until contract automation exists (PRD 2.2).
+        </p>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <h2 style="margin-top:0">Accounts</h2>
+        <div style="overflow-x:auto">
+          <table class="tbl">
+            <thead><tr><th>Person</th><th>Email</th><th>Role · Labs</th><th>Status</th><th>2FA</th><th>Actions</th></tr></thead>
+            <tbody id="userRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="margin-top:0">Auth audit log</h2>
+        <p class="sub" style="margin-top:0">Sign-ins, invites, email changes, and 2FA resets.
+          Kept for 90 days. Failed sign-in attempts are in CloudTrail.</p>
+        <div id="auditList"></div>
+      </div>
+
+    </main>
+  </div>
+</div>
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/portal.js"></script>
+<script src="assets/ui.js"></script>
+<script src="assets/admin.js"></script>
+<script>initPage("Admin & Invites", renderAdmin);</script>
+</body>
+</html>

@@ -73,6 +73,9 @@ Resources:
           KeyType: RANGE
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
 
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -80,9 +83,55 @@ Resources:
       UserPoolName: ol-portal
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailSubject: You're invited to the Optimistic Labs Portal
+          EmailMessage: >-
+            Hi! You've been invited to the Optimistic Labs Portal.
+            Your username is {username} and your temporary password is {####}.
+            Sign in at https://main.d2rvkunvze2ixv.amplifyapp.com/login.html
+            within 7 days. You'll choose your own password and set up
+            two-factor authentication on first sign-in.
       AutoVerifiedAttributes: [email]
       UsernameConfiguration:
         CaseSensitive: false
+      # PRD 2.3: 12+ chars, upper/lower/number required (3 character classes).
+      # Cognito cannot express "any 3 of 4", so symbols stay optional.
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      # PRD 2.5: TOTP 2FA. OPTIONAL until the frontend that handles the
+      # MFA_SETUP / SOFTWARE_TOKEN_MFA challenges is live, then flip to ON.
+      MfaConfiguration: OPTIONAL
+      EnabledMfas: [SOFTWARE_TOKEN_MFA]
+      # PRD 2.6: audit log of auth events, written by the post-auth trigger.
+      LambdaConfig:
+        PostAuthentication: !GetAtt AuthEventsFunction.Arn
+
+  AuthEventsInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AuthEventsFunction
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt UserPool.Arn
+
+  AuthEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-auth-events
+      CodeUri: src/
+      Handler: authevents.handler
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
 
   UserPoolClient:
     Type: AWS::Cognito::UserPoolClient
@@ -90,6 +139,8 @@ Resources:
       UserPoolId: !Ref UserPool
       ClientName: portal-web
       GenerateSecret: false
+      # PRD 2.4: no account-enumeration leakage from sign-in / forgot-password.
+      PreventUserExistenceErrors: ENABLED
       ExplicitAuthFlows:
         - ALLOW_USER_SRP_AUTH
         - ALLOW_USER_PASSWORD_AUTH
@@ -149,6 +200,7 @@ Resources:
           # be circular, since the HttpApi routes already reference this function.
           # Must exactly match a redirect URI registered in the Intuit dashboard.
           QBO_REDIRECT_URI: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/qbo/callback
+          USER_POOL_ID: !Ref UserPool
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
@@ -156,6 +208,18 @@ Resources:
             BucketName: !Sub ol-portal-files-${AWS::AccountId}
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/qbo-credentials
+        # PRD 2.2/2.5: invite lifecycle + admin 2FA reset (admin routes only)
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminCreateUser
+                - cognito-idp:AdminDeleteUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminGetUser
+                - cognito-idp:AdminUpdateUserAttributes
+                - cognito-idp:AdminSetUserMFAPreference
+                - cognito-idp:ListUsers
+              Resource: !GetAtt UserPool.Arn
       Events:
         GetRoute:
           Type: HttpApi

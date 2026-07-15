@@ -9,6 +9,7 @@ import {
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import * as qbo from "./qbo.mjs";
+import * as admin from "./admin.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -329,6 +330,17 @@ export const handler = async event => {
     if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
     if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
     if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await updateProposal(ctx, seg[1], body);
+    if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
+    if (method === "POST" && path === "/admin/invites") return await admin.createInvite(ctx, body);
+    if (method === "POST" && seg[0] === "admin" && seg[1] === "invites" && seg[3] === "resend")
+      return await admin.resendInvite(ctx, seg[2]);
+    if (method === "DELETE" && seg[0] === "admin" && seg[1] === "invites" && seg[2])
+      return await admin.revokeInvite(ctx, seg[2]);
+    if (method === "PATCH" && seg[0] === "admin" && seg[1] === "users" && seg[2])
+      return await admin.updateUserEmail(ctx, seg[2], body);
+    if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "reset-mfa")
+      return await admin.resetUserMfa(ctx, seg[2]);
+    if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
     if (method === "GET" && path === "/qbo/status") return await qboStatus(ctx);
     if (method === "GET" && path === "/qbo/connect") return await qboConnect(ctx);
     if (method === "POST" && path === "/qbo/disconnect") return await qboDisconnect(ctx);
