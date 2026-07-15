@@ -2,7 +2,7 @@
    Data arrays are empty shells here — store.js fills them from the API at page load. */
 
 let LABS = {}, PEOPLE = {}, BENCH = [];
-const DEALS = [], PROPOSALS = [], INVOICES = [], FILES = [];
+const DEALS = [], PROPOSALS = [], INVOICES = [], FILES = [], CONTRACTS = [], RECURS = [];
 let ROLE = null, ME = null, MY_LABS = [];
 
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
@@ -15,6 +15,11 @@ const PROPOSAL_CLASS = {
   "Sent": "b-sent", "Customer Approved": "b-won", "Customer Rejected": "b-lost", "Revision Requested": "b-negotiating"
 };
 const INVOICE_CLASS = { "Admin review": "b-review", "Sent to client": "b-sent", "Paid": "b-won", "Overdue": "b-lost" };
+const CONTRACT_CLASS = { "Draft": "b-draft", "Internal Review": "b-review", "Sent": "b-sent", "Signed": "b-won" };
+const SECTION_LABELS = {
+  summary: "Client & problem summary", scope: "Scope", deliverables: "Deliverables",
+  timeline: "Timeline", pricing: "Pricing", terms: "Terms"
+};
 
 const TODAY = new Date().toISOString().slice(0, 10);
 const fmt$ = n => "$" + n.toLocaleString("en-US");

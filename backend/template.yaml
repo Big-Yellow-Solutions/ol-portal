@@ -183,15 +183,38 @@ Resources:
                 - !Ref UserPoolClient
             IdentitySource: $request.header.Authorization
 
+  # Daily generator for recurring deal instances + opt-in auto invoice requests (PRD 3.9/3.10)
+  RecurringFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-recurring
+      CodeUri: src/
+      Handler: recurring.handler
+      Timeout: 60
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+      Events:
+        Daily:
+          Type: Schedule
+          Properties:
+            Schedule: cron(15 6 * * ? *)
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: ol-portal-api
       CodeUri: src/
       Handler: app.handler
+      # HTTP API caps responses at 29s; the AI proposal assistant needs most of it.
+      Timeout: 28
       Environment:
         Variables:
           TABLE_NAME: !Ref PortalTable
+          ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
           FILES_BUCKET: !Ref FilesBucket
           FRONTEND_URL: https://main.d2rvkunvze2ixv.amplifyapp.com
           QBO_CREDS_PARAM: /ol-portal/qbo-credentials
@@ -208,6 +231,8 @@ Resources:
             BucketName: !Sub ol-portal-files-${AWS::AccountId}
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/qbo-credentials
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/anthropic-api-key
         # PRD 2.2/2.5: invite lifecycle + admin 2FA reset (admin routes only)
         - Statement:
             - Effect: Allow
@@ -253,6 +278,24 @@ Resources:
             ApiId: !Ref PortalApi
             Path: /qbo/callback
             Method: GET
+            Auth:
+              Authorizer: NONE
+        # Customer-facing proposal view + decision (PRD 3.5). Clients aren't
+        # portal users, so no JWT; the per-proposal share token is the credential.
+        ShareGetRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /share/{proxy+}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        SharePostRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /share/{proxy+}
+            Method: POST
             Auth:
               Authorizer: NONE
 

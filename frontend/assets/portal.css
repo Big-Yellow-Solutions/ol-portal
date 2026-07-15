@@ -290,3 +290,8 @@ td .who small{display:block;font-weight:400;font-size:11.5px;color:var(--ink-mut
   .top-role{display:none}
   .f-grid{grid-template-columns:1fr}
 }
+
+/* proposals editor + clickable rows */
+.modal-wide{max-width:840px;width:min(840px,94vw)}
+.rowlink{cursor:pointer}
+.rowlink:hover td{background:#faf7f1}

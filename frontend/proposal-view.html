@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Proposal · Optimistic Labs</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 15px/1.65 Inter, sans-serif; color: #1d1a16; background: #3D2FD4; padding: 40px 16px; }
+  .sheet { max-width: 760px; margin: 0 auto; background: #fff; border-radius: 16px; padding: 44px 48px; box-shadow: 0 24px 60px rgba(0,0,0,.25); }
+  .brand { font: 700 13px Inter, sans-serif; letter-spacing: .12em; color: #3D2FD4; margin-bottom: 20px; }
+  h1 { font-family: "Playfair Display", serif; font-size: 30px; margin-bottom: 4px; }
+  .meta { color: #6b655d; font-size: 13px; margin-bottom: 28px; }
+  h2 { font: 600 12px Inter, sans-serif; letter-spacing: .1em; text-transform: uppercase; color: #3D2FD4; margin: 26px 0 8px; }
+  .sec { white-space: pre-wrap; }
+  .decide { margin-top: 36px; border-top: 1.5px solid #eee7dc; padding-top: 24px; }
+  .decide h3 { font-size: 17px; margin-bottom: 10px; }
+  .decide input, .decide textarea { width: 100%; padding: 11px 12px; border: 1.5px solid #ddd7ce; border-radius: 9px; font: inherit; margin-bottom: 10px; }
+  .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btns button { padding: 11px 20px; border-radius: 99px; border: 1.5px solid #3D2FD4; font: 600 14px Inter, sans-serif; cursor: pointer; background: #fff; color: #3D2FD4; }
+  .btns .go { background: #3D2FD4; color: #fff; }
+  .btns button:disabled { opacity: .5; cursor: wait; }
+  .note { margin-top: 14px; font-size: 13px; min-height: 18px; }
+  .done { margin-top: 24px; padding: 16px; border-radius: 10px; background: #f0f7e8; color: #3B6D11; font-weight: 600; }
+  .center { text-align: center; padding: 80px 0; color: #fff; font-size: 17px; }
+  @media (max-width: 600px) { .sheet { padding: 28px 20px; } }
+</style>
+</head>
+<body>
+<div id="root" class="center">Loading proposal…</div>
+<script src="assets/config.js"></script>
+<script>
+  const token = new URLSearchParams(location.search).get("token") || "";
+  const esc = s => String(s || "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const LABELS = { summary: "Summary", scope: "Scope", deliverables: "Deliverables", timeline: "Timeline", pricing: "Pricing", terms: "Terms" };
+
+  async function main() {
+    const res = await fetch(`${CONFIG.apiUrl}/share/${encodeURIComponent(token)}`);
+    const p = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      document.getElementById("root").textContent = p.error || "This proposal link is not valid.";
+      return;
+    }
+    const secs = Object.entries(LABELS)
+      .filter(([k]) => (p.sections?.[k] || "").trim())
+      .map(([k, label]) => `<h2>${label}</h2><div class="sec">${esc(p.sections[k])}</div>`).join("");
+    const decided = !!p.decision;
+    document.getElementById("root").className = "";
+    document.getElementById("root").innerHTML = `
+      <div class="sheet">
+        <div class="brand">OPTIMISTIC LABS</div>
+        <h1>${esc(p.title)}</h1>
+        <div class="meta">Prepared for ${esc(p.client)} · version ${p.version} · sent ${(p.sentAt || "").slice(0, 10)}</div>
+        ${secs || "<p>The proposal document will appear here.</p>"}
+        ${decided ? `<div class="done">Thank you — your response (“${esc(p.decision.action)}”) was recorded${p.decision.at ? " on " + p.decision.at.slice(0, 10) : ""}.</div>` : `
+        <div class="decide">
+          <h3>Your decision</h3>
+          <input id="dName" placeholder="Your name (optional)">
+          <textarea id="dComment" rows="3" placeholder="Comments or requested changes (optional)"></textarea>
+          <div class="btns">
+            <button class="go" data-act="approve">Approve proposal</button>
+            <button data-act="revision">Request revisions</button>
+            <button data-act="reject">Decline</button>
+          </div>
+          <div class="note" id="dNote"></div>
+        </div>`}
+      </div>`;
+
+    document.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+      const act = b.dataset.act;
+      if (act === "approve" && !confirm("Approve this proposal? Optimistic Labs will be notified and contracting begins.")) return;
+      document.querySelectorAll("[data-act]").forEach(x => x.disabled = true);
+      try {
+        const r = await fetch(`${CONFIG.apiUrl}/share/${encodeURIComponent(token)}/decision`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: act,
+            name: document.getElementById("dName").value.trim(),
+            comment: document.getElementById("dComment").value.trim()
+          })
+        });
+        const out = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(out.error || "Something went wrong");
+        main();
+      } catch (ex) {
+        document.getElementById("dNote").textContent = ex.message;
+        document.getElementById("dNote").style.color = "#C0392B";
+        document.querySelectorAll("[data-act]").forEach(x => x.disabled = false);
+      }
+    });
+  }
+  main();
+</script>
+</body>
+</html>

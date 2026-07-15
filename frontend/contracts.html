@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow">
-<title>Proposals · Optimistic Labs Portal</title>
+<title>Contracts · Optimistic Labs Portal</title>
 <link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,27 +19,25 @@
     <main class="content">
 
       <div class="page-head">
-        <h1>Proposals</h1>
-        <p class="sub">Built from the OL template, versioned on every save. One version at a time is
-          marked <b>★ Final</b>: the single source of truth for what the client sees.</p>
+        <h1>Contracts</h1>
+        <p class="sub">Auto-created from customer-approved proposals, pre-filled with the approved
+          version's data. Status flow: Draft → Internal Review → Sent → Signed.</p>
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>All proposals</h2></div>
+        <div class="card-head"><h2>All contracts</h2></div>
         <div class="tbl-wrap">
           <table>
-            <thead><tr><th>Proposal</th><th>Lab</th><th>Author</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
-            <tbody id="propRows"></tbody>
+            <thead><tr><th>Client</th><th>Lab</th><th>Value</th><th>Status</th><th>Contributor</th><th>Created</th></tr></thead>
+            <tbody id="conRows"></tbody>
           </table>
         </div>
       </div>
 
       <p class="footnote">
-        Status flow per the PRD: Draft → In Review → Internally Approved → Sent → Customer Approved /
-        Rejected / Revision Requested. Sending locks the exact version the client sees; their
-        Approve / Reject / Revision decision is captured on the shared link, and approval
-        auto-creates the contract. The <span class="em-italic">AI Proposal Assistant</span> drafts
-        from the knowledge base admins maintain on the Admin page.
+        Marking a contract <b>Signed</b> is a manual admin step for now — e-signature build-vs-buy is
+        deferred until post-raise per the PRD. A signed contract naming a Contributor unlocks that
+        lab's Lab Leader to invite them to the portal, right from this table.
       </p>
     </main>
   </div>
@@ -50,7 +48,7 @@
 <script src="assets/store.js"></script>
 <script src="assets/portal.js"></script>
 <script src="assets/ui.js"></script>
-<script src="assets/proposals.js"></script>
-<script>initPage("Proposals", renderProposals);</script>
+<script src="assets/contracts.js"></script>
+<script>initPage("Contracts", renderContracts);</script>
 </body>
 </html>

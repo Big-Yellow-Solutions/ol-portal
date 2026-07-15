@@ -73,16 +73,37 @@ export async function listPortalUsers(ctx) {
   return resp(200, users);
 }
 
-/* ---------- invites (PRD 2.2): Cognito emails the temp credentials ---------- */
+/* ---------- invites (PRD 2.2): Cognito emails the temp credentials ----------
+   Admins invite anyone. Lab Leaders may invite a Contributor only when a
+   Signed contract in one of their labs names that email (PRD 2.2 gate,
+   unlocked by PRD 3.6 contract signing). */
+async function signedContractUnlocks(labs, email) {
+  const page = await doc.send(new QueryCommand({
+    TableName: TABLE, KeyConditionExpression: "pk = :p",
+    ExpressionAttributeValues: { ":p": "CONTRACT" }
+  }));
+  return (page.Items || []).some(c =>
+    c.status === "Signed" && labs.includes(c.lab) &&
+    (c.contributorEmail || "").toLowerCase() === (email || "").toLowerCase());
+}
+
 export async function createInvite(ctx, body) {
-  if (!isAdmin(ctx)) return forbidden();
   const { username, name, email, role, labs } = body || {};
+  if (!isAdmin(ctx)) {
+    if (ctx.role !== "Lab Leader") return forbidden();
+    if (role !== "Contributor")
+      return resp(403, { error: "Lab Leaders can only invite Contributors" });
+    if (!(await signedContractUnlocks(ctx.me.labs || [], email)))
+      return resp(403, { error: "No signed contract names this Contributor's email in your lab yet" });
+  }
   if (!/^[a-z][a-z0-9._-]{1,30}$/.test(username || ""))
     return resp(400, { error: "username must be lowercase letters/numbers, 2-31 chars" });
   if (typeof name !== "string" || !name.trim()) return resp(400, { error: "name is required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) return resp(400, { error: "valid email is required" });
   if (!GROUP_OF_ROLE[role]) return resp(400, { error: "role must be Admin, Lab Leader, or Contributor" });
   const labList = Array.isArray(labs) ? labs : [];
+  if (!isAdmin(ctx) && labList.some(l => !(ctx.me.labs || []).includes(l)))
+    return resp(403, { error: "You can only assign labs you lead" });
   for (const lab of labList) {
     const known = (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk: "LAB", sk: lab } }))).Item;
     if (!known) return resp(400, { error: `unknown lab: ${lab}` });

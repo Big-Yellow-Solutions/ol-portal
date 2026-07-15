@@ -10,6 +10,10 @@ import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } fro
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import * as qbo from "./qbo.mjs";
 import * as admin from "./admin.mjs";
+import * as proposals from "./proposals.mjs";
+import * as contracts from "./contracts.mjs";
+import * as recurring from "./recurring.mjs";
+import * as assist from "./assist.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -22,9 +26,6 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 const ROLE_OF_GROUP = { Admin: "Admin", LabLeader: "Lab Leader", Contributor: "Contributor" };
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
 const SOURCES = ["Referral", "Inbound", "Outbound"];
-const PROPOSAL_STATUSES = ["Draft", "In Review", "Internally Approved", "Sent",
-  "Customer Approved", "Customer Rejected", "Revision Requested"];
-const LL_PROPOSAL_STATUSES = ["Draft", "In Review", "Sent"];
 const INVOICE_STATUSES = ["Admin review", "Sent to client", "Paid", "Overdue"];
 
 const resp = (status, body) => ({
@@ -127,8 +128,13 @@ async function updateDeal(ctx, id, body) {
   if (!deal) return resp(404, { error: "deal not found" });
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   const patch = {};
-  const editable = ["client", "owner", "stage", "amount", "close", "source", "recurring", "outcome", "lab"];
+  const editable = ["client", "owner", "stage", "amount", "close", "source", "recurring",
+    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd"];
   for (const k of editable) if (body && k in body) patch[k] = body[k];
+  if ("recurPaused" in patch) patch.recurPaused = !!patch.recurPaused;
+  if ("autoInvoice" in patch) patch.autoInvoice = !!patch.autoInvoice;
+  if ("recurEnd" in patch && patch.recurEnd && !/^\d{4}-\d{2}-\d{2}$/.test(patch.recurEnd))
+    return resp(400, { error: "invalid recurEnd date" });
   if ("lab" in patch) {
     if (!ctx.can.changeLab()) return resp(403, { error: "Lab reassignment is admin-only" });
     if (!(await get("LAB", patch.lab))) return resp(400, { error: "unknown lab" });
@@ -177,24 +183,6 @@ async function updateInvoice(ctx, id, body) {
   if (!INVOICE_STATUSES.includes(body?.status)) return resp(400, { error: "invalid status" });
   await put({ ...inv, status: body.status });
   return resp(200, { id, status: body.status });
-}
-
-async function updateProposal(ctx, id, body) {
-  const p = await get("PROPOSAL", id);
-  if (!p) return resp(404, { error: "proposal not found" });
-  if (!ctx.can.editProposal(p)) return resp(403, { error: "Not allowed to edit this proposal" });
-  const next = { ...p };
-  if ("status" in (body || {})) {
-    const allowed = ctx.can.approveProposal() ? PROPOSAL_STATUSES : LL_PROPOSAL_STATUSES;
-    if (!allowed.includes(body.status)) return resp(403, { error: "status not allowed for this role" });
-    next.status = body.status;
-    next.version = (next.version || 0) + 1;
-  }
-  if ("final" in (body || {})) next.final = !!body.final;
-  next.updated = today();
-  await put(next);
-  const { pk, sk, ...rest } = next;
-  return resp(200, { id: sk, ...rest });
 }
 
 /* ---------- files ---------- */
@@ -299,8 +287,19 @@ async function qboCallback(event) {
 /* ---------- router ---------- */
 export const handler = async event => {
   try {
-    if (event.requestContext.http.method === "GET" &&
-        event.rawPath.replace(/\/+$/, "") === "/qbo/callback") return await qboCallback(event);
+    const rawMethod = event.requestContext.http.method;
+    const rawPath = event.rawPath.replace(/\/+$/, "");
+    if (rawMethod === "GET" && rawPath === "/qbo/callback") return await qboCallback(event);
+
+    // Public customer routes (Authorizer NONE) — the share token is the credential.
+    const shareMatch = rawPath.match(/^\/share\/([0-9a-f]+)(\/decision)?$/);
+    if (shareMatch) {
+      let shareBody = null;
+      if (event.body) { try { shareBody = JSON.parse(event.body); } catch { return resp(400, { error: "invalid JSON body" }); } }
+      if (rawMethod === "GET" && !shareMatch[2]) return await proposals.shareView(shareMatch[1]);
+      if (rawMethod === "POST" && shareMatch[2]) return await proposals.shareDecision(shareMatch[1], shareBody);
+      return resp(404, { error: "no such route" });
+    }
 
     const { username, role } = identity(event);
     if (!username || !role) return resp(403, { error: "No portal role on this account" });
@@ -329,7 +328,18 @@ export const handler = async event => {
     if (method === "DELETE" && seg[0] === "files" && seg[1]) return await deleteFile(ctx, seg[1]);
     if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
     if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
-    if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await updateProposal(ctx, seg[1], body);
+    if (method === "POST" && path === "/proposals") return await proposals.createProposal(ctx, body);
+    if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1]);
+    if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
+    if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
+    if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);
+    if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
+    if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
+    if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
+    if (method === "POST" && path === "/kb") return await assist.createKb(ctx, body);
+    if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await assist.updateKb(ctx, seg[1], body);
+    if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await assist.deleteKb(ctx, seg[1]);
+    if (method === "POST" && path === "/assist") return await assist.assist(ctx, body);
     if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
     if (method === "POST" && path === "/admin/invites") return await admin.createInvite(ctx, body);
     if (method === "POST" && seg[0] === "admin" && seg[1] === "invites" && seg[3] === "resend")

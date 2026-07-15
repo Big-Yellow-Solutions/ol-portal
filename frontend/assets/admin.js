@@ -116,6 +116,49 @@ async function renderAdmin() {
     b.disabled = false;
   });
 
+  /* ---------- proposal knowledge base (PRD 3.8) ---------- */
+  let kb = [];
+  const drawKb = () => {
+    document.getElementById("kbList").innerHTML = kb.length ? kb.map(e => `
+      <div class="todo" style="align-items:flex-start">
+        <span class="dot" style="background:var(--violet)"></span>
+        <span style="flex:1;min-width:0"><b>${e.title}</b>
+          <small style="display:block;white-space:pre-wrap">${e.content.length > 240 ? e.content.slice(0, 240) + "…" : e.content}</small>
+          <small style="color:var(--ink-mute)">updated ${e.updated} by ${e.updatedBy}</small></span>
+        <span style="display:flex;gap:6px;flex-shrink:0">
+          <button class="btn-mini" data-kbedit="${e.id}">Edit</button>
+          <button class="btn-mini" data-kbdel="${e.id}">Delete</button></span>
+      </div>`).join("")
+      : '<div class="empty">Empty — the assistant will say so and draft from general best practice. Seed it with pricing frameworks and past winning proposals.</div>';
+  };
+  const loadKb = async () => { kb = await kbApi.list(); drawKb(); };
+
+  document.getElementById("kbForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const f = e.target, btn = f.querySelector("button");
+    btn.disabled = true;
+    try { await kbApi.create(f.kbTitle.value.trim(), f.kbContent.value); f.reset(); await loadKb(); }
+    catch (ex) { alert(ex.message); }
+    btn.disabled = false;
+  });
+  document.getElementById("kbList").addEventListener("click", async e => {
+    const ed = e.target.closest("[data-kbedit]");
+    if (ed) {
+      const entry = kb.find(x => x.id === ed.dataset.kbedit);
+      const title = prompt("Title:", entry.title);
+      if (title === null) return;
+      const content = prompt("Content:", entry.content);
+      if (content === null) return;
+      try { await kbApi.update(entry.id, { title, content }); await loadKb(); } catch (ex) { alert(ex.message); }
+      return;
+    }
+    const del = e.target.closest("[data-kbdel]");
+    if (del && confirm("Delete this knowledge base entry?")) {
+      try { await kbApi.remove(del.dataset.kbdel); await loadKb(); } catch (ex) { alert(ex.message); }
+    }
+  });
+
   await load();
   drawAll();
+  await loadKb();
 }

@@ -15,10 +15,13 @@ async function api(path, opts = {}) {
 }
 
 async function loadPortalData() {
-  const [boot, deals, proposals, invoices, files] = await Promise.all([
-    api("/bootstrap"), api("/deals"), api("/proposals"), api("/invoices"), api("/files")
+  const [boot, deals, proposals, invoices, files, contracts, recurs] = await Promise.all([
+    api("/bootstrap"), api("/deals"), api("/proposals"), api("/invoices"), api("/files"),
+    api("/contracts"), api("/recurrences")
   ]);
   FILES.length = 0; FILES.push(...files);
+  CONTRACTS.length = 0; CONTRACTS.push(...contracts);
+  RECURS.length = 0; RECURS.push(...recurs);
   LABS = boot.labs;
   PEOPLE = boot.people;
   ROLE = boot.role;
@@ -131,6 +134,55 @@ async function toggleProposalFinal(id) {
   const cur = PROPOSALS.find(x => x.id === id);
   if (!cur) return;
   const p = await api(`/proposals/${id}`, { method: "PATCH", body: { final: !cur.final } });
+  await refreshProposals(); // marking Final unmarks the others
+  return p;
+}
+
+async function refreshProposals() {
+  const list = await api("/proposals");
+  PROPOSALS.length = 0; PROPOSALS.push(...list);
+}
+
+/* ---------- proposals: structured template, send, AI assistant ---------- */
+async function createProposal(dealId, title) {
+  const p = await api("/proposals", { method: "POST", body: { dealId, title } });
+  PROPOSALS.unshift(p);
+  return p;
+}
+async function saveProposalSections(id, sections) {
+  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { sections } });
   const i = PROPOSALS.findIndex(x => x.id === id);
   if (i > -1) PROPOSALS[i] = p;
+  return p;
+}
+async function sendProposalToClient(id) {
+  const out = await api(`/proposals/${id}/send`, { method: "POST" });
+  await refreshProposals();
+  return out; // { url, sentVersion }
+}
+async function assistDraft(proposalId, guidance) {
+  return api("/assist", { method: "POST", body: { proposalId, guidance } });
+}
+
+/* ---------- contracts ---------- */
+async function updateContractApi(id, patch) {
+  const c = await api(`/contracts/${id}`, { method: "PATCH", body: patch });
+  const i = CONTRACTS.findIndex(x => x.id === id);
+  if (i > -1) CONTRACTS[i] = c;
+  return c;
+}
+async function inviteContributor(fields) {
+  return api("/admin/invites", { method: "POST", body: { ...fields, role: "Contributor" } });
+}
+
+/* ---------- knowledge base (admin) ---------- */
+const kbApi = {
+  list: () => api("/kb"),
+  create: (title, content) => api("/kb", { method: "POST", body: { title, content } }),
+  update: (id, patch) => api(`/kb/${id}`, { method: "PATCH", body: patch }),
+  remove: id => api(`/kb/${id}`, { method: "DELETE" })
+};
+
+async function runRecurrencesNow() {
+  return api("/recurrences/run", { method: "POST" });
 }

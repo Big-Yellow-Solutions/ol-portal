@@ -47,6 +47,14 @@ function dealFormHTML(d) {
           `<option${v.source === s ? " selected" : ""}>${s}</option>`).join("")}</select></label>
       <label class="field f-check"><input id="dfRecurring" type="checkbox" ${v.recurring ? "checked" : ""}>
         Recurring (generates a monthly instance, feeds MRR)</label>
+      <div id="dfRecurOpts" class="f-wide" style="display:${v.recurring ? "block" : "none"};padding:10px 12px;background:#f6f3ee;border-radius:9px">
+        <label class="field f-check" style="margin-bottom:6px"><input id="dfAutoInvoice" type="checkbox" ${v.autoInvoice ? "checked" : ""}>
+          Auto-request an invoice each month (goes to admin review, never straight to the client)</label>
+        <label class="field f-check" style="margin-bottom:6px"><input id="dfRecurPaused" type="checkbox" ${v.recurPaused ? "checked" : ""}>
+          Pause recurrence (past instances stay on record)</label>
+        <label class="field">End date (blank = ongoing until cancelled)
+          <input id="dfRecurEnd" type="date" value="${v.recurEnd || ""}"></label>
+      </div>
     </div>`;
 }
 
@@ -64,7 +72,10 @@ function readDealForm() {
     lab: document.getElementById("dfLab").value,
     owner: document.getElementById("dfOwner").value,
     source: document.getElementById("dfSource").value,
-    recurring: document.getElementById("dfRecurring").checked
+    recurring: document.getElementById("dfRecurring").checked,
+    autoInvoice: document.getElementById("dfAutoInvoice").checked,
+    recurPaused: document.getElementById("dfRecurPaused").checked,
+    recurEnd: document.getElementById("dfRecurEnd").value || ""
   };
   if (stage === "Closed") f.outcome = document.getElementById("dfOutcome").value;
   return f;
@@ -73,6 +84,9 @@ function readDealForm() {
 function wireOutcomeToggle(root) {
   root.querySelector("#dfStage").addEventListener("change", e => {
     root.querySelector("#dfOutcomeWrap").style.display = e.target.value === "Closed" ? "flex" : "none";
+  });
+  root.querySelector("#dfRecurring").addEventListener("change", e => {
+    root.querySelector("#dfRecurOpts").style.display = e.target.checked ? "block" : "none";
   });
 }
 

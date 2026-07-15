@@ -22,24 +22,21 @@ const NAV = [
   { href: "files.html",     icon: "doc",      label: "Files" },
   { href: "bench.html",     icon: "people",   label: "Bench Directory" }
 ];
+const NAV_CONTRACTS = { href: "contracts.html", icon: "doc", label: "Contracts" };
 const NAV_ADMIN = { href: "admin.html", icon: "gear", label: "Admin & Invites" };
-const NAV_SOON = [
-  { icon: "doc",  label: "Contracts" }
-];
 
 function buildShell(pageTitle) {
   const here = location.pathname.split("/").pop() || "index.html";
-  const navItems = ROLE === "Admin" ? [...NAV, NAV_ADMIN] : NAV;
+  const navItems = [...NAV];
+  if (ROLE !== "Contributor") navItems.push(NAV_CONTRACTS);
+  if (ROLE === "Admin") navItems.push(NAV_ADMIN);
   const nav = navItems.map(n =>
     `<a class="nav-item${n.href === here ? " active" : ""}" href="${n.href}">${ICONS[n.icon]}${n.label}</a>`).join("");
-  const soon = NAV_SOON.map(n =>
-    `<a class="nav-item" href="#" onclick="return false" aria-disabled="true">${ICONS[n.icon]}${n.label}<span class="soon">Soon</span></a>`).join("");
 
   document.getElementById("side").innerHTML = `
     <div class="side-logo"><img src="assets/ol-logo-white.svg" alt="Optimistic Labs"></div>
     <div class="side-tag">The Portal</div>
     <div class="side-label">Workspace</div>${nav}
-    <div class="side-label">Coming with auth</div>${soon}
     <div class="side-foot">Signed in as ${PEOPLE[ME].name}<br>
       <a href="#" id="signOut" style="color:var(--violet-light);font-weight:600">Sign out</a></div>`;
 
@@ -93,7 +90,14 @@ function renderDashboard() {
   const won = deals.filter(d => d.stage === "Closed" && d.outcome === "Won");
   const pipelineVal = open.reduce((s, d) => s + d.amount, 0);
   const wonVal = won.reduce((s, d) => s + d.amount, 0);
-  const mrr = deals.filter(d => d.recurring && d.outcome === "Won").reduce((s, d) => s + Math.round(d.amount / 12), 0);
+  // MRR (PRD 3.9): current month's generated instances when they exist,
+  // otherwise projected from Closed-Won recurring deals.
+  const month = TODAY.slice(0, 7);
+  const monthInstances = RECURS.filter(r => r.month === month);
+  const mrrItems = monthInstances.length ? monthInstances
+    : deals.filter(d => d.recurring && d.outcome === "Won" && !d.recurPaused)
+        .map(d => ({ lab: d.lab, owner: d.owner, amount: Math.round(d.amount / 12) }));
+  const mrr = mrrItems.reduce((s, x) => s + x.amount, 0);
 
   document.getElementById("helloName").textContent = PEOPLE[ME].name.split(" ")[0];
 
@@ -105,7 +109,7 @@ function renderDashboard() {
   document.getElementById("stats").innerHTML = [
     { ic: "trend",  cls: "ic-violet", num: fmtK(pipelineVal), lbl: "Open pipeline value", d: open.length + " open deal" + (open.length === 1 ? "" : "s") },
     { ic: "dollar", cls: "ic-green",  num: fmtK(wonVal),      lbl: "Closed won (all time)", d: won.length + " deal" + (won.length === 1 ? "" : "s") + " won" },
-    { ic: "repeat", cls: "ic-amber",  num: fmt$(mrr),         lbl: "MRR from recurring deals", d: deals.filter(x => x.recurring).length + " recurring" },
+    { ic: "repeat", cls: "ic-amber",  num: fmt$(mrr),         lbl: "MRR from recurring deals", d: monthInstances.length ? monthInstances.length + " instance" + (monthInstances.length === 1 ? "" : "s") + " this month" : deals.filter(x => x.recurring).length + " recurring" },
     { ic: "people", cls: "ic-red",    num: String(BENCH.length), lbl: "People on the bench", d: liveLabs + " lab" + (liveLabs === 1 ? "" : "s") + " live" }
   ].map(s => `<div class="card stat">
       <div class="ic ${s.cls}">${ICONS[s.ic]}</div>
@@ -172,6 +176,31 @@ function renderDashboard() {
   document.getElementById("todos").innerHTML = todos.length
     ? todos.map(t => `<div class="todo"><span class="dot" style="background:${t.c}"></span><span><b>${t.t}</b><small>${t.s}</small></span></div>`).join("")
     : '<div class="empty">Nothing needs attention. Enjoy it.</div>';
+
+  // MRR by lab / leader (PRD 3.9 reporting)
+  const mrrEl = document.getElementById("mrrReport");
+  if (mrrEl) {
+    if (!mrrItems.length) {
+      mrrEl.innerHTML = '<div class="empty">No recurring revenue yet. Flag a Closed-Won deal as recurring and instances generate monthly.</div>';
+    } else {
+      const groupSum = key => {
+        const m = {};
+        for (const x of mrrItems) m[x[key]] = (m[x[key]] || 0) + x.amount;
+        return Object.entries(m).sort((a, b) => b[1] - a[1]);
+      };
+      const rows = (pairs, nameOf) => pairs.map(([k, v]) =>
+        `<div class="todo"><span class="dot" style="background:var(--amber,#BA7517)"></span>
+          <span><b>${nameOf(k)}</b><small>${fmt$(v)} / month</small></span></div>`).join("");
+      mrrEl.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+          <div><h3 style="margin:0 0 8px;font-size:13px;color:var(--ink-mute)">BY LAB</h3>
+            ${rows(groupSum("lab"), k => LABS[k]?.name || k)}</div>
+          <div><h3 style="margin:0 0 8px;font-size:13px;color:var(--ink-mute)">BY LAB LEADER</h3>
+            ${rows(groupSum("owner"), k => PEOPLE[k]?.name || k)}</div>
+        </div>
+        <small style="display:block;margin-top:10px;color:var(--ink-mute)">Org-wide MRR: <b>${fmt$(mrr)}</b> · ${monthInstances.length ? "from this month's generated instances" : "projected from recurring Closed-Won deals"}</small>`;
+    }
+  }
 
   // recent files with analysis
   const rf = document.getElementById("recentFiles");
@@ -328,47 +357,7 @@ function renderPipeline() {
   draw();
 }
 
-/* ---------- proposals ---------- */
-function renderProposals() {
-  const props = visibleProposals();
-  const draw = () => {
-    document.getElementById("propRows").innerHTML = props.length ? props.map(p => {
-      const editable = can.editProposal(p);
-      const statuses = can.approveProposal() ? PROPOSAL_STATUSES : LL_PROPOSAL_STATUSES;
-      const statusCtl = editable
-        ? `<select class="row-sel" data-id="${p.id}" aria-label="Change status">
-            ${statuses.includes(p.status) ? "" : `<option selected>${p.status}</option>`}
-            ${statuses.map(s => `<option${s === p.status ? " selected" : ""}>${s}</option>`).join("")}</select>`
-        : "";
-      return `<tr>
-        <td><b>${p.title}</b><br><small style="color:var(--ink-mute)">${p.id} · deal ${p.deal}</small></td>
-        <td>${labCell(p.lab)}</td>
-        <td>${personCell(p.author)}</td>
-        <td><span class="badge ${PROPOSAL_CLASS[p.status]}"><i></i>${p.status}</span>${statusCtl}</td>
-        <td>v${p.version}
-          ${p.final ? ' <span class="badge b-approved" title="Single source of truth sent to client">★ Final</span>' : ""}
-          ${editable ? `<button class="btn-mini" data-final="${p.id}">${p.final ? "Unmark" : "Mark Final"}</button>` : ""}</td>
-        <td>${p.updated}</td>
-      </tr>`;
-    }).join("") : '<tr><td colspan="6" class="empty">No proposals visible for this role.</td></tr>';
-  };
-  const tbody = document.getElementById("propRows");
-  tbody.addEventListener("change", async e => {
-    const sel = e.target.closest(".row-sel");
-    if (!sel) return;
-    sel.disabled = true;
-    try { await setProposalStatus(sel.dataset.id, sel.value); } catch (ex) { alert(ex.message); }
-    draw();
-  });
-  tbody.addEventListener("click", async e => {
-    const b = e.target.closest("[data-final]");
-    if (!b) return;
-    b.disabled = true;
-    try { await toggleProposalFinal(b.dataset.final); } catch (ex) { alert(ex.message); }
-    draw();
-  });
-  draw();
-}
+/* ---------- proposals: see assets/proposals.js (editor, send, AI assist) ---------- */
 
 /* ---------- invoices ---------- */
 function renderInvoices() {

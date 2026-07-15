@@ -67,6 +67,21 @@
         </div>
       </div>
 
+      <div class="card" style="margin-bottom:20px">
+        <h2 style="margin-top:0">Proposal knowledge base</h2>
+        <p class="sub" style="margin-top:0">What the AI Proposal Assistant is grounded in (PRD 3.8):
+          past-proposal patterns, pricing frameworks, tone of voice. Keep it fresh — stale inputs
+          degrade the drafts. Content should not include client-confidential details.</p>
+        <div id="kbList" style="margin-bottom:12px"></div>
+        <form id="kbForm">
+          <input name="kbTitle" placeholder="Entry title, e.g. Faith Lab three-tier pricing" required
+            style="width:100%;padding:10px 12px;border:1.5px solid #ddd7ce;border-radius:9px;font:inherit;margin-bottom:8px">
+          <textarea name="kbContent" rows="4" placeholder="The framework, guidance, or example text itself…" required
+            style="width:100%;padding:10px 12px;border:1.5px solid #ddd7ce;border-radius:9px;font:inherit;resize:vertical;margin-bottom:8px"></textarea>
+          <button class="pill pill-primary" type="submit">Add entry</button>
+        </form>
+      </div>
+
       <div class="card">
         <h2 style="margin-top:0">Auth audit log</h2>
         <p class="sub" style="margin-top:0">Sign-ins, invites, email changes, and 2FA resets.
