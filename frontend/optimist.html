@@ -26,7 +26,13 @@
           <div class="chat-name" id="optChatHead">✦ The Optimist
             <small>OL's proposal writer. Pick a proposal or start a new one, then just talk.</small></div>
           <div class="chat-log" id="optLog"></div>
+          <div class="opt-quick">
+            <button class="chip" id="optAuto" title="Fills every missing section from whatever it knows so far — assumptions and all">⚡ Auto-fill the rest</button>
+            <span id="optChip"></span>
+          </div>
           <div class="opt-inbar">
+            <button class="btn-mini" id="optAttach" title="Attach your own draft or notes (PDF, text, image)">📎</button>
+            <input type="file" id="optFile" accept=".pdf,.txt,.md,.csv,.png,.jpg,.jpeg" style="display:none">
             <input id="optIn" placeholder="Tell The Optimist about this engagement…">
             <button class="pill pill-primary" id="optSend">Send</button>
           </div>

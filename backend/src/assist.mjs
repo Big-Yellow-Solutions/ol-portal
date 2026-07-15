@@ -92,8 +92,31 @@ const CHAT_SCHEMA = {
 const MAX_TURNS = 30;
 const MAX_MSG_CHARS = 4000;
 
+/* Attachments: the Lab Leader can hand The Optimist their own draft/notes
+   (PDF, text, image) and it pulls the content into the sections. */
+const ATTACH_KIND = {
+  "application/pdf": "document",
+  "text/plain": "text", "text/markdown": "text", "text/csv": "text",
+  "image/png": "image", "image/jpeg": "image"
+};
+const MAX_ATTACH_B64 = 5_500_000; // ~4MB file
+
+function attachmentBlock(att) {
+  const kind = ATTACH_KIND[att?.type];
+  const data = String(att?.data || "");
+  if (!kind) return { error: "attach a PDF, text/markdown/CSV file, or an image" };
+  if (!data || data.length > MAX_ATTACH_B64 || !/^[A-Za-z0-9+/=]+$/.test(data))
+    return { error: "attachment must be under 4 MB" };
+  const name = String(att.name || "attachment").slice(0, 120);
+  if (kind === "document")
+    return { block: { type: "document", source: { type: "base64", media_type: "application/pdf", data } } };
+  if (kind === "image")
+    return { block: { type: "image", source: { type: "base64", media_type: att.type, data } } };
+  return { block: { type: "text", text: `Contents of the attached file "${name}":\n\n` + Buffer.from(data, "base64").toString("utf8").slice(0, 150_000) } };
+}
+
 export async function assist(ctx, body) {
-  const { proposalId, messages, draft } = body || {};
+  const { proposalId, messages, draft, attachment } = body || {};
   const p = await get("PROPOSAL", proposalId);
   if (!p) return resp(404, { error: "proposal not found" });
   if (!ctx.can.editProposal(p)) return resp(403, { error: "Not allowed to edit this proposal" });
@@ -104,6 +127,14 @@ export async function assist(ctx, body) {
   })).filter(m => m.content.trim());
   while (turns.length && turns[0].role !== "user") turns.shift(); // API requires a user turn first
   if (!turns.length) return resp(400, { error: "say something first" });
+
+  if (attachment) {
+    const { block, error } = attachmentBlock(attachment);
+    if (error) return resp(400, { error });
+    const last = turns[turns.length - 1];
+    if (last.role !== "user") return resp(400, { error: "attach files alongside your own message" });
+    last.content = [block, { type: "text", text: last.content }];
+  }
 
   const [deal, kb] = await Promise.all([get("DEAL", p.deal), listType("KB")]);
   const kbText = kb.length
@@ -123,6 +154,8 @@ Your job: interview them and build the proposal as you go.
 - As soon as you know enough for any section, write it — update sections incrementally rather than waiting for everything. Set a section to an empty string to leave what's already there untouched.
 - When you update sections, your reply should briefly say what you drafted and ask the next most useful question.
 - You are the only way the document gets edited, so handle wording requests precisely: when the Lab Leader dictates exact text ("the terms should say X", "change $30k to $32k"), apply it verbatim to the right section without embellishing, and confirm briefly.
+- If they attach a document (their own draft, notes, a prior proposal), extract its content into the matching sections in the same turn, preferring their wording and structure; fill obvious gaps yourself and say what you pulled in.
+- If they ask you to auto-fill or auto-draft, immediately write EVERY section that's missing using your best assumptions from whatever you have — even from just a one-line summary, and even if imperfect. Don't ask questions first; state your two or three key assumptions briefly in the reply so they can correct you.
 - Ground pricing and tone in OL's knowledge base below; do not invent OL policies that aren't there. Write sections in plain, confident prose. Never use em-dashes.
 - You draft only. You cannot send, approve, or finalize anything; the Lab Leader reviews the preview and uses the controls under it.
 

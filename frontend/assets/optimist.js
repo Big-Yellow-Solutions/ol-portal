@@ -123,18 +123,47 @@ function renderOptimist() {
     if (id) $("optIn").focus();
   };
 
+  /* attachments: hand The Optimist your own draft/notes to pull in */
+  let pendingFile = null;
+  const drawFileChip = () => {
+    $("optChip").innerHTML = pendingFile
+      ? `<span class="tag">📎 ${pendingFile.name} <a href="#" id="optChipX" style="text-decoration:none">✕</a></span>`
+      : "";
+    const x = $("optChipX");
+    if (x) x.onclick = e => { e.preventDefault(); pendingFile = null; drawFileChip(); };
+  };
+  $("optAttach").onclick = () => $("optFile").click();
+  $("optFile").addEventListener("change", e => {
+    const f = e.target.files[0];
+    e.target.value = "";
+    if (!f) return;
+    if (f.size > 4 * 1024 * 1024) { alert("Keep attachments under 4 MB."); return; }
+    const ext = f.name.toLowerCase().split(".").pop();
+    const type = f.type || ({ md: "text/markdown", txt: "text/plain", csv: "text/csv" }[ext] || "");
+    const r = new FileReader();
+    r.onload = () => { pendingFile = { name: f.name, type, data: String(r.result).split(",")[1] }; drawFileChip(); };
+    r.readAsDataURL(f);
+  });
+  $("optAuto").onclick = () => {
+    if (!currentId) return;
+    $("optIn").value = "Auto-fill the rest of the proposal from what you have so far. Make reasonable assumptions, fill every missing section, and note your key assumptions — I'll correct anything that's off.";
+    sendChat();
+  };
+
   const sendChat = async () => {
     const p = current();
     if (!p) return;
     const input = $("optIn"), btn = $("optSend");
     const text = input.value.trim();
-    if (!text) return;
-    chat.push({ role: "user", content: text });
+    const att = pendingFile;
+    if (!text && !att) return;
+    chat.push({ role: "user", content: (att ? `📎 ${att.name}\n` : "") + (text || "Here's my draft — pull it into the proposal.") });
     input.value = ""; input.disabled = btn.disabled = true;
+    pendingFile = null; drawFileChip();
     drawChat(true);
     try {
       const out = await assistChat(p.id,
-        chat.map(({ role, content }) => ({ role, content })), p.sections || {});
+        chat.map(({ role, content }) => ({ role, content })), p.sections || {}, att);
       let applied = false;
       const sections = { ...(p.sections || {}) };
       for (const k of Object.keys(SECTION_LABELS)) {
