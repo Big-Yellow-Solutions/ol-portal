@@ -388,41 +388,4 @@ function renderInvoices() {
   draw();
 }
 
-/* ---------- bench ---------- */
-function renderBench() {
-  const allTags = [...new Set(BENCH.flatMap(b => b.specialties))];
-  const chipRow = document.getElementById("benchChips");
-  chipRow.innerHTML = '<button class="chip on" data-t="">Everyone</button>' +
-    '<button class="chip" data-t="__ll">Lab Leaders</button><button class="chip" data-t="__sc">Contributors</button>' +
-    allTags.map(t => `<button class="chip" data-t="${t}">${t}</button>`).join("");
-
-  const draw = () => {
-    const active = chipRow.querySelector(".chip.on").dataset.t;
-    const q = document.getElementById("benchSearch").value.trim().toLowerCase();
-    const list = BENCH.filter(b => {
-      const p = PEOPLE[b.key];
-      if (active === "__ll" && p.role !== "Lab Leader") return false;
-      if (active === "__sc" && p.role !== "Contributor") return false;
-      if (active && !active.startsWith("__") && !b.specialties.includes(active)) return false;
-      return !q || p.name.toLowerCase().includes(q) || b.blurb.toLowerCase().includes(q);
-    });
-    document.getElementById("benchGrid").innerHTML = list.map(b => {
-      const p = PEOPLE[b.key];
-      return `<div class="card person">
-        <div class="top-row">${faceHTML(p)}
-          <div><h3>${p.name}</h3><div class="role-line">${p.role}${b.labKeys.length ? " · " + b.labKeys.map(k => LABS[k].name).join(", ") : ""}</div></div>
-        </div>
-        <p class="blurb">${b.blurb}</p>
-        <div class="tags">${b.specialties.map(t => `<span class="tag">${t}</span>`).join("")}</div>
-        <div class="links"><a href="mailto:${b.email}">Email</a><a href="${b.linkedin}">LinkedIn</a></div>
-      </div>`;
-    }).join("") || '<div class="empty">No one matches that filter.</div>';
-  };
-  chipRow.addEventListener("click", e => {
-    const c = e.target.closest(".chip"); if (!c) return;
-    chipRow.querySelectorAll(".chip").forEach(x => x.classList.remove("on"));
-    c.classList.add("on"); draw();
-  });
-  document.getElementById("benchSearch").oninput = draw;
-  draw();
-}
+/* ---------- bench: see assets/bench.js (directory + profile editor) ---------- */

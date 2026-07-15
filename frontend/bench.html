@@ -35,9 +35,9 @@
       <div class="bench-grid" id="benchGrid"></div>
 
       <p class="footnote">
-        Everyone edits their own profile; admins can edit any. Open question from the PRD:
-        opt-in consent before personal email/phone shows org-wide, or directory inclusion as a
-        condition of being on the bench. Contact details here are placeholders.
+        Everyone edits their own profile; admins can edit any. Contact visibility is per-person:
+        your email shows unless you hide it, your phone stays private until you opt in — and the
+        server enforces it, so hidden details never leave the API.
       </p>
     </main>
   </div>
@@ -48,6 +48,7 @@
 <script src="assets/store.js"></script>
 <script src="assets/portal.js"></script>
 <script src="assets/ui.js"></script>
+<script src="assets/bench.js"></script>
 <script>initPage("Bench Directory", renderBench);</script>
 </body>
 </html>

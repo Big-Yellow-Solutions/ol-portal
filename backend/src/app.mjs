@@ -14,6 +14,7 @@ import * as proposals from "./proposals.mjs";
 import * as contracts from "./contracts.mjs";
 import * as recurring from "./recurring.mjs";
 import * as assist from "./assist.mjs";
+import * as profile from "./profile.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -87,7 +88,8 @@ async function bootstrap(ctx) {
   return resp(200, {
     me: ctx.me.sk, role: ctx.role,
     labs: Object.fromEntries(labs.map(({ pk, sk, ...l }) => [sk, l])),
-    people: Object.fromEntries(people.map(({ pk, sk, ...p }) => [sk, p]))
+    people: Object.fromEntries(people.map(({ pk, sk, ...p }) =>
+      [sk, profile.publicView(p, ctx.me.sk, ctx.role, sk)]))
   });
 }
 
@@ -340,6 +342,8 @@ export const handler = async event => {
     if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await assist.updateKb(ctx, seg[1], body);
     if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await assist.deleteKb(ctx, seg[1]);
     if (method === "POST" && path === "/assist") return await assist.assist(ctx, body);
+    if (method === "PATCH" && path === "/profile") return await profile.updateProfile(ctx, null, body);
+    if (method === "PATCH" && seg[0] === "profile" && seg[1]) return await profile.updateProfile(ctx, seg[1], body);
     if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
     if (method === "POST" && path === "/admin/invites") return await admin.createInvite(ctx, body);
     if (method === "POST" && seg[0] === "admin" && seg[1] === "invites" && seg[3] === "resend")

@@ -27,8 +27,10 @@ async function loadPortalData() {
   ROLE = boot.role;
   ME = boot.me;
   MY_LABS = PEOPLE[ME]?.labs || [];
-  BENCH = Object.entries(PEOPLE).filter(([, p]) => p.bench)
-    .map(([key, p]) => ({ key, ...p.bench }));
+  // PRD 4: the full bench — every Lab Leader and Contributor, profile or not.
+  BENCH = Object.entries(PEOPLE)
+    .filter(([, p]) => p.role === "Lab Leader" || p.role === "Contributor" || p.bench)
+    .map(([key, p]) => ({ key, specialties: [], blurb: "", ...(p.bench || {}) }));
   DEALS.length = 0; DEALS.push(...deals);
   PROPOSALS.length = 0; PROPOSALS.push(...proposals);
   INVOICES.length = 0; INVOICES.push(...invoices);
@@ -185,4 +187,13 @@ const kbApi = {
 
 async function runRecurrencesNow() {
   return api("/recurrences/run", { method: "POST" });
+}
+
+/* ---------- bench profiles ---------- */
+async function updateProfileApi(fields, username) {
+  const person = await api(username ? `/profile/${username}` : "/profile",
+    { method: "PATCH", body: fields });
+  const { id, ...rest } = person;
+  PEOPLE[id] = rest;
+  return person;
 }
