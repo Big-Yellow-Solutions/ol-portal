@@ -39,10 +39,8 @@ or a custom domain.
   constant, `BOOKING_URL`, at the top of `assets/js/site.js` (the same URL is
   also in each button's `href` for no-JS visitors). Replace it in `site.js` and
   find-and-replace the old URL across the `.html` files.
-- **Laura's updated photo** — add the file as `assets/img/laura.jpg` (on
-  GitHub: *Add file → Upload files*, drag the photo in, name/path
-  `assets/img/laura.jpg`). The Meet the Team page already has the slot wired
-  and keeps it hidden until the file exists — no code change needed.
+- ~~Laura's updated photo~~ — done: `assets/img/laura.jpg` shows on the
+  Meet the Team page. Replace that file to swap the photo.
 - **Logo artwork** — the header/footer wordmark is a live-text recreation of
   the i2 Leadership logo (Archivo Black + gold starburst SVG), which stays
   crisp at any size. To use the original logo file instead, add it as
