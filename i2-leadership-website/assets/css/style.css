@@ -636,6 +636,117 @@ a:hover { text-decoration-thickness: 2px; }
   .lm-track img { filter: grayscale(0) opacity(0.85); }
 }
 
+/* ---------- Client wall hero (from the i2 Leadership Hero design) ----------
+   Six rows of logo tiles drift horizontally at different speeds while a
+   perspective warp curves the wall away from center (assets/js/client-wall.js
+   drives the transforms). Vignettes keep the centered copy readable. */
+
+.client-wall {
+  --cw-tile-w: max(calc((100vw - 60px) / 6.2), 190px);
+  --cw-tile-h: calc(var(--cw-tile-w) / 1.6);
+  position: relative;
+  height: calc(100vh - 4.2rem);
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--dark);
+}
+.cw-wall {
+  position: absolute;
+  top: -3%;
+  bottom: -3%;
+  left: -30px;
+  right: -30px;
+  perspective: 1400px;
+  perspective-origin: 50% 50%;
+  transform-style: preserve-3d;
+}
+.cw-row {
+  position: absolute;
+  left: 0;
+  top: calc(var(--cw-i) * (var(--cw-tile-h) + 14px));
+  display: flex;
+  gap: 14px;
+  will-change: transform;
+  transform-style: preserve-3d;
+}
+.cw-tile {
+  flex: 0 0 auto;
+  width: var(--cw-tile-w);
+  aspect-ratio: 16 / 10;
+  will-change: transform;
+  transform-style: preserve-3d;
+}
+.cw-card {
+  width: 100%;
+  height: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(250, 247, 242, 0.09);
+  background: rgba(250, 247, 242, 0.05);
+  filter: brightness(0.55);
+  transform: translateZ(0);
+  transition: filter 0.45s ease-in-out, transform 0.45s ease-in-out;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.cw-card:hover { filter: brightness(1); transform: translateZ(28px); }
+.cw-card img {
+  max-width: 72%;
+  max-height: 46%;
+  object-fit: contain;
+  opacity: 0.92;
+  filter: brightness(0) invert(1);
+}
+.cw-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(62% 56% at 50% 46%, rgba(21, 44, 66, 0.84) 0%, rgba(21, 44, 66, 0.48) 54%, rgba(21, 44, 66, 0) 78%),
+    radial-gradient(120% 120% at 50% 50%, rgba(21, 44, 66, 0) 38%, rgba(21, 44, 66, 0.78) 100%);
+}
+.cw-content {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 0 24px;
+  pointer-events: none;
+}
+.cw-content h1 {
+  margin: 0;
+  max-width: 820px;
+  font-size: clamp(2.5rem, 5.4vw, 4.4rem);
+  line-height: 1.07;
+  color: var(--paper);
+  text-wrap: balance;
+}
+.cw-content .lede {
+  margin: 1.6rem 0 0;
+  max-width: 560px;
+  color: rgba(250, 247, 242, 0.85);
+  text-wrap: pretty;
+}
+.button--paper {
+  pointer-events: auto;
+  margin-top: 2.5rem;
+  padding: 1.05rem 2.5rem;
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--dark);
+  font-size: 1rem;
+}
+.button--paper:hover { background: #fff; }
+@media (prefers-reduced-motion: reduce) {
+  .cw-card { transition: none; }
+  .cw-card:hover { transform: translateZ(0); }
+}
+
 /* ---------- Footer ---------- */
 
 .site-footer {
