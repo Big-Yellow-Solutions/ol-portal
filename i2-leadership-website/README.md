@@ -51,7 +51,7 @@ or a custom domain.
 
 ## Design notes
 
-- Type: [Fraunces](https://fonts.google.com/specimen/Fraunces) for display,
+- Type: [Instrument Serif](https://fonts.google.com/specimen/Instrument+Serif) for display,
   [Public Sans](https://fonts.google.com/specimen/Public+Sans) for body
   (16px / 1.6), [Archivo Black](https://fonts.google.com/specimen/Archivo+Black)
   for the brand lockup only.
