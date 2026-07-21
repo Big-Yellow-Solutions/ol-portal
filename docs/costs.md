@@ -73,8 +73,8 @@ Assumed monthly averages **per user** (blended across roles):
 | Blended AI cost per user | **~$1.95/mo** (heavy Lab Leaders can be $5–8; Contributors near $0) |
 
 If real usage skews heavier (more proposals per Lab Leader, big attachments),
-scale the Claude line linearly — it is almost exactly $0.10 per Optimist message
-and $0.15 per file.
+scale the Claude line linearly — it is almost exactly $0.06 per Optimist message
+and $0.03 per file.
 
 ---
 
