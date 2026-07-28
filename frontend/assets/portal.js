@@ -168,6 +168,11 @@ function renderDashboard() {
   // needs attention
   const props = visibleProposals(), invs = visibleInvoices();
   const todos = [
+    ...(profileIncomplete() ? [{
+      c: "var(--violet)", t: "Finish your bench profile",
+      s: "Add what people should engage you for, so the right work finds you",
+      href: "welcome.html"
+    }] : []),
     ...props.filter(p => p.status === "In Review").map(p =>
       ({ c: "var(--amber)", t: "Proposal awaiting admin review", s: p.title })),
     ...invs.filter(i => i.status === "Admin review").map(i =>
@@ -176,7 +181,12 @@ function renderDashboard() {
       ({ c: "var(--red)", t: "Client requested revisions", s: p.title }))
   ];
   document.getElementById("todos").innerHTML = todos.length
-    ? todos.map(t => `<div class="todo"><span class="dot" style="background:${t.c}"></span><span><b>${t.t}</b><small>${t.s}</small></span></div>`).join("")
+    ? todos.map(t => {
+      const body = `<span class="dot" style="background:${t.c}"></span><span><b>${t.t}</b><small>${t.s}</small></span>`;
+      return t.href
+        ? `<a class="todo" href="${t.href}" style="text-decoration:none;color:inherit">${body}</a>`
+        : `<div class="todo">${body}</div>`;
+    }).join("")
     : '<div class="empty">Nothing needs attention. Enjoy it.</div>';
 
   // MRR by lab / leader (PRD 3.9 reporting)

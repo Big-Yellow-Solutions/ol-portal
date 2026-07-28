@@ -9,7 +9,7 @@ function renderProposals() {
       <td>${labCell(p.lab)}</td>
       <td>${personCell(p.author)}</td>
       <td><span class="badge ${PROPOSAL_CLASS[p.status] || "b-draft"}"><i></i>${p.status}</span></td>
-      <td>v${p.version}${p.final ? ' <span class="badge b-approved">★ Final</span>' : ""}
+      <td>${versionLabel(p)}${p.final ? ` <span class="badge b-approved">★ Final v${p.finalVersion || p.version}</span>` : ""}
         ${p.sentAt ? `<small style="display:block;color:var(--ink-mute)">sent v${p.sentVersion}</small>` : ""}</td>
       <td>${p.updated}</td>
     </tr>`).join("") : '<tr><td colspan="6" class="empty">No proposals yet. Open The Optimist and start one.</td></tr>';

@@ -54,6 +54,9 @@ export async function updateProfile(ctx, username, body) {
   if ("showPhone" in b) bench.showPhone = !!b.showPhone;
 
   const next = { ...person, bench };
+  // Set once by the welcome screen when someone finishes setting up their own
+  // profile; an admin editing someone else's must not flip it for them.
+  if ("onboarded" in b && target === ctx.me.sk) next.onboarded = !!b.onboarded;
   if ("photo" in b) {
     const v = String(b.photo || "");
     if (v && !/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v))
@@ -73,7 +76,7 @@ export async function updateProfile(ctx, username, body) {
    opted out, phone hides unless opted in. */
 export function publicView(person, viewerKey, viewerRole, personKey) {
   if (viewerRole === "Admin" || personKey === viewerKey) return person;
-  const { email, ...rest } = person;
+  const { email, onboarded, ...rest } = person;
   if (rest.bench) {
     const b = { ...rest.bench };
     if (b.showEmail === false) delete b.email;

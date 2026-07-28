@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Welcome · Optimistic Labs Portal</title>
+<link rel="icon" href="assets/ol-mark.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/portal.css">
+<style>
+  .wel-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--violet, #3D2FD4); padding: 32px 0; }
+  .wel-card { background: #fff; border-radius: 16px; padding: 36px 34px; width: min(620px, 92vw); box-shadow: 0 24px 60px rgba(0,0,0,.25); }
+  .wel-card img.logo { height: 30px; margin-bottom: 16px; }
+  .wel-card h1 { font-size: 26px; margin: 0 0 4px; }
+  .wel-card p.lead { color: var(--ink-mute, #6b655d); margin: 0 0 20px; font-size: 14px; }
+  .wel-card .field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; margin-bottom: 14px; }
+  .wel-card input, .wel-card textarea { padding: 11px 12px; border: 1.5px solid #ddd7ce; border-radius: 9px; font: inherit; }
+  .wel-card textarea { resize: vertical; }
+  .wel-card input:focus, .wel-card textarea:focus { outline: 2px solid var(--violet, #3D2FD4); border-color: transparent; }
+  .wel-card small.hint { font-weight: 400; color: #6b655d; }
+  .wel-two { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+  .wel-photo { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+  .wel-photo .face, .wel-photo img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; display: inline-flex; align-items: center; justify-content: center; background: #efeae2; font-weight: 700; font-size: 20px; }
+  /* .wel-card .field already sets column, so these need equal specificity */
+  .wel-card .wel-check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 6px; }
+  .wel-card .wel-check input { width: auto; flex: none; }
+  .wel-err { color: #C0392B; font-size: 13px; min-height: 18px; margin-bottom: 8px; }
+  .wel-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+  .wel-btn { padding: 12px 26px; border: 0; border-radius: 99px; background: var(--violet, #3D2FD4); color: #fff; font: 600 15px Inter, sans-serif; cursor: pointer; }
+  .wel-btn:disabled { opacity: .6; cursor: wait; }
+  .wel-skip { font-size: 13px; color: #6b655d; font-weight: 600; text-decoration: none; }
+  @media (max-width: 560px) { .wel-two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wel-wrap">
+  <div class="wel-card" id="welCard">
+    <img class="logo" src="assets/ol-logo.svg" alt="Optimistic Labs">
+    <p class="lead">Loading your profile…</p>
+  </div>
+</div>
+<script src="assets/config.js"></script>
+<script src="assets/auth.js"></script>
+<script src="assets/data.js"></script>
+<script src="assets/store.js"></script>
+<script src="assets/welcome.js"></script>
+<script>renderWelcome();</script>
+</body>
+</html>

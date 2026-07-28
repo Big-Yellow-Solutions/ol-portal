@@ -34,7 +34,7 @@ function renderOptimist() {
     $("optList").innerHTML = PROPOSALS.length ? PROPOSALS.map(p => `
       <div class="opt-item${p.id === currentId ? " on" : ""}" data-sel="${p.id}" tabindex="0">
         <b>${p.title}</b>
-        <small>${p.client || ""} · v${p.version}</small>
+        <small>${p.client || ""} · ${versionLabel(p)}</small>
         <span class="badge ${PROPOSAL_CLASS[p.status] || "b-draft"}"><i></i>${p.status}</span>
       </div>`).join("")
       : '<div class="empty" style="padding:20px 8px;font-size:13px">No proposals yet. Start one above and The Optimist takes it from there.</div>';
@@ -42,7 +42,7 @@ function renderOptimist() {
 
   const drawChat = (thinking) => {
     $("optLog").innerHTML = currentId ? chat.map(m =>
-      `<div class="msg ${m.role}"><span>${m.content.replace(/</g, "&lt;").replace(/\n/g, "<br>")}${m.applied ? ` <em class="applied">✦ document updated · v${m.ver} saved</em>` : ""}</span></div>`).join("") +
+      `<div class="msg ${m.role}"><span>${m.content.replace(/</g, "&lt;").replace(/\n/g, "<br>")}${m.applied ? ' <em class="applied">✦ document updated · draft saved</em>' : ""}</span></div>`).join("") +
       (thinking ? '<div class="msg assistant"><span class="typing">writing…</span></div>' : "")
       : '<div class="empty" style="margin:auto">Pick a proposal on the left, or start a new one.</div>';
     $("optLog").scrollTop = $("optLog").scrollHeight;
@@ -56,13 +56,19 @@ function renderOptimist() {
       ? ["Draft", "In Review", "Internally Approved", "Sent", "Customer Approved", "Customer Rejected", "Revision Requested"]
       : ["Draft", "In Review", "Sent"];
     const versions = (p.versions || []).slice().reverse().slice(0, 5).map(v =>
-      `<button class="btn-mini" data-ver="${v.v}">v${v.v} · ${v.date}</button>`).join(" ");
+      `<button class="btn-mini" data-ver="${v.v}"${v.v === p.finalVersion ? ' title="The version marked Final"' : ""}>${v.v === p.finalVersion ? "★ " : ""}v${v.v} · ${v.date}</button>`).join(" ");
+    // The draft can legitimately sit ahead of the Final version. Say so plainly
+    // instead of silently clearing Final or sending the wrong text.
+    const draftAhead = p.final && (p.dirty || (p.finalVersion && p.finalVersion !== p.version));
     $("optDoc").innerHTML = `
       <div class="doc-head">
         <b>${p.title}</b>
         <small style="display:block;color:var(--ink-mute)">${p.id} · deal ${p.deal} · ${LABS[p.lab]?.name || p.lab} ·
-          <span id="optVer">v${p.version}</span>${p.final ? " · ★ Final" : ""}${p.sentAt ? ` · sent v${p.sentVersion}` : ""}</small>
+          <span id="optVer">${versionLabel(p)}</span>${p.final ? ` · ★ Final: v${p.finalVersion || p.version}` : ""}${p.sentAt ? ` · sent v${p.sentVersion}` : ""}</small>
       </div>
+      ${draftAhead ? `<div class="todo" style="margin:8px 0"><span class="dot" style="background:var(--amber,#BA7517)"></span>
+        <span><b>Your draft is ahead of the Final version</b>
+        <small>The client would receive v${p.finalVersion || p.version}. Mark Final again to promote what's on screen now.</small></span></div>` : ""}
       ${p.decision ? `<div class="todo" style="margin:8px 0"><span class="dot" style="background:${p.decision.action === "approve" ? "var(--green,#3B6D11)" : "var(--red,#C0392B)"}"></span>
         <span><b>Client ${p.decision.action === "approve" ? "approved" : p.decision.action === "reject" ? "rejected" : "requested revisions on"} v${p.decision.version}</b>
         <small>${p.decision.name ? p.decision.name + " · " : ""}${(p.decision.at || "").slice(0, 10)}${p.decision.comment ? " · “" + p.decision.comment + "”" : ""}</small></span></div>` : ""}
@@ -74,10 +80,11 @@ function renderOptimist() {
             : '<div class="doc-sec doc-empty">Not written yet</div>'}`).join("")}
       </div>
       <div class="doc-controls">
+        <button class="btn-mini" id="optSave" ${p.dirty ? "" : "disabled"}>${p.dirty ? "Save version" : "Saved"}</button>
         <select id="optStatus" class="row-sel" aria-label="Status">
           ${statuses.includes(p.status) ? "" : `<option selected>${p.status}</option>`}
           ${statuses.map(s => `<option${s === p.status ? " selected" : ""}>${s}</option>`).join("")}</select>
-        <button class="btn-mini" id="optFinal">${p.final ? "Unmark Final" : "★ Mark Final"}</button>
+        <button class="btn-mini" id="optFinal">${p.final && !draftAhead ? "Unmark Final" : "★ Mark Final"}</button>
         <button class="btn-mini" id="optSendClient" ${p.final ? "" : "disabled"}>Send to client</button>
       </div>
       ${versions ? `<div style="margin-top:8px"><small style="font-weight:700">VERSIONS</small> ${versions}</div>` : ""}
@@ -85,18 +92,26 @@ function renderOptimist() {
         📄 <a href="#" id="optPdfDl" style="font-weight:600;color:var(--violet)">Download the drafted PDF</a></div>` : ""}
       <div id="optLink" style="display:none;margin-top:8px;padding:8px;background:#f6f3ee;border-radius:8px;font-size:12.5px;word-break:break-all"></div>`;
 
+    $("optSave").onclick = async e => {
+      e.target.disabled = true;
+      try { await commitProposalVersion(p.id); } catch (ex) { alert(ex.message); }
+      drawDoc(); drawRail();
+    };
     $("optStatus").onchange = async e => {
       e.target.disabled = true;
       try { await setProposalStatus(p.id, e.target.value); } catch (ex) { alert(ex.message); }
       drawDoc(); drawRail();
     };
+    // When the draft has moved past the Final version this button promotes the
+    // draft rather than toggling Final off.
     $("optFinal").onclick = async e => {
       e.target.disabled = true;
-      try { await toggleProposalFinal(p.id); } catch (ex) { alert(ex.message); }
+      try { await toggleProposalFinal(p.id, draftAhead ? true : !p.final); } catch (ex) { alert(ex.message); }
       drawDoc(); drawRail();
     };
     $("optSendClient").onclick = async e => {
-      if (!confirm("Send this proposal to the client? The current Final version gets locked as what they see, and you'll get a share link.")) return;
+      const which = p.finalVersion || p.version;
+      if (!confirm(`Send v${which} to the client?${draftAhead ? " That is the version marked Final — the newer draft on screen is NOT included." : ""} It gets locked as what they see, and you'll get a share link.`)) return;
       e.target.disabled = true;
       try {
         const out = await sendProposalToClient(p.id);
@@ -114,9 +129,9 @@ function renderOptimist() {
     document.querySelectorAll("#optDoc [data-ver]").forEach(b => b.onclick = async () => {
       const snap = (p.versions || []).find(v => String(v.v) === b.dataset.ver);
       if (!snap) return;
-      if (!confirm(`Restore the v${snap.v} snapshot? It saves as a new version, so nothing is lost.`)) return;
+      if (!confirm(`Bring v${snap.v} back into the working draft? v${p.version} stays saved, and this only becomes a version if you save it.`)) return;
       b.disabled = true;
-      try { await saveProposalSections(p.id, snap.sections || {}); } catch (ex) { alert(ex.message); }
+      try { await saveProposalSections(p.id, snap.sections || {}, true); } catch (ex) { alert(ex.message); }
       drawDoc(); drawRail();
     });
   };
@@ -187,14 +202,13 @@ function renderOptimist() {
         const v = out.sections?.[k];
         if (v && v.trim()) { sections[k] = v; applied = true; }
       }
-      let ver;
       if (applied) {
-        const saved = await saveProposalSections(p.id, sections);
-        Object.assign(p, saved, { id: p.id });
-        ver = saved.version;
+        // Draft save: the conversation shapes the working document, and the
+        // human decides when a version is worth keeping.
+        await saveProposalSections(p.id, sections, true);
         drawDoc(); drawRail();
       }
-      chat.push({ role: "assistant", content: out.reply, applied, ver });
+      chat.push({ role: "assistant", content: out.reply, applied });
       saveChat(p.id, chat);
     } catch (ex) {
       chat.pop();

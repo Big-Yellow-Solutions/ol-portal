@@ -39,6 +39,25 @@ async function loadPortalData() {
   INVOICES.length = 0; INVOICES.push(...invoices);
 }
 
+/* ---------- profile setup (invite flow, step two) ---------- */
+const WELCOME_SKIPPED = "olportal.welcomeSkipped";
+
+/* True until someone finishes setup or dismisses it in this browser. Cognito
+   handles the account and password; the portal still needs a photo, tags and
+   a blurb before a person is any use on the bench. */
+function needsWelcome() {
+  const me = PEOPLE[ME];
+  return !!me && !me.onboarded && !localStorage.getItem(WELCOME_SKIPPED);
+}
+
+/* A profile with neither a blurb nor specialties tells a browsing Lab Leader
+   nothing, so the dashboard nudge stays until one of them exists — separate
+   from `onboarded`, which only records that the screen was completed. */
+function profileIncomplete() {
+  const b = PEOPLE[ME]?.bench || {};
+  return !(b.blurb || "").trim() && !(b.specialties || []).length;
+}
+
 /* every page calls this: auth guard → load data → build chrome → render */
 async function initPage(title, render) {
   requireAuth();
@@ -49,6 +68,7 @@ async function initPage(title, render) {
       Couldn't load portal data (${e.message}). <a href="login.html">Sign in again</a></div>`;
     return;
   }
+  if (needsWelcome()) { location.replace("welcome.html"); return; }
   buildShell(title);
   render && render();
 }
@@ -135,11 +155,14 @@ async function deleteFileApi(id) {
   if (i > -1) FILES.splice(i, 1);
 }
 
-async function toggleProposalFinal(id) {
+/* Final is scoped to this proposal, so nothing else needs refreshing. */
+async function toggleProposalFinal(id, value) {
   const cur = PROPOSALS.find(x => x.id === id);
   if (!cur) return;
-  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { final: !cur.final } });
-  await refreshProposals(); // marking Final unmarks the others
+  const final = value === undefined ? !cur.final : !!value;
+  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { final } });
+  const i = PROPOSALS.findIndex(x => x.id === id);
+  if (i > -1) PROPOSALS[i] = p;
   return p;
 }
 
@@ -154,11 +177,24 @@ async function createProposal(dealId, title) {
   PROPOSALS.unshift(p);
   return p;
 }
-async function saveProposalSections(id, sections) {
-  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { sections } });
+/* draft: true saves the working draft without creating a version. The Optimist
+   writes this way on every message; versions are created deliberately. */
+async function saveProposalSections(id, sections, draft) {
+  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { sections, draft: !!draft } });
   const i = PROPOSALS.findIndex(x => x.id === id);
   if (i > -1) PROPOSALS[i] = p;
   return p;
+}
+async function commitProposalVersion(id) {
+  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { commit: true } });
+  const i = PROPOSALS.findIndex(x => x.id === id);
+  if (i > -1) PROPOSALS[i] = p;
+  return p;
+}
+/* "v3", "v3 · unsaved changes", or "unsaved draft" before anything is committed. */
+function versionLabel(p) {
+  if (!p.version) return "unsaved draft";
+  return `v${p.version}${p.dirty ? " · unsaved changes" : ""}`;
 }
 async function sendProposalToClient(id) {
   const out = await api(`/proposals/${id}/send`, { method: "POST" });
