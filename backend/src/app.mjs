@@ -100,9 +100,19 @@ async function listScoped(ctx, pk) {
   return resp(200, visible.map(({ pk: _, sk, ...rest }) => ({ id: sk, ...rest })));
 }
 
+async function isValidDealOwner(key) {
+  const p = await get("PERSON", key);
+  return !!p && (p.role === "Admin" || p.role === "Lab Leader");
+}
+
+function isValidAssignmentNotice(n) {
+  return !!n && typeof n.clientContactName === "string" && n.clientContactName.trim() &&
+    typeof n.scopeSummary === "string" && n.scopeSummary.trim();
+}
+
 async function createDeal(ctx, body) {
   if (!ctx.can.addDeal()) return resp(403, { error: "Not allowed to add deals" });
-  const { client, lab, owner, stage, amount, close, source, recurring } = body || {};
+  const { client, lab, owner, dealOwner, stage, amount, close, source, recurring } = body || {};
   const assignable = ctx.role === "Admin" ? null : ctx.me.labs || [];
   if (typeof client !== "string" || !client.trim()) return resp(400, { error: "client is required" });
   if (!(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
@@ -113,12 +123,17 @@ async function createDeal(ctx, body) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(close || "")) return resp(400, { error: "invalid close date" });
   const ownerKey = ctx.role === "Lab Leader" ? ctx.me.sk : (owner || ctx.me.sk);
   if (!(await get("PERSON", ownerKey))) return resp(400, { error: "unknown owner" });
+  const dealOwnerKey = dealOwner || ownerKey;
+  if (!(await isValidDealOwner(dealOwnerKey))) return resp(400, { error: "unknown deal owner" });
+  if (stage === "Closed" && !isValidAssignmentNotice(body.assignmentNotice))
+    return resp(400, { error: "Assignment Notice is required when closing a deal" });
 
   const id = await nextId("DEAL", "D-");
   const deal = {
-    pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey,
+    pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
     stage, amount, close, source, recurring: !!recurring,
-    ...(stage === "Closed" && ["Won", "Lost"].includes(body.outcome) ? { outcome: body.outcome } : {})
+    ...(stage === "Closed" && ["Won", "Lost"].includes(body.outcome) ? { outcome: body.outcome } : {}),
+    ...(stage === "Closed" ? { assignmentNotice: body.assignmentNotice } : {})
   };
   await put(deal);
   const { pk, sk, ...rest } = deal;
@@ -130,8 +145,8 @@ async function updateDeal(ctx, id, body) {
   if (!deal) return resp(404, { error: "deal not found" });
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   const patch = {};
-  const editable = ["client", "owner", "stage", "amount", "close", "source", "recurring",
-    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd"];
+  const editable = ["client", "owner", "dealOwner", "stage", "amount", "close", "source", "recurring",
+    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd", "assignmentNotice"];
   for (const k of editable) if (body && k in body) patch[k] = body[k];
   if ("recurPaused" in patch) patch.recurPaused = !!patch.recurPaused;
   if ("autoInvoice" in patch) patch.autoInvoice = !!patch.autoInvoice;
@@ -145,6 +160,10 @@ async function updateDeal(ctx, id, body) {
   if ("amount" in patch && (!Number.isFinite(patch.amount) || patch.amount < 0)) return resp(400, { error: "invalid amount" });
   if ("outcome" in patch && !["Won", "Lost"].includes(patch.outcome)) return resp(400, { error: "invalid outcome" });
   if ("owner" in patch && !(await get("PERSON", patch.owner))) return resp(400, { error: "unknown owner" });
+  if ("dealOwner" in patch && !(await isValidDealOwner(patch.dealOwner))) return resp(400, { error: "unknown deal owner" });
+  if (patch.stage === "Closed" && deal.stage !== "Closed" &&
+    !isValidAssignmentNotice(patch.assignmentNotice || deal.assignmentNotice))
+    return resp(400, { error: "Assignment Notice is required when closing a deal" });
 
   const next = { ...deal, ...patch };
   if (next.stage !== "Closed") delete next.outcome;

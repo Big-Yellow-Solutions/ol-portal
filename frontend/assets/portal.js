@@ -79,6 +79,7 @@ function dealRows(deals) {
     <td><b>${d.client}</b><br><small style="color:var(--ink-mute)">${d.id} · ${d.source}</small></td>
     <td>${labCell(d.lab)}</td>
     <td>${personCell(d.owner)}</td>
+    <td>${personCell(d.dealOwner || d.owner)}</td>
     <td><span class="badge ${stageClass(d)}"><i></i>${stageLabel(d)}</span>${d.recurring ? ' <span class="badge b-recurring">↻ Recurring</span>' : ""}</td>
     <td class="amount">${fmt$(d.amount)}</td>
     <td>${d.close}</td>
