@@ -24,6 +24,9 @@ async function renderAdmin() {
     `<label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;margin-right:14px">
       <input type="checkbox" name="invLab" value="${k}">${l.name}</label>`).join("");
 
+  const kbLabOptions = () => `<option value="">All labs (org-wide)</option>` +
+    Object.entries(LABS).map(([k, l]) => `<option value="${k}">${l.name}</option>`).join("");
+
   const drawUsers = () => {
     document.getElementById("userRows").innerHTML = users.map(u => {
       const [cls, label] = STATUS_BADGE[u.status] || ["b-draft", u.status];
@@ -58,6 +61,7 @@ async function renderAdmin() {
   const drawAll = () => { drawUsers(); drawAudit(); };
 
   document.getElementById("inviteLabs").innerHTML = labChecks();
+  document.getElementById("kbLab").innerHTML = kbLabOptions();
 
   document.getElementById("inviteForm").addEventListener("submit", async e => {
     e.preventDefault();
@@ -124,7 +128,7 @@ async function renderAdmin() {
         <span class="dot" style="background:var(--violet)"></span>
         <span style="flex:1;min-width:0"><b>${e.title}</b>
           <small style="display:block;white-space:pre-wrap">${e.content.length > 240 ? e.content.slice(0, 240) + "…" : e.content}</small>
-          <small style="color:var(--ink-mute)">updated ${e.updated} by ${e.updatedBy}</small></span>
+          <small style="color:var(--ink-mute)">${e.lab ? (LABS[e.lab]?.name || e.lab) : "All labs"} · updated ${e.updated} by ${e.updatedBy}</small></span>
         <span style="display:flex;gap:6px;flex-shrink:0">
           <button class="btn-mini" data-kbedit="${e.id}">Edit</button>
           <button class="btn-mini" data-kbdel="${e.id}">Delete</button></span>
@@ -137,7 +141,7 @@ async function renderAdmin() {
     e.preventDefault();
     const f = e.target, btn = f.querySelector("button");
     btn.disabled = true;
-    try { await kbApi.create(f.kbTitle.value.trim(), f.kbContent.value); f.reset(); await loadKb(); }
+    try { await kbApi.create(f.kbTitle.value.trim(), f.kbContent.value, f.kbLab.value); f.reset(); await loadKb(); }
     catch (ex) { alert(ex.message); }
     btn.disabled = false;
   });
@@ -149,7 +153,9 @@ async function renderAdmin() {
       if (title === null) return;
       const content = prompt("Content:", entry.content);
       if (content === null) return;
-      try { await kbApi.update(entry.id, { title, content }); await loadKb(); } catch (ex) { alert(ex.message); }
+      const lab = prompt("Lab key (leave blank for all labs):", entry.lab || "");
+      if (lab === null) return;
+      try { await kbApi.update(entry.id, { title, content, lab: lab.trim() }); await loadKb(); } catch (ex) { alert(ex.message); }
       return;
     }
     const del = e.target.closest("[data-kbdel]");

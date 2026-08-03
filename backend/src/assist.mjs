@@ -30,13 +30,15 @@ export async function listKb(ctx) {
 
 export async function createKb(ctx, body) {
   if (ctx.role !== "Admin") return resp(403, { error: "Knowledge base is admin-only" });
-  const { title, content } = body || {};
+  const { title, content, lab } = body || {};
   if (typeof title !== "string" || !title.trim()) return resp(400, { error: "title is required" });
   if (typeof content !== "string" || !content.trim()) return resp(400, { error: "content is required" });
+  if (lab && !(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
   const id = await nextId("KB", "KB-");
   const item = {
     pk: "KB", sk: id, title: title.trim().slice(0, 200),
-    content: content.slice(0, 30_000), updatedBy: ctx.me.sk, updated: today()
+    content: content.slice(0, 30_000), updatedBy: ctx.me.sk, updated: today(),
+    ...(lab ? { lab } : {})
   };
   await put(item);
   await writeAudit(ctx.me.sk, "kb.created", `${id} · ${item.title}`);
@@ -51,6 +53,14 @@ export async function updateKb(ctx, id, body) {
   const next = { ...item, updatedBy: ctx.me.sk, updated: today() };
   if (typeof body?.title === "string" && body.title.trim()) next.title = body.title.trim().slice(0, 200);
   if (typeof body?.content === "string" && body.content.trim()) next.content = body.content.slice(0, 30_000);
+  if (body && "lab" in body) {
+    if (body.lab) {
+      if (!(await get("LAB", body.lab))) return resp(400, { error: "unknown lab" });
+      next.lab = body.lab;
+    } else {
+      delete next.lab;
+    }
+  }
   await put(next);
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
@@ -136,17 +146,16 @@ export async function assist(ctx, body) {
     last.content = [block, { type: "text", text: last.content }];
   }
 
-  const [deal, kb] = await Promise.all([get("DEAL", p.deal), listType("KB")]);
-  const kbText = kb.length
-    ? kb.map(e => `### ${e.title}\n${e.content}`).join("\n\n")
-    : "(The knowledge base is empty — draft from general consulting best practice and say so.)";
+  const [deal, kb, labRec] = await Promise.all([get("DEAL", p.deal), listType("KB"), get("LAB", p.lab)]);
+  const labName = labRec?.name || p.lab;
+  const globalKb = kb.filter(e => !e.lab);
+  const labKb = kb.filter(e => e.lab === p.lab);
+  const kbSections = [
+    globalKb.length ? `## OL-wide knowledge base\n${globalKb.map(e => `### ${e.title}\n${e.content}`).join("\n\n")}` : "",
+    labKb.length ? `## ${labName} knowledge base\n${labKb.map(e => `### ${e.title}\n${e.content}`).join("\n\n")}` : ""
+  ].filter(Boolean).join("\n\n") || "(The knowledge base is empty — draft from general consulting best practice and say so.)";
 
-  const c = await client();
-  const response = await c.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 6000,
-    thinking: { type: "adaptive" },
-    system: `You are The Optimist, Optimistic Labs' proposal writer, chatting with a Lab Leader inside OL's internal portal. The conversation with you IS the proposal editor: everything in the document gets written through you, and the Lab Leader watches it form in a live preview beside the chat.
+  const stableBlock = `You are The Optimist, Optimistic Labs' proposal writer, chatting with a Lab Leader inside OL's internal portal. The conversation with you IS the proposal editor: everything in the document gets written through you, and the Lab Leader watches it form in a live preview beside the chat.
 Optimistic Labs is a consultancy that runs client engagements through practice "labs", each led by a Lab Leader.
 
 Your job: interview them and build the proposal as you go.
@@ -159,20 +168,37 @@ Your job: interview them and build the proposal as you go.
 - Ground pricing and tone in OL's knowledge base below; do not invent OL policies that aren't there. Write sections in plain, confident prose. Never use em-dashes.
 - You draft only. You cannot send, approve, or finalize anything; the Lab Leader reviews the preview and uses the controls under it.
 
-## OL knowledge base
-${kbText}
+${kbSections}`;
 
-## This proposal
+  const proposalBlock = `## This proposal
 Title: "${p.title}" for client "${p.client}" (lab "${p.lab}", deal ${p.deal}${deal ? `, deal value $${deal.amount}, expected close ${deal.close}, source ${deal.source}${deal.recurring ? ", recurring engagement" : ""}` : ""}).
 Current section contents as they sit in the editor right now (empty means not yet written):
 ${JSON.stringify(
   typeof draft === "object" && draft !== null
     ? Object.fromEntries(SECTION_KEYS.map(k => [k, String(draft[k] || "").slice(0, 20_000)]))
     : p.sections || {}
-)}`,
+)}`;
+
+  const c = await client();
+  const response = await c.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 6000,
+    thinking: { type: "adaptive" },
+    system: [
+      { type: "text", text: stableBlock, cache_control: { type: "ephemeral" } },
+      { type: "text", text: proposalBlock }
+    ],
     output_config: { format: { type: "json_schema", schema: CHAT_SCHEMA } },
     messages: turns
   });
+
+  console.log(JSON.stringify({
+    level: "info", message: "assist.cache",
+    proposalId, lab: p.lab,
+    cacheRead: response.usage?.cache_read_input_tokens,
+    cacheWrite: response.usage?.cache_creation_input_tokens,
+    input: response.usage?.input_tokens
+  }));
 
   if (response.stop_reason === "refusal")
     return resp(502, { error: "The assistant declined to draft this content" });

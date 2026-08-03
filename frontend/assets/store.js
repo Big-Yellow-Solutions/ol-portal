@@ -231,7 +231,7 @@ async function inviteContributor(fields) {
 /* ---------- knowledge base (admin) ---------- */
 const kbApi = {
   list: () => api("/kb"),
-  create: (title, content) => api("/kb", { method: "POST", body: { title, content } }),
+  create: (title, content, lab) => api("/kb", { method: "POST", body: { title, content, lab: lab || undefined } }),
   update: (id, patch) => api(`/kb/${id}`, { method: "PATCH", body: patch }),
   remove: id => api(`/kb/${id}`, { method: "DELETE" })
 };
