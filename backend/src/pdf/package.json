@@ -7,7 +7,7 @@
     "@aws-sdk/client-dynamodb": "^3.0.0",
     "@aws-sdk/lib-dynamodb": "^3.0.0",
     "@aws-sdk/client-s3": "^3.0.0",
-    "@sparticuz/chromium": "^131.0.1",
-    "puppeteer-core": "^23.9.0"
+    "@sparticuz/chromium": "^143.0.0",
+    "puppeteer-core": "^24.32.0"
   }
 }

@@ -157,11 +157,14 @@ export const handler = async event => {
       (kind === "proposals" && role === "Lab Leader" && (me.labs || []).includes(docModel.lab));
     if (!allowed) return resp(403, { error: "Generating this PDF isn't allowed for your role" });
 
+    // @sparticuz/chromium@143 dropped the defaultViewport/headless getters
+    // (chromium.args already bakes in --headless='shell'); set the viewport
+    // explicitly to preserve prior rendering dimensions.
     browser = await puppeteer.launch({
       args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
+      defaultViewport: { width: 1920, height: 1080 },
       executablePath: await chromium.executablePath(),
-      headless: chromium.headless
+      headless: true
     });
     const page = await browser.newPage();
     await page.setContent(renderHtml(docModel));
