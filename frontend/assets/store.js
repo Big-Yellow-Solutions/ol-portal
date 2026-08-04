@@ -222,10 +222,10 @@ function versionLabel(p) {
   if (!p.version) return "unsaved draft";
   return `v${p.version}${p.dirty ? " · unsaved changes" : ""}`;
 }
-async function sendProposalToClient(id) {
-  const out = await api(`/proposals/${id}/send`, { method: "POST" });
+async function sendProposalToClient(id, { clientEmail, sendEmail } = {}) {
+  const out = await api(`/proposals/${id}/send`, { method: "POST", body: { clientEmail, sendEmail } });
   await refreshProposals();
-  return out; // { url, sentVersion }
+  return out; // { url, sentVersion, clientEmail, subject, text, emailSent, emailError }
 }
 async function assistChat(proposalId, messages, draft, attachment) {
   return api("/assist", { method: "POST", body: { proposalId, messages, draft, ...(attachment ? { attachment } : {}) } });

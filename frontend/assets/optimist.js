@@ -18,6 +18,57 @@ function saveChat(id, chat) {
   try { localStorage.setItem(CHAT_KEY(id), JSON.stringify(chat.slice(-60))); } catch { }
 }
 
+/* Sending a proposal always locks in the Final version behind a one-time
+   link — this modal is just about *delivery*: have the portal email the
+   client directly, or copy ready-to-paste email text for the sender to send
+   themselves. Never a raw link dumped on screen for someone to copy by hand. */
+function openSendProposalModal(p, draftAhead, onDone) {
+  const which = p.finalVersion || p.version;
+  const back = overlay(`
+    <div class="modal-head"><h2>Send proposal to client</h2><button class="x" aria-label="Close">×</button></div>
+    <p class="sub">Sending locks in v${which} as what the client sees.${draftAhead ? " The newer draft on screen is NOT included — mark Final again to promote it first." : ""}</p>
+    <div class="f-grid">
+      <label class="field f-wide">Client email
+        <input id="spEmail" type="email" required value="${p.clientEmail || ""}" placeholder="client@example.com"></label>
+    </div>
+    <div id="spMsg" style="margin:10px 0 0;font-size:12.5px;color:var(--ink-mute)"></div>
+    <div class="modal-foot">
+      <button class="pill pill-outline" id="spCancel">Cancel</button>
+      <button class="pill pill-outline" id="spCopy">Copy email text</button>
+      <button class="pill pill-primary" id="spSend">Send email now</button>
+    </div>`, "modal");
+  back.querySelector(".x").onclick = back.querySelector("#spCancel").onclick = () => back.remove();
+  const email = () => back.querySelector("#spEmail").value.trim();
+  const msg = m => { back.querySelector("#spMsg").textContent = m; };
+
+  back.querySelector("#spSend").onclick = async e => {
+    if (!email()) { msg("Enter the client's email address first."); return; }
+    e.target.disabled = true;
+    try {
+      const out = await sendProposalToClient(p.id, { clientEmail: email(), sendEmail: true });
+      onDone();
+      if (out.emailSent) {
+        msg(`Sent to ${email()}.`);
+        setTimeout(() => back.remove(), 1400);
+      } else {
+        msg(`Couldn't send automatically (${out.emailError || "unknown error"}) — try "Copy email text" instead.`);
+      }
+    } catch (ex) { msg(ex.message); }
+    e.target.disabled = false;
+  };
+
+  back.querySelector("#spCopy").onclick = async e => {
+    e.target.disabled = true;
+    try {
+      const out = await sendProposalToClient(p.id, { clientEmail: email() || undefined, sendEmail: false });
+      onDone();
+      await navigator.clipboard.writeText(`Subject: ${out.subject}\n\n${out.text}`);
+      msg("Email text copied — paste it into your own email client.");
+    } catch (ex) { msg(ex.message); }
+    e.target.disabled = false;
+  };
+}
+
 function renderOptimist() {
   const $ = id => document.getElementById(id);
   if (ROLE === "Contributor") {
@@ -89,8 +140,7 @@ function renderOptimist() {
       </div>
       ${versions ? `<div style="margin-top:8px"><small style="font-weight:700">VERSIONS</small> ${versions}</div>` : ""}
       ${p.pdfFileId ? `<div style="margin-top:8px;padding:8px;background:#f6f3ee;border-radius:8px;font-size:12.5px">
-        📄 <a href="#" id="optPdfDl" style="font-weight:600;color:var(--violet)">Download the drafted PDF</a></div>` : ""}
-      <div id="optLink" style="display:none;margin-top:8px;padding:8px;background:#f6f3ee;border-radius:8px;font-size:12.5px;word-break:break-all"></div>`;
+        📄 <a href="#" id="optPdfDl" style="font-weight:600;color:var(--violet)">Download the drafted PDF</a></div>` : ""}`;
 
     $("optSave").onclick = async e => {
       e.target.disabled = true;
@@ -109,19 +159,7 @@ function renderOptimist() {
       try { await toggleProposalFinal(p.id, draftAhead ? true : !p.final); } catch (ex) { alert(ex.message); }
       drawDoc(); drawRail();
     };
-    $("optSendClient").onclick = async e => {
-      const which = p.finalVersion || p.version;
-      if (!confirm(`Send v${which} to the client?${draftAhead ? " That is the version marked Final — the newer draft on screen is NOT included." : ""} It gets locked as what they see, and you'll get a share link.`)) return;
-      e.target.disabled = true;
-      try {
-        const out = await sendProposalToClient(p.id);
-        drawDoc(); drawRail();
-        const link = $("optLink");
-        link.style.display = "block";
-        link.innerHTML = `Client link (v${out.sentVersion} locked): <b>${out.url}</b> <button class="btn-mini" id="optCopy">Copy</button>`;
-        $("optCopy").onclick = () => navigator.clipboard.writeText(out.url);
-      } catch (ex) { alert(ex.message); e.target.disabled = false; }
-    };
+    $("optSendClient").onclick = () => openSendProposalModal(p, draftAhead, () => { drawDoc(); drawRail(); });
     if ($("optPdfDl")) $("optPdfDl").onclick = async e => {
       e.preventDefault();
       try { location.href = await downloadFileUrl(p.pdfFileId); } catch (ex) { alert(ex.message); }

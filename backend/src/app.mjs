@@ -325,7 +325,7 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
   if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
   if (method === "POST" && path === "/proposals") return await proposals.createProposal(ctx, body);
-  if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1], body);
   if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
   if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
   if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);

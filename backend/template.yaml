@@ -299,6 +299,18 @@ Resources:
                 - cognito-idp:AdminSetUserMFAPreference
                 - cognito-idp:ListUsers
               Resource: !GetAtt UserPool.Arn
+        # PRD 3.5: emailing a sent proposal's link to the client. SES resolves
+        # IAM authorization against whichever identity ARN most specifically
+        # matches the From address — the optimisticlabs.com domain ARN alone
+        # isn't enough for addresses (like hello@) that are ALSO independently
+        # verified as their own identity, so this covers every identity in
+        # the account rather than trying to enumerate them.
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
       Events:
         GetRoute:
           Type: HttpApi

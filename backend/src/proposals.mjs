@@ -8,6 +8,9 @@ import { randomBytes } from "node:crypto";
 import { resp, today, get, put, listType, nextId } from "./util.mjs";
 import { createFromProposal } from "./contracts.mjs";
 import { writeAudit } from "./admin.mjs";
+import { sendClientEmail } from "./email.mjs";
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const SECTION_KEYS = ["summary", "scope", "deliverables", "timeline", "pricing", "terms"];
 const PROPOSAL_STATUSES = ["Draft", "In Review", "Internally Approved", "Sent",
@@ -131,12 +134,22 @@ export async function updateProposal(ctx, id, body) {
   return resp(200, { id: sk, ...rest });
 }
 
-/* ---------- send to customer (PRD 3.5) ---------- */
-export async function sendProposal(ctx, id) {
+/* ---------- send to customer (PRD 3.5) ----------
+   "Sending" always freezes the Final version behind a one-time link — that
+   part never changes. Delivery is a separate choice the sender makes each
+   time: `sendEmail: true` has the portal email the client directly via SES;
+   otherwise the response's subject/text let the frontend offer a "copy email
+   text" fallback instead. A failed SES send doesn't undo the freeze — the
+   link is still valid either way, matching the pre-email behavior. */
+export async function sendProposal(ctx, id, body) {
   const p = await get("PROPOSAL", id);
   if (!p) return resp(404, { error: "proposal not found" });
   if (!ctx.can.editProposal(p)) return resp(403, { error: "Not allowed to send this proposal" });
   if (!p.final) return resp(409, { error: "Mark a version Final before sending — the Final version is what the client sees" });
+
+  const clientEmail = typeof body?.clientEmail === "string" ? body.clientEmail.trim() : "";
+  if (clientEmail && !EMAIL_RE.test(clientEmail)) return resp(400, { error: "invalid client email" });
+  if (body?.sendEmail && !clientEmail) return resp(400, { error: "client email is required to send" });
 
   // Send the version that was marked Final, not whatever the draft has drifted
   // to since. `draftAhead` lets the UI say so rather than surprising the sender.
@@ -149,14 +162,33 @@ export async function sendProposal(ctx, id) {
     sentVersion,
     sentSections: sectionsAt(p, sentVersion),
     sentAt: new Date().toISOString(),
-    updated: today()
+    updated: today(),
+    ...(clientEmail ? { clientEmail } : {})
   };
   await put(next);
   await writeAudit(ctx.me.sk, "proposal.sent", `${id} v${sentVersion} → customer link`);
-  return resp(200, {
-    id, sentVersion, draftAhead,
-    url: `${process.env.FRONTEND_URL}/proposal-view.html?token=${next.shareToken}`
-  });
+
+  const url = `${process.env.FRONTEND_URL}/proposal-view.html?token=${next.shareToken}`;
+  const subject = `Your proposal from Optimistic Labs: ${p.title}`;
+  const text = `Hi,\n\n${ctx.me.name} at Optimistic Labs has sent you a proposal: "${p.title}".\n\n` +
+    `View it and let us know what you think: ${url}\n\n` +
+    `Just reply to this email with any questions.\n\n— Optimistic Labs`;
+  const html = `<p>Hi,</p><p>${ctx.me.name} at Optimistic Labs has sent you a proposal: <b>${p.title}</b>.</p>` +
+    `<p><a href="${url}">View it and let us know what you think</a>.</p>` +
+    `<p>Just reply to this email with any questions.</p><p>— Optimistic Labs</p>`;
+
+  let emailSent = false, emailError;
+  if (body?.sendEmail) {
+    try {
+      await sendClientEmail({ sender: ctx.me, toEmail: clientEmail, subject, text, html });
+      emailSent = true;
+      await writeAudit(ctx.me.sk, "proposal.emailed", `${id} → ${clientEmail}`);
+    } catch (err) {
+      emailError = err.message;
+    }
+  }
+
+  return resp(200, { id, sentVersion, draftAhead, url, clientEmail, subject, text, emailSent, emailError });
 }
 
 /* ---------- public customer routes (Authorizer NONE) ----------
