@@ -4,6 +4,7 @@
 let LABS = {}, PEOPLE = {}, BENCH = [];
 const DEALS = [], PROPOSALS = [], INVOICES = [], FILES = [], CONTRACTS = [], RECURS = [];
 let ROLE = null, ME = null, MY_LABS = [];
+let ACTING_AS_BY = null; // { by, byName } of the real Admin, when acting as someone else
 
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
 const STAGE_CLASS = {

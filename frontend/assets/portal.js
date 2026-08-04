@@ -26,7 +26,27 @@ const NAV = [
 const NAV_CONTRACTS = { href: "contracts.html", icon: "doc", label: "Contracts" };
 const NAV_ADMIN = { href: "admin.html", icon: "gear", label: "Admin & Invites" };
 
+function renderActingAsBanner() {
+  const existing = document.getElementById("actAsBanner");
+  if (!ACTING_AS_BY) { existing?.remove(); return; }
+  const me = PEOPLE[ME];
+  const bar = existing || document.createElement("div");
+  bar.id = "actAsBanner";
+  bar.className = "act-as-banner";
+  bar.innerHTML = `${ACTING_AS_BY.byName} is viewing/acting as <b>${me.name}</b> (${me.role})
+    <button id="actAsExit" type="button">Exit</button>`;
+  if (!existing) document.body.prepend(bar);
+  document.getElementById("actAsExit").onclick = async () => {
+    const btn = document.getElementById("actAsExit");
+    btn.disabled = true;
+    try { await api("/admin/act-as/stop", { method: "POST" }); } catch { /* still exit locally */ }
+    clearActingAs();
+    location.href = "admin.html";
+  };
+}
+
 function buildShell(pageTitle) {
+  renderActingAsBanner();
   const here = location.pathname.split("/").pop() || "index.html";
   const navItems = [...NAV];
   if (ROLE !== "Contributor") navItems.splice(3, 0, { href: "optimist.html", icon: "spark", label: "The Optimist" });

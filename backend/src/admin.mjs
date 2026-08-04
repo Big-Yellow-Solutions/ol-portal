@@ -223,6 +223,30 @@ export async function resetUserMfa(ctx, username) {
   return resp(200, { mfaReset: username });
 }
 
+/* ---------- act as (god-mode view/edit as another user) ----------
+   Gated on ctx.realRole, not ctx.role: by the time a request reaches here,
+   ctx.role may already be the impersonated target's (see app.mjs), so the
+   exit route (stopActingAs) must check the *real* caller's role or an admin
+   could get locked out of their own "stop" button. */
+export async function startActingAs(ctx, body) {
+  if (ctx.realRole !== "Admin") return forbidden();
+  const { target } = body || {};
+  if (target === ctx.realMe.sk) return resp(400, { error: "You're already you" });
+  const person = target && (await doc.send(new GetCommand({
+    TableName: TABLE, Key: { pk: "PERSON", sk: target }
+  }))).Item;
+  if (!person) return resp(404, { error: "no such user" });
+  if (person.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
+  await writeAudit(ctx.realMe.sk, "admin.act-as-start", `${target} (${person.role})`);
+  return resp(200, { username: target, name: person.name, role: person.role });
+}
+
+export async function stopActingAs(ctx) {
+  if (ctx.realRole !== "Admin") return forbidden();
+  if (ctx.actingAs) await writeAudit(ctx.realMe.sk, "admin.act-as-stop", ctx.me.sk);
+  return resp(200, { stopped: true });
+}
+
 /* ---------- audit log (PRD 2.6) ---------- */
 export async function listAudit(ctx) {
   if (!isAdmin(ctx)) return forbidden();

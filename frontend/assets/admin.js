@@ -43,6 +43,7 @@ async function renderAdmin() {
           ${pending ? `<button class="btn-mini" data-resend="${u.username}">Resend invite</button>
             <button class="btn-mini" data-revoke="${u.username}">Revoke</button>` : ""}
           ${!pending && !self ? `<button class="btn-mini" data-mfa="${u.username}">Reset access</button>` : ""}
+          ${!pending && !self && u.role !== "Admin" ? `<button class="btn-mini" data-actas="${u.username}">Act as</button>` : ""}
         </td>
       </tr>`;
     }).join("") || '<tr><td colspan="6" class="empty">No users yet.</td></tr>';
@@ -114,6 +115,13 @@ async function renderAdmin() {
       } else if (b.dataset.email) {
         const email = prompt(`New email for ${b.dataset.email}:`);
         if (email) await api(`/admin/users/${b.dataset.email}`, { method: "PATCH", body: { email } });
+      } else if (b.dataset.actas) {
+        if (confirm(`View and act as ${b.dataset.actas}? You'll see exactly what they see and can make changes as them until you exit — every action is logged.`)) {
+          const info = await api("/admin/act-as", { method: "POST", body: { target: b.dataset.actas } });
+          setActingAs(info);
+          location.href = "index.html";
+          return; // navigating away — skip the reload/re-enable below
+        }
       }
       await load(); drawAll();
     } catch (ex) { alert(ex.message); }

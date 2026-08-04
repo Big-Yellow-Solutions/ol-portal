@@ -87,6 +87,7 @@ async function bootstrap(ctx) {
   const [labs, people] = await Promise.all([listType("LAB"), listType("PERSON")]);
   return resp(200, {
     me: ctx.me.sk, role: ctx.role,
+    ...(ctx.actingAs ? { actingAs: { by: ctx.realMe.sk, byName: ctx.realMe.name } } : {}),
     labs: Object.fromEntries(labs.map(({ pk, sk, ...l }) => [sk, l])),
     people: Object.fromEntries(people.map(({ pk, sk, ...p }) =>
       [sk, profile.publicView(p, ctx.me.sk, ctx.role, sk)]))
@@ -309,6 +310,58 @@ async function qboCallback(event) {
 }
 
 /* ---------- router ---------- */
+async function route(ctx, method, path, seg, body) {
+  if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
+  if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL");
+  if (method === "GET" && path === "/proposals") return await listScoped(ctx, "PROPOSAL");
+  if (method === "GET" && path === "/invoices") return await listScoped(ctx, "INVOICE");
+  if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
+  if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
+  if (method === "GET" && path === "/files") return await listFiles(ctx);
+  if (method === "POST" && path === "/files") return await createFile(ctx, body);
+  if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);
+  if (method === "DELETE" && seg[0] === "files" && seg[1]) return await deleteFile(ctx, seg[1]);
+  if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
+  if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
+  if (method === "POST" && path === "/proposals") return await proposals.createProposal(ctx, body);
+  if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1]);
+  if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
+  if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
+  if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);
+  if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
+  if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
+  if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
+  if (method === "POST" && path === "/kb") return await assist.createKb(ctx, body);
+  if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await assist.updateKb(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await assist.deleteKb(ctx, seg[1]);
+  if (method === "POST" && path === "/assist") return await assist.assist(ctx, body);
+  if (method === "PATCH" && path === "/profile") return await profile.updateProfile(ctx, null, body);
+  if (method === "PATCH" && seg[0] === "profile" && seg[1]) return await profile.updateProfile(ctx, seg[1], body);
+  if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
+  if (method === "POST" && path === "/admin/invites") return await admin.createInvite(ctx, body);
+  if (method === "POST" && seg[0] === "admin" && seg[1] === "invites" && seg[3] === "resend")
+    return await admin.resendInvite(ctx, seg[2]);
+  if (method === "DELETE" && seg[0] === "admin" && seg[1] === "invites" && seg[2])
+    return await admin.revokeInvite(ctx, seg[2]);
+  if (method === "PATCH" && seg[0] === "admin" && seg[1] === "users" && seg[2])
+    return await admin.updateUserEmail(ctx, seg[2], body);
+  if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "reset-mfa")
+    return await admin.resetUserMfa(ctx, seg[2]);
+  if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
+  if (method === "POST" && path === "/admin/act-as") return await admin.startActingAs(ctx, body);
+  if (method === "POST" && path === "/admin/act-as/stop") return await admin.stopActingAs(ctx);
+  if (method === "GET" && path === "/qbo/status") return await qboStatus(ctx);
+  if (method === "GET" && path === "/qbo/connect") return await qboConnect(ctx);
+  if (method === "POST" && path === "/qbo/disconnect") return await qboDisconnect(ctx);
+  if (method === "GET" && path === "/qbo/invoices") return await qboInvoices(ctx);
+
+  return resp(404, { error: "no such route" });
+}
+
+const MUTATING_METHODS = new Set(["POST", "PATCH", "PUT", "DELETE"]);
+const ACT_AS_ROUTES = new Set(["/admin/act-as", "/admin/act-as/stop"]);
+
 export const handler = async event => {
   try {
     const rawMethod = event.requestContext.http.method;
@@ -329,7 +382,25 @@ export const handler = async event => {
     if (!username || !role) return resp(403, { error: "No portal role on this account" });
     const me = await get("PERSON", username);
     if (!me) return resp(403, { error: "No portal profile for this user" });
-    const ctx = { me, role, can: perms(role, me.labs || []) };
+
+    // Admin "act as" (god-mode view/edit as another user): the caller's own JWT
+    // never changes — this only substitutes who ctx.me/ctx.role/ctx.can resolve
+    // to for this request. Every downstream permission check (perms(), isAdmin())
+    // runs against the *substituted* identity, so acting as a non-Admin naturally
+    // locks the caller out of admin-only routes for the duration — no separate
+    // allowlist needed. ctx.realMe/ctx.realRole keep the true caller available so
+    // the act-as start/stop routes (and audit logging) always know who's really here.
+    const actAsTarget = event.headers?.["x-act-as"];
+    let ctx;
+    if (actAsTarget) {
+      if (role !== "Admin") return resp(403, { error: "Only Admins can act as another user" });
+      const target = await get("PERSON", actAsTarget);
+      if (!target) return resp(404, { error: "No such user to act as" });
+      if (target.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
+      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || []), realMe: me, realRole: role, actingAs: true };
+    } else {
+      ctx = { me, role, can: perms(role, me.labs || []), realMe: me, realRole: role, actingAs: false };
+    }
 
     const method = event.requestContext.http.method;
     const path = event.rawPath.replace(/\/+$/, "");
@@ -339,50 +410,11 @@ export const handler = async event => {
       try { body = JSON.parse(event.body); } catch { return resp(400, { error: "invalid JSON body" }); }
     }
 
-    if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
-    if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL");
-    if (method === "GET" && path === "/proposals") return await listScoped(ctx, "PROPOSAL");
-    if (method === "GET" && path === "/invoices") return await listScoped(ctx, "INVOICE");
-    if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
-    if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
-    if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
-    if (method === "GET" && path === "/files") return await listFiles(ctx);
-    if (method === "POST" && path === "/files") return await createFile(ctx, body);
-    if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);
-    if (method === "DELETE" && seg[0] === "files" && seg[1]) return await deleteFile(ctx, seg[1]);
-    if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
-    if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
-    if (method === "POST" && path === "/proposals") return await proposals.createProposal(ctx, body);
-    if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1]);
-    if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
-    if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
-    if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);
-    if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
-    if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
-    if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
-    if (method === "POST" && path === "/kb") return await assist.createKb(ctx, body);
-    if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await assist.updateKb(ctx, seg[1], body);
-    if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await assist.deleteKb(ctx, seg[1]);
-    if (method === "POST" && path === "/assist") return await assist.assist(ctx, body);
-    if (method === "PATCH" && path === "/profile") return await profile.updateProfile(ctx, null, body);
-    if (method === "PATCH" && seg[0] === "profile" && seg[1]) return await profile.updateProfile(ctx, seg[1], body);
-    if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
-    if (method === "POST" && path === "/admin/invites") return await admin.createInvite(ctx, body);
-    if (method === "POST" && seg[0] === "admin" && seg[1] === "invites" && seg[3] === "resend")
-      return await admin.resendInvite(ctx, seg[2]);
-    if (method === "DELETE" && seg[0] === "admin" && seg[1] === "invites" && seg[2])
-      return await admin.revokeInvite(ctx, seg[2]);
-    if (method === "PATCH" && seg[0] === "admin" && seg[1] === "users" && seg[2])
-      return await admin.updateUserEmail(ctx, seg[2], body);
-    if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "reset-mfa")
-      return await admin.resetUserMfa(ctx, seg[2]);
-    if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
-    if (method === "GET" && path === "/qbo/status") return await qboStatus(ctx);
-    if (method === "GET" && path === "/qbo/connect") return await qboConnect(ctx);
-    if (method === "POST" && path === "/qbo/disconnect") return await qboDisconnect(ctx);
-    if (method === "GET" && path === "/qbo/invoices") return await qboInvoices(ctx);
-
-    return resp(404, { error: "no such route" });
+    const result = await route(ctx, method, path, seg, body);
+    if (ctx.actingAs && MUTATING_METHODS.has(method) && !ACT_AS_ROUTES.has(path) && result.statusCode < 300) {
+      await admin.writeAudit(ctx.realMe.sk, "admin.act-as-mutation", `${method} ${path} (as ${ctx.me.sk})`);
+    }
+    return result;
   } catch (err) {
     console.error(JSON.stringify({ level: "error", message: err.message, stack: err.stack }));
     return resp(500, { error: "internal error" });

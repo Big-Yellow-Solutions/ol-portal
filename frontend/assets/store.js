@@ -2,10 +2,22 @@
    The Lambda enforces the PRD 3.3 permissions matrix server-side; the `can`
    object here only drives UI affordances — lists arrive pre-scoped to the role. */
 
+/* ---------- act as (god-mode view/edit as another user) ----------
+   Session-scoped only (sessionStorage, not localStorage): gone the moment the
+   tab/browser closes, never silently follows the admin into a new session. */
+const ACT_AS_KEY = "olportal.actingAs";
+const actingAsTarget = () => { try { return JSON.parse(sessionStorage.getItem(ACT_AS_KEY) || "null"); } catch { return null; } };
+const setActingAs = target => sessionStorage.setItem(ACT_AS_KEY, JSON.stringify(target));
+const clearActingAs = () => sessionStorage.removeItem(ACT_AS_KEY);
+
 async function api(path, opts = {}) {
+  const actingAs = actingAsTarget();
   const res = await fetch(CONFIG.apiUrl + path, {
     method: opts.method || "GET",
-    headers: { "content-type": "application/json", authorization: "Bearer " + await getToken() },
+    headers: {
+      "content-type": "application/json", authorization: "Bearer " + await getToken(),
+      ...(actingAs ? { "x-act-as": actingAs.username } : {})
+    },
     body: opts.body ? JSON.stringify(opts.body) : undefined
   });
   if (res.status === 401) { logout(); throw new Error("Signed out"); }
@@ -18,6 +30,18 @@ async function api(path, opts = {}) {
 }
 
 async function loadPortalData() {
+  try {
+    await loadPortalDataOnce();
+  } catch (e) {
+    // A stale/invalid "acting as" target (e.g. removed after the session
+    // started) would otherwise 403/404 on every request and brick the app —
+    // drop back to the real admin's own identity and retry once.
+    if (actingAsTarget()) { clearActingAs(); await loadPortalDataOnce(); }
+    else throw e;
+  }
+}
+
+async function loadPortalDataOnce() {
   const [boot, deals, proposals, invoices, files, contracts, recurs] = await Promise.all([
     api("/bootstrap"), api("/deals"), api("/proposals"), api("/invoices"), api("/files"),
     api("/contracts"), api("/recurrences")
@@ -29,6 +53,8 @@ async function loadPortalData() {
   PEOPLE = boot.people;
   ROLE = boot.role;
   ME = boot.me;
+  ACTING_AS_BY = boot.actingAs || null;
+  if (!ACTING_AS_BY) clearActingAs(); // stale local state the server no longer recognizes
   MY_LABS = PEOPLE[ME]?.labs || [];
   // PRD 4: the full bench — every Lab Leader and Contributor, profile or not.
   BENCH = Object.entries(PEOPLE)
