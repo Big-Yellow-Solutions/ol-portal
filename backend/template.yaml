@@ -5,9 +5,13 @@ Description: OL Portal backend — DynamoDB data layer, Lambda API, Cognito auth
 Globals:
   Function:
     Runtime: nodejs24.x
-    Architectures: [arm64]
     Timeout: 10
     MemorySize: 256
+    # Architectures deliberately isn't set here: SAM's Globals merge
+    # concatenates list properties instead of overriding them, so a per-
+    # function override (needed by ContractPdfFunction, see below) combined
+    # with a Globals default here produces an invalid 2-element list. Every
+    # function below sets Architectures explicitly instead.
 
 Resources:
   FilesBucket:
@@ -34,6 +38,7 @@ Resources:
       FunctionName: ol-portal-analyzer
       CodeUri: src/
       Handler: analyzer.handler
+      Architectures: [arm64]
       Timeout: 300
       MemorySize: 512
       Environment:
@@ -128,6 +133,7 @@ Resources:
       FunctionName: ol-portal-auth-events
       CodeUri: src/
       Handler: authevents.handler
+      Architectures: [arm64]
       Environment:
         Variables:
           TABLE_NAME: !Ref PortalTable
@@ -192,6 +198,7 @@ Resources:
       FunctionName: ol-portal-recurring
       CodeUri: src/
       Handler: recurring.handler
+      Architectures: [arm64]
       Timeout: 60
       Environment:
         Variables:
@@ -217,6 +224,10 @@ Resources:
       FunctionName: ol-portal-contract-pdf
       CodeUri: src/pdf/
       Handler: index.handler
+      # @sparticuz/chromium@131 ships an x86_64-only Chromium build (no ARM
+      # binary yet, per its own README) — override the Globals arm64 default
+      # here or the bundled binary fails to exec on Lambda's Graviton runtime.
+      Architectures: [x86_64]
       # HTTP API caps integrations at 29s; headless-Chromium cold start + render
       # needs most of it. MemorySize is generous because Lambda CPU scales with
       # memory — Chromium launches noticeably faster above ~1.5GB.
@@ -251,6 +262,7 @@ Resources:
       FunctionName: ol-portal-api
       CodeUri: src/
       Handler: app.handler
+      Architectures: [arm64]
       # HTTP API caps responses at 29s; the AI proposal assistant needs most of it.
       Timeout: 28
       Environment:
