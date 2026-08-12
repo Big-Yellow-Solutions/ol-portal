@@ -222,9 +222,15 @@ function assignmentNoticeSummaryHTML(d, editable) {
   const rows = lines.map(({ key, label }) => {
     const sig = signed[key];
     const canSign = !sig && (key === "ol" ? ROLE === "Admin" : (ME === key || ROLE === "Admin"));
-    return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+    const status = sig
+      ? `<span class="sig-line">
+          <span class="sig-script">${escapeHtml(sig.name)}</span>
+          <small style="color:var(--ink-mute)">${escapeHtml(sig.verifiedName || "")} · signed ${sig.at.slice(0, 10)}</small>
+        </span>`
+      : '<span class="badge b-review"><i></i>Pending</span>';
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--paper)">
       <span style="flex:1;font-size:13px">${label}</span>
-      <span class="badge ${sig ? "b-won" : "b-review"}"><i></i>${sig ? `Signed ${sig.at.slice(0, 10)}` : "Pending"}</span>
+      ${status}
       ${canSign ? `<button class="btn-mini" data-sign="${key}">Sign</button>` : ""}
     </div>`;
   }).join("");
@@ -242,6 +248,46 @@ function assignmentNoticeSummaryHTML(d, editable) {
       ${rows}
       ${allSigned ? '<small style="color:var(--ink-mute);display:block;margin-top:8px">All parties have signed.</small>' : ""}
     </div>`;
+}
+
+/* In-portal signing: the signer types their name (pre-filled from their own
+   profile, editable) and confirms; the account is already verified by the
+   session, so this is the identity check plus explicit consent. */
+function openSignAssignmentModal(clientName, signerLabel, onSigned) {
+  const suggested = fullName(PEOPLE[ME]) || "";
+  const html = `
+    <div class="modal-head"><h2>Sign Assignment Notice</h2><button class="x" aria-label="Close">×</button></div>
+    <p class="sub">Signing for <b>${clientName}</b> as <b>${signerLabel}</b>.</p>
+    <label class="field f-wide">Type your name to sign
+      <input id="sigName" value="${escapeHtml(suggested)}" placeholder="Full name" autocomplete="off"></label>
+    <div class="sig-preview" id="sigPreview">${escapeHtml(suggested)}</div>
+    <label class="field f-check" style="margin-top:10px">
+      <input type="checkbox" id="sigAgree">
+      I agree this constitutes my electronic signature on this Assignment Notice.</label>
+    <div class="modal-foot">
+      <button class="pill pill-outline" id="sigCancel">Cancel</button>
+      <button class="pill pill-primary" id="sigSubmit" disabled>Sign</button>
+    </div>`;
+  const back = overlay(html, "modal");
+  const nameInput = back.querySelector("#sigName");
+  const preview = back.querySelector("#sigPreview");
+  const agree = back.querySelector("#sigAgree");
+  const submitBtn = back.querySelector("#sigSubmit");
+  const refresh = () => {
+    preview.textContent = nameInput.value.trim() || "Your signature";
+    submitBtn.disabled = !(nameInput.value.trim() && agree.checked);
+  };
+  nameInput.addEventListener("input", refresh);
+  agree.addEventListener("change", refresh);
+  refresh();
+  const close = () => back.remove();
+  back.querySelector(".x").onclick = back.querySelector("#sigCancel").onclick = close;
+  submitBtn.onclick = async () => {
+    submitBtn.disabled = true;
+    try { await onSigned(nameInput.value.trim()); close(); }
+    catch (ex) { alert(ex.message); submitBtn.disabled = false; }
+  };
+  nameInput.focus();
 }
 
 function wireOutcomeToggle(root, d) {
@@ -323,10 +369,13 @@ function openDealDrawer(id, onDone) {
     </div>`, "modal");
   if (editable) wireOutcomeToggle(back, d);
   back.querySelector(".x").onclick = back.querySelector("#dfCancel").onclick = () => back.remove();
-  back.querySelectorAll("[data-sign]").forEach(btn => btn.onclick = async () => {
-    btn.disabled = true;
-    try { await signAssignmentNotice(d.id, btn.dataset.sign); back.remove(); openDealDrawer(d.id, onDone); onDone && onDone(); }
-    catch (ex) { alert(ex.message); btn.disabled = false; }
+  back.querySelectorAll("[data-sign]").forEach(btn => btn.onclick = () => {
+    const key = btn.dataset.sign;
+    const label = key === "ol" ? "Optimistic Labs" : fullName(PEOPLE[key]);
+    openSignAssignmentModal(d.client, label, async typedName => {
+      await signAssignmentNotice(d.id, key, typedName);
+      back.remove(); openDealDrawer(d.id, onDone); onDone && onDone();
+    });
   });
   const anEditBtn = back.querySelector("#anEdit");
   if (anEditBtn) anEditBtn.onclick = () => {

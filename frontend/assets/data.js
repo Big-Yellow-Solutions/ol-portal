@@ -29,6 +29,8 @@ const stageLabel = d => d.stage === "Closed" ? "Closed " + d.outcome : d.stage;
 const stageClass = d => STAGE_CLASS[stageLabel(d)] || "b-lead";
 const fullName = p => [p?.firstName, p?.lastName].filter(Boolean).join(" ");
 const initials = p => ((p?.firstName || "")[0] || "") + ((p?.lastName || "")[0] || "");
+const ESCAPE_HTML_MAP = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const escapeHtml = s => String(s ?? "").replace(/[&<>"']/g, c => ESCAPE_HTML_MAP[c]);
 const faceHTML = p => p.photo
   ? `<img src="${p.photo}" alt="${fullName(p)}">`
   : `<span class="face">${initials(p)}</span>`;

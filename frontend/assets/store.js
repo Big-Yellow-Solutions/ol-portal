@@ -134,8 +134,8 @@ async function deleteDeal(id) {
   const i = DEALS.findIndex(x => x.id === id);
   if (i > -1) DEALS.splice(i, 1);
 }
-async function signAssignmentNotice(dealId, signerKey) {
-  const d = await api(`/deals/${dealId}/assignment-notice/sign`, { method: "POST", body: { signerKey } });
+async function signAssignmentNotice(dealId, signerKey, signatureText) {
+  const d = await api(`/deals/${dealId}/assignment-notice/sign`, { method: "POST", body: { signerKey, signatureText } });
   const i = DEALS.findIndex(x => x.id === dealId);
   if (i > -1) DEALS[i] = d;
   return d;

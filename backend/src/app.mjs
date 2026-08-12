@@ -219,9 +219,13 @@ async function updateDeal(ctx, id, body) {
   return resp(200, { id: sk, ...rest });
 }
 
-/* Lightweight "signature" like contracts (PRD 3.7 defers real e-signature): a
-   named person attests by hitting Sign, recorded server-side with their key
-   and a server timestamp. "ol" is the Optimistic Labs line, Admin-only. */
+/* In-portal e-signature for Assignment Notices: the signer types their name
+   while authenticated as themselves, so the "signature" is that typed text
+   plus the verified account it came from (who + when, server-stamped). This
+   is a lighter-weight scheme than a certified e-signature vendor (no drawn
+   signature, no external audit trail) but it's captured directly in the
+   portal instead of the manual "assume it's signed outside the system" model
+   contracts still use (PRD 3.7). "ol" is the Optimistic Labs line, Admin-only. */
 async function signAssignmentNotice(ctx, id, body) {
   const deal = await get("DEAL", id);
   if (!deal) return resp(404, { error: "deal not found" });
@@ -229,6 +233,9 @@ async function signAssignmentNotice(ctx, id, body) {
   if (deal.stage !== "Closed" || !deal.assignmentNotice)
     return resp(400, { error: "This deal has no Assignment Notice to sign" });
   const signerKey = body?.signerKey;
+  const signatureText = typeof body?.signatureText === "string" ? body.signatureText.trim() : "";
+  if (!signatureText) return resp(400, { error: "Type your name to sign" });
+  if (signatureText.length > 120) return resp(400, { error: "Signature is too long" });
   const isLabLeaderLine = deal.assignmentNotice.labLeaders.some(l => l.key === signerKey);
   if (signerKey !== "ol" && !isLabLeaderLine) return resp(400, { error: "unknown signer" });
   if (signerKey === "ol") {
@@ -238,7 +245,9 @@ async function signAssignmentNotice(ctx, id, body) {
   }
   const signatures = { ...(deal.assignmentNotice.signatures || {}) };
   if (signatures[signerKey]) return resp(409, { error: "This line is already signed" });
-  signatures[signerKey] = { by: ctx.me.sk, name: fullName(ctx.me), at: new Date().toISOString() };
+  signatures[signerKey] = {
+    by: ctx.me.sk, verifiedName: fullName(ctx.me), name: signatureText, at: new Date().toISOString()
+  };
   const next = { ...deal, assignmentNotice: { ...deal.assignmentNotice, signatures } };
   await put(next);
   const { pk, sk, ...rest } = next;
