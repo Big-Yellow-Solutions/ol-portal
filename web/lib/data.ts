@@ -26,9 +26,12 @@ export const STAGE_VARIANT: Record<Stage, BadgeVariant> = {
 
 export const PROPOSAL_VARIANT: Record<ProposalStatus, BadgeVariant> = {
   Draft: "outline",
-  "Internal Review": "secondary",
-  Final: "warning",
-  Sent: "success",
+  "In Review": "secondary",
+  "Internally Approved": "warning",
+  Sent: "warning",
+  "Customer Approved": "success",
+  "Customer Rejected": "destructive",
+  "Revision Requested": "destructive",
 };
 
 export const INVOICE_VARIANT: Record<InvoiceStatus, BadgeVariant> = {

@@ -8,7 +8,18 @@ export type Stage =
   | "Closed Won"
   | "Closed Lost";
 
-export type ProposalStatus = "Draft" | "Internal Review" | "Final" | "Sent";
+// Mirrors backend/src/proposals.mjs's PROPOSAL_STATUSES exactly — Lab Leaders
+// are restricted server-side to a subset (Draft/In Review/Sent) but the type
+// covers every status a proposal can carry once an Admin (or the customer
+// decision flow) moves it further.
+export type ProposalStatus =
+  | "Draft"
+  | "In Review"
+  | "Internally Approved"
+  | "Sent"
+  | "Customer Approved"
+  | "Customer Rejected"
+  | "Revision Requested";
 
 export type InvoiceStatus = "Requested" | "Sent to client" | "Paid";
 
@@ -53,19 +64,42 @@ export interface Deal {
   updatedAt?: string;
 }
 
+// Field names match backend/src/proposals.mjs's raw record shape (`lab`,
+// `deal`, `contributorName`/`contributorEmail`, etc.) rather than the
+// `...Id`/`...Username` naming used elsewhere in this file — the proposals
+// endpoints pass the DynamoDB item through almost unchanged, and a
+// Contributor is identified by name+email text, not a Person username.
+export interface ProposalVersionSnapshot {
+  v: number;
+  author?: string;
+  date?: string;
+  status?: ProposalStatus;
+  sections: Record<string, string>;
+}
+
 export interface Proposal {
   id: string;
-  dealId?: string;
+  deal?: string;
   title: string;
   client?: string;
-  labId: string;
+  lab: string;
+  owner?: string;
+  author?: string;
   status: ProposalStatus;
-  contributorUsername?: string;
+  contributorName?: string;
+  contributorEmail?: string;
   sections: Record<string, string>;
-  draftSections?: Record<string, string>;
   version: number;
-  draftAhead?: boolean;
-  createdAt: string;
+  dirty?: boolean;
+  final?: boolean;
+  finalVersion?: number;
+  versions?: ProposalVersionSnapshot[];
+  sentAt?: string;
+  sentVersion?: number;
+  sentSections?: Record<string, string>;
+  clientEmail?: string;
+  shareToken?: string;
+  createdAt?: string;
   updatedAt?: string;
 }
 
