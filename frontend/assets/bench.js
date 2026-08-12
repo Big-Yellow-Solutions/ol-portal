@@ -25,7 +25,7 @@ function renderBench() {
       if (active === "__sc" && p.role !== "Contributor") return false;
       if (active.startsWith("__lab:") && !(p.labs || []).includes(active.slice(6))) return false;
       if (active && !active.startsWith("__") && !b.specialties.includes(active)) return false;
-      return !q || p.name.toLowerCase().includes(q) || (b.blurb || "").toLowerCase().includes(q) ||
+      return !q || fullName(p).toLowerCase().includes(q) || (b.blurb || "").toLowerCase().includes(q) ||
         b.specialties.some(t => t.toLowerCase().includes(q));
     });
     document.getElementById("benchGrid").innerHTML = list.map(b => {
@@ -39,7 +39,7 @@ function renderBench() {
       const mine = b.key === ME;
       return `<div class="card person">
         <div class="top-row">${faceHTML(p)}
-          <div style="flex:1"><h3>${p.name}</h3><div class="role-line">${p.role}${labs ? " · " + labs : ""}</div></div>
+          <div style="flex:1"><h3>${fullName(p)}</h3><div class="role-line">${p.role}${labs ? " · " + labs : ""}</div></div>
           ${(mine || ROLE === "Admin") ? `<button class="btn-mini" data-edit="${b.key}" title="${mine ? "Edit my profile" : "Admin: edit profile"}">✎</button>` : ""}
         </div>
         <p class="blurb">${b.blurb || '<span style="color:var(--ink-mute)">No profile yet' + (mine ? " — add what people should engage you for." : ".") + "</span>"}</p>
@@ -97,7 +97,7 @@ function openProfileEditor(key, onDone) {
   const mine = key === ME;
   const back = overlay(`
     <div class="modal-head">
-      <div><h2>${mine ? "My profile" : p.name}</h2>
+      <div><h2>${mine ? "My profile" : fullName(p)}</h2>
         <small class="drawer-sub">Shown to everyone in the portal on the bench directory.</small></div>
       <button class="x" aria-label="Close">×</button>
     </div>
@@ -136,7 +136,7 @@ function openProfileEditor(key, onDone) {
   $$(".x").onclick = $$("#pfCancel").onclick = () => back.remove();
   $$("#pfPickPhoto").onclick = () => $$("#pfPhotoFile").click();
   const clearBtn = $$("#pfClearPhoto");
-  if (clearBtn) clearBtn.onclick = () => { photo = ""; $$("#pfFace").innerHTML = `<span class="face">${initials(p.name)}</span>`; };
+  if (clearBtn) clearBtn.onclick = () => { photo = ""; $$("#pfFace").innerHTML = `<span class="face">${initials(p)}</span>`; };
   $$("#pfPhotoFile").addEventListener("change", async e => {
     if (!e.target.files[0]) return;
     try {

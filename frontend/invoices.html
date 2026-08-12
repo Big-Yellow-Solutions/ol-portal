@@ -10,6 +10,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;1,500;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/portal.css">
+<style>
+  #invTable th[data-sort] { cursor: pointer; user-select: none; }
+  #invTable th[data-sort]:hover { color: var(--violet, #3D2FD4); }
+  #invTable th[data-sort].sorted::after { content: " ↓"; }
+  #invTable th[data-sort].sorted[data-dir="asc"]::after { content: " ↑"; }
+</style>
 </head>
 <body>
 <div class="shell">
@@ -24,16 +30,33 @@
           with no manual re-entry. Every request passes admin review before anything reaches a client.</p>
       </div>
 
-      <div class="controls">
-        <select id="ifLab" aria-label="Filter by lab"></select>
-        <select id="ifRequester" aria-label="Filter by requester"></select>
-      </div>
-
       <div class="card">
         <div class="card-head"><h2>Recent requests</h2></div>
+        <div class="controls">
+          <div class="search">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.5-4.5"/></svg>
+            <input id="ifSearch" type="search" placeholder="Search by client or requester…" aria-label="Search invoice requests">
+          </div>
+          <select id="ifLab" aria-label="Filter by lab"></select>
+          <select id="ifStatus" aria-label="Filter by status"></select>
+          <select id="ifCadence" aria-label="Filter by cadence">
+            <option value="">All cadences</option>
+            <option value="recurring">Recurring</option>
+            <option value="one-time">One-time</option>
+          </select>
+        </div>
+        <p class="count-note" id="invCount"></p>
         <div class="tbl-wrap">
-          <table>
-            <thead><tr><th>Client</th><th>Lab</th><th>Requested by</th><th>Amount</th><th>Cadence</th><th>Status</th><th>Date</th></tr></thead>
+          <table id="invTable">
+            <thead><tr>
+              <th data-sort="client">Client</th>
+              <th data-sort="lab">Lab</th>
+              <th data-sort="requestedBy">Requested by</th>
+              <th data-sort="amount">Amount</th>
+              <th data-sort="cadence">Cadence</th>
+              <th data-sort="status">Status</th>
+              <th data-sort="date">Date</th>
+            </tr></thead>
             <tbody id="invRows"></tbody>
           </table>
         </div>

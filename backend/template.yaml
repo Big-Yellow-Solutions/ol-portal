@@ -92,8 +92,8 @@ Resources:
           EmailSubject: You're invited to the Optimistic Labs Portal
           EmailMessage: >-
             Hi! You've been invited to the Optimistic Labs Portal.
-            Your username is {username} and your temporary password is {####}.
-            Sign in at https://main.d2rvkunvze2ixv.amplifyapp.com/login.html
+            Sign in with your email ({username}) and the temporary password
+            {####} at https://main.d2rvkunvze2ixv.amplifyapp.com/login.html
             within 7 days. You'll choose your own password and set up
             two-factor authentication on first sign-in.
       AutoVerifiedAttributes: [email]

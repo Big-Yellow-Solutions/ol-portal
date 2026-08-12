@@ -34,6 +34,7 @@ const SECTION_LABELS = {
 };
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt$ = n => Number.isFinite(n) ? "$" + n.toLocaleString("en-US") : "—";
+const fullName = p => [p?.firstName, p?.lastName].filter(Boolean).join(" ").trim();
 
 function identity(event) {
   const claims = event.requestContext?.authorizer?.jwt?.claims || {};
@@ -57,7 +58,7 @@ async function loadDocument(kind, id) {
       refLine: `${esc(c.sk)} &middot; prepared for <b>${esc(c.client)}</b>`,
       meta: [
         ["Lab", esc(lab?.name || c.lab)],
-        ["Lab Leader", esc(owner?.name || c.owner || "—")],
+        ["Lab Leader", esc(fullName(owner) || c.owner || "—")],
         ["Contract value", fmt$(c.amount)],
         ["Status", esc(c.status) + (c.signedAt ? " &middot; signed " + esc(c.signedAt.slice(0, 10)) : "")],
         ...(c.contributorName || c.contributorEmail
@@ -80,7 +81,7 @@ async function loadDocument(kind, id) {
       refLine: `${esc(p.sk)} &middot; prepared for <b>${esc(p.client)}</b> &middot; version ${esc(p.version)}`,
       meta: [
         ["Lab", esc(lab?.name || p.lab)],
-        ["Lab Leader", esc(owner?.name || deal?.owner || "—")],
+        ["Lab Leader", esc(fullName(owner) || deal?.owner || "—")],
         ...(deal?.amount != null ? [["Deal value", fmt$(deal.amount)]] : []),
         ["Status", esc(p.status)],
         ...(p.sentAt ? [["Sent to client", esc(p.sentAt.slice(0, 10)) + ` (v${esc(p.sentVersion)})`]] : []),

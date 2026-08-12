@@ -5,7 +5,7 @@
    auto-creates a contract (PRD 3.6). */
 
 import { randomBytes } from "node:crypto";
-import { resp, today, get, put, listType, nextId } from "./util.mjs";
+import { resp, today, get, put, listType, nextId, fullName } from "./util.mjs";
 import { createFromProposal } from "./contracts.mjs";
 import { writeAudit } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
@@ -192,17 +192,18 @@ export async function sendProposal(ctx, id, body) {
 
   const url = `${process.env.FRONTEND_URL}/proposal-view.html?token=${next.shareToken}`;
   const subject = `Your proposal from Optimistic Labs: ${p.title}`;
-  const text = `Hi,\n\n${ctx.me.name} at Optimistic Labs has sent you a proposal: "${p.title}".\n\n` +
+  const senderName = fullName(ctx.me);
+  const text = `Hi,\n\n${senderName} at Optimistic Labs has sent you a proposal: "${p.title}".\n\n` +
     `View it and let us know what you think: ${url}\n\n` +
     `Just reply to this email with any questions.\n\n— Optimistic Labs`;
-  const html = `<p>Hi,</p><p>${ctx.me.name} at Optimistic Labs has sent you a proposal: <b>${p.title}</b>.</p>` +
+  const html = `<p>Hi,</p><p>${senderName} at Optimistic Labs has sent you a proposal: <b>${p.title}</b>.</p>` +
     `<p><a href="${url}">View it and let us know what you think</a>.</p>` +
     `<p>Just reply to this email with any questions.</p><p>— Optimistic Labs</p>`;
 
   let emailSent = false, emailError;
   if (body?.sendEmail) {
     try {
-      await sendClientEmail({ sender: ctx.me, toEmail: clientEmail, subject, text, html });
+      await sendClientEmail({ sender: { ...ctx.me, name: senderName }, toEmail: clientEmail, subject, text, html });
       emailSent = true;
       await writeAudit(ctx.me.sk, "proposal.emailed", `${id} → ${clientEmail}`);
     } catch (err) {

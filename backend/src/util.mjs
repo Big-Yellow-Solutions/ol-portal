@@ -16,6 +16,7 @@ export const resp = (status, body) => ({
   body: JSON.stringify(body)
 });
 export const today = () => new Date().toISOString().slice(0, 10);
+export const fullName = p => [p?.firstName, p?.lastName].filter(Boolean).join(" ").trim();
 
 export const get = async (pk, sk) =>
   (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;

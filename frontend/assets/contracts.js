@@ -73,14 +73,14 @@ function renderContracts() {
     const inv = e.target.closest("[data-invite]");
     if (inv) {
       const c = CONTRACTS.find(x => x.id === inv.dataset.invite);
-      const name = prompt("Full name for the new portal account:", c.contributorName || "");
-      if (!name) return;
-      const username = prompt("Username (lowercase, e.g. first name):",
-        (c.contributorName || "").split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9]/g, "") || "");
-      if (!username) return;
+      const [suggestedFirst, ...suggestedRest] = (c.contributorName || "").split(/\s+/).filter(Boolean);
+      const firstName = prompt("First name for the new portal account:", suggestedFirst || "");
+      if (!firstName) return;
+      const lastName = prompt("Last name for the new portal account:", suggestedRest.join(" ") || "");
+      if (!lastName) return;
       inv.disabled = true;
       try {
-        await inviteContributor({ name, username, email: c.contributorEmail, labs: [c.lab] });
+        await inviteContributor({ firstName, lastName, email: c.contributorEmail, labs: [c.lab] });
         alert(`Invite sent to ${c.contributorEmail}. They get a temporary password valid 7 days.`);
       } catch (ex) { alert(ex.message); inv.disabled = false; }
       return;
