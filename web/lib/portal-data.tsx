@@ -4,11 +4,13 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
 import { api, actingAsTarget, clearActingAs } from "@/lib/api";
 import type {
+  ActingAs,
   Bootstrap,
   Contract,
   Deal,
@@ -23,6 +25,11 @@ import type {
 
 const WELCOME_SKIPPED_KEY = "olportal.welcomeSkipped";
 
+// `people` is keyed by username with the key stripped from each value
+// (mirrors bootstrap's raw response) — this re-attaches it for call sites
+// that need to identify who a Person is (e.g. bench directory cards).
+export type PersonWithUsername = Person & { username: string };
+
 interface PortalDataValue {
   loading: boolean;
   error: string | null;
@@ -30,9 +37,9 @@ interface PortalDataValue {
   people: Record<string, Person>;
   role: Role | null;
   me: string | null;
-  actingAsBy: string | null;
+  actingAs: ActingAs | null;
   myLabs: string[];
-  bench: Person[];
+  bench: PersonWithUsername[];
   deals: Deal[];
   proposals: Proposal[];
   invoices: InvoiceRequest[];
@@ -66,7 +73,7 @@ export function PortalDataProvider({
   const [people, setPeople] = useState<Record<string, Person>>({});
   const [role, setRole] = useState<Role | null>(null);
   const [me, setMe] = useState<string | null>(null);
-  const [actingAsBy, setActingAsBy] = useState<string | null>(null);
+  const [actingAs, setActingAsInfo] = useState<ActingAs | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRequest[]>([]);
@@ -74,44 +81,60 @@ export function PortalDataProvider({
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
 
-  const load = useCallback(async (retrying = false): Promise<void> => {
+  const fetchAll = useCallback(async (): Promise<void> => {
+    const [bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes, recurrencesRes] =
+      await Promise.all([
+        api<Bootstrap>("/bootstrap"),
+        api<Deal[]>("/deals"),
+        api<Proposal[]>("/proposals"),
+        api<InvoiceRequest[]>("/invoices"),
+        api<FileRecord[]>("/files"),
+        api<Contract[]>("/contracts"),
+        api<Recurrence[]>("/recurrences"),
+      ]);
+    setLabs(Object.entries(bootstrap.labs).map(([id, lab]) => ({ id, name: lab.name })));
+    setPeople(bootstrap.people);
+    setRole(bootstrap.role);
+    setMe(bootstrap.me);
+    setActingAsInfo(bootstrap.actingAs ?? null);
+    setDeals(dealsRes);
+    setProposals(proposalsRes);
+    setInvoices(invoicesRes);
+    setFiles(filesRes);
+    setContracts(contractsRes);
+    setRecurrences(recurrencesRes);
+  }, []);
+
+  const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
     try {
-      const [bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes, recurrencesRes] =
-        await Promise.all([
-          api<Bootstrap>("/bootstrap"),
-          api<Deal[]>("/deals"),
-          api<Proposal[]>("/proposals"),
-          api<InvoiceRequest[]>("/invoices"),
-          api<FileRecord[]>("/files"),
-          api<Contract[]>("/contracts"),
-          api<Recurrence[]>("/recurrences"),
-        ]);
-      setLabs(bootstrap.labs);
-      setPeople(bootstrap.people);
-      setRole(bootstrap.role);
-      setMe(bootstrap.me);
-      setActingAsBy(bootstrap.actingAs ?? null);
-      setDeals(dealsRes);
-      setProposals(proposalsRes);
-      setInvoices(invoicesRes);
-      setFiles(filesRes);
-      setContracts(contractsRes);
-      setRecurrences(recurrencesRes);
+      await fetchAll();
     } catch (err) {
       // A stale "act as" target can make bootstrap fail; retry once clean.
-      if (!retrying && actingAsTarget()) {
+      if (actingAsTarget()) {
         clearActingAs();
-        return load(true);
+        try {
+          await fetchAll();
+        } catch (retryErr) {
+          setError(retryErr instanceof Error ? retryErr.message : "Failed to load portal data");
+        }
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load portal data");
       }
-      setError(err instanceof Error ? err.message : "Failed to load portal data");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fetchAll]);
 
-  const refresh = useCallback(() => load(false), [load]);
+  const refresh = useCallback(() => load(), [load]);
+
+  useEffect(() => {
+    load();
+    // Intentionally run once on mount — `load` only changes identity if
+    // `fetchAll` does, which never does (empty dep array).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const refreshFiles = useCallback(async () => {
     setFiles(await api<FileRecord[]>("/files"));
@@ -134,7 +157,10 @@ export function PortalDataProvider({
     return people[me]?.labs ?? [];
   }, [me, people]);
 
-  const bench = useMemo(() => Object.values(people), [people]);
+  const bench = useMemo(
+    () => Object.entries(people).map(([username, p]) => ({ ...p, username })),
+    [people]
+  );
 
   const value = useMemo<PortalDataValue>(
     () => ({
@@ -144,7 +170,7 @@ export function PortalDataProvider({
       people,
       role,
       me,
-      actingAsBy,
+      actingAs,
       myLabs,
       bench,
       deals,
@@ -171,7 +197,7 @@ export function PortalDataProvider({
       people,
       role,
       me,
-      actingAsBy,
+      actingAs,
       myLabs,
       bench,
       deals,

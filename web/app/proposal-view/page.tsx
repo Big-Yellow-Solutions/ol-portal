@@ -8,13 +8,33 @@ import { Input } from "@/components/ui/input";
 import { publicApi } from "@/lib/public-api";
 import { SECTION_LABELS } from "@/lib/types";
 
+// Matches backend/src/proposals.mjs's shareView/shareDecision response
+// shapes exactly.
+type DecisionAction = "approve" | "reject" | "revision";
+
+interface Decision {
+  action: DecisionAction;
+  comment?: string;
+  name?: string;
+  at: string;
+  version: number;
+}
+
 interface SharedProposal {
   title: string;
   client?: string;
   version: number;
+  sentAt: string;
+  status: string;
   sections: Record<string, string>;
-  decision?: { action: string; name: string; comment?: string } | null;
+  decision: Decision | null;
 }
+
+const ACTION_LABEL: Record<DecisionAction, string> = {
+  approve: "Approve",
+  reject: "Decline",
+  revision: "Request revisions",
+};
 
 export default function ProposalSharePage() {
   return (
@@ -34,9 +54,7 @@ function ProposalShareView() {
   const token = useSearchParams().get("token");
   const [proposal, setProposal] = useState<SharedProposal | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [showDecisionForm, setShowDecisionForm] = useState<
-    "Approve" | "Request revisions" | "Decline" | null
-  >(null);
+  const [showDecisionForm, setShowDecisionForm] = useState<DecisionAction | null>(null);
   const [name, setName] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -51,15 +69,31 @@ function ProposalShareView() {
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load proposal."));
   }, [token]);
 
-  const submitDecision = async (action: string) => {
+  const submitDecision = async (action: DecisionAction) => {
     if (!token) return;
     setSubmitting(true);
     try {
-      await publicApi(`/share/${token}/decision`, {
-        method: "POST",
-        body: JSON.stringify({ action, name, comment }),
-      });
-      setProposal((p) => (p ? { ...p, decision: { action, name, comment } } : p));
+      const result = await publicApi<{ recorded: DecisionAction }>(
+        `/share/${token}/decision`,
+        {
+          method: "POST",
+          body: JSON.stringify({ action, name, comment }),
+        }
+      );
+      setProposal((p) =>
+        p
+          ? {
+              ...p,
+              decision: {
+                action: result.recorded,
+                name,
+                comment,
+                at: new Date().toISOString(),
+                version: p.version,
+              },
+            }
+          : p
+      );
       setShowDecisionForm(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not submit your decision.");
@@ -95,7 +129,7 @@ function ProposalShareView() {
 
             {proposal.decision ? (
               <div className="mt-8 rounded-md bg-violet-pale p-4 text-sm text-ink">
-                Decision recorded: <strong>{proposal.decision.action}</strong>
+                Decision recorded: <strong>{ACTION_LABEL[proposal.decision.action]}</strong>
                 {proposal.decision.name && ` by ${proposal.decision.name}`}
               </div>
             ) : showDecisionForm ? (
@@ -117,7 +151,7 @@ function ProposalShareView() {
                     onClick={() => submitDecision(showDecisionForm)}
                     className="bg-violet-deep hover:bg-violet"
                   >
-                    Confirm {showDecisionForm.toLowerCase()}
+                    Confirm {ACTION_LABEL[showDecisionForm].toLowerCase()}
                   </Button>
                   <Button variant="outline" onClick={() => setShowDecisionForm(null)}>
                     Cancel
@@ -128,20 +162,17 @@ function ProposalShareView() {
               <div className="mt-8 flex flex-wrap gap-3">
                 <Button
                   className="bg-green hover:bg-green/90"
-                  onClick={() => setShowDecisionForm("Approve")}
+                  onClick={() => setShowDecisionForm("approve")}
                 >
                   Approve
                 </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setShowDecisionForm("Request revisions")}
-                >
+                <Button variant="outline" onClick={() => setShowDecisionForm("revision")}>
                   Request revisions
                 </Button>
                 <Button
                   variant="outline"
                   className="border-red text-red hover:bg-red-pale"
-                  onClick={() => setShowDecisionForm("Decline")}
+                  onClick={() => setShowDecisionForm("reject")}
                 >
                   Decline
                 </Button>

@@ -20,8 +20,7 @@ export const STAGE_VARIANT: Record<Stage, BadgeVariant> = {
   Discovery: "secondary",
   "Proposal Sent": "warning",
   Negotiating: "warning",
-  "Closed Won": "success",
-  "Closed Lost": "destructive",
+  Closed: "success",
 };
 
 export const PROPOSAL_VARIANT: Record<ProposalStatus, BadgeVariant> = {
@@ -35,9 +34,10 @@ export const PROPOSAL_VARIANT: Record<ProposalStatus, BadgeVariant> = {
 };
 
 export const INVOICE_VARIANT: Record<InvoiceStatus, BadgeVariant> = {
-  Requested: "outline",
+  "Admin review": "outline",
   "Sent to client": "warning",
   Paid: "success",
+  Overdue: "destructive",
 };
 
 export const CONTRACT_VARIANT: Record<ContractStatus, BadgeVariant> = {

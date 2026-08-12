@@ -31,14 +31,14 @@ export default function DashboardPage() {
   const { deals, invoices, files, labs, people, me } = usePortalData();
 
   const meRecord = me ? people[me] : undefined;
-  const openDeals = deals.filter((d) => !d.stage.startsWith("Closed"));
-  const pipelineValue = openDeals.reduce((sum, d) => sum + (d.value ?? 0), 0);
+  const openDeals = deals.filter((d) => d.stage !== "Closed");
+  const pipelineValue = openDeals.reduce((sum, d) => sum + (d.amount ?? 0), 0);
   const closedWonValue = deals
-    .filter((d) => d.stage === "Closed Won")
-    .reduce((sum, d) => sum + (d.value ?? 0), 0);
+    .filter((d) => d.stage === "Closed" && d.outcome === "Won")
+    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
   const openInvoices = invoices.filter((i) => i.status !== "Paid");
 
-  const stageBars = STAGES.filter((s) => !s.startsWith("Closed")).map((stage) => ({
+  const stageBars = STAGES.filter((s) => s !== "Closed").map((stage) => ({
     stage,
     count: deals.filter((d) => d.stage === stage).length,
   }));
@@ -47,17 +47,17 @@ export default function DashboardPage() {
     .map((lab) => ({
       name: lab.name,
       value: openDeals
-        .filter((d) => d.labId === lab.id)
-        .reduce((sum, d) => sum + (d.value ?? 0), 0),
+        .filter((d) => d.lab === lab.id)
+        .reduce((sum, d) => sum + (d.amount ?? 0), 0),
     }))
     .filter((d) => d.value > 0);
 
   const recentDeals = [...deals]
-    .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))
+    .sort((a, b) => (b.close > a.close ? 1 : -1))
     .slice(0, 5);
 
   const recentFiles = [...files]
-    .sort((a, b) => (b.createdAt > a.createdAt ? 1 : -1))
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
     .slice(0, 5);
 
   return (
@@ -133,13 +133,17 @@ export default function DashboardPage() {
                 {recentDeals.map((deal) => (
                   <li key={deal.id} className="flex items-center justify-between py-2">
                     <Link href="/pipeline" className="text-sm text-ink hover:text-violet-deep">
-                      {deal.name}
+                      {deal.client}
                     </Link>
                     <div className="flex items-center gap-3">
                       <span className="text-sm tabular-nums text-ink-mute">
-                        {fmtDollars(deal.value)}
+                        {fmtDollars(deal.amount)}
                       </span>
-                      <Badge variant={STAGE_VARIANT[deal.stage]}>{deal.stage}</Badge>
+                      <Badge variant={STAGE_VARIANT[deal.stage]}>
+                        {deal.stage === "Closed" && deal.outcome
+                          ? `Closed ${deal.outcome}`
+                          : deal.stage}
+                      </Badge>
                     </div>
                   </li>
                 ))}

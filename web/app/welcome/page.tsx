@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
 import { useAuth } from "@/lib/auth";
 import { PortalDataProvider, usePortalData, WELCOME_SKIPPED_KEY } from "@/lib/portal-data";
 import { api } from "@/lib/api";
@@ -43,16 +42,14 @@ function WelcomeForm() {
 
   const [blurb, setBlurb] = useState("");
   const [specialties, setSpecialties] = useState("");
-  const [visible, setVisible] = useState(true);
   const [photo, setPhoto] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (meRecord) {
-      setBlurb(meRecord.blurb ?? "");
-      setSpecialties((meRecord.specialties ?? []).join(", "));
-      setVisible(meRecord.visible ?? true);
+      setBlurb(meRecord.bench?.blurb ?? "");
+      setSpecialties((meRecord.bench?.specialties ?? []).join(", "));
       setPhoto(meRecord.photo);
     }
   }, [meRecord]);
@@ -83,7 +80,6 @@ function WelcomeForm() {
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean),
-          visible,
           photo,
           onboarded: true,
         }),
@@ -132,11 +128,6 @@ function WelcomeForm() {
             <Label>Specialties (comma-separated)</Label>
             <Input value={specialties} onChange={(e) => setSpecialties(e.target.value)} />
           </div>
-
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <Checkbox checked={visible} onCheckedChange={(c) => setVisible(!!c)} />
-            List me in the Bench Directory
-          </label>
 
           {error && <p className="text-sm text-red">{error}</p>}
 

@@ -20,8 +20,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { fullName, initials } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { readPhoto } from "@/lib/photo";
-import { usePortalData } from "@/lib/portal-data";
-import type { Person } from "@/lib/types";
+import { usePortalData, type PersonWithUsername } from "@/lib/portal-data";
 
 type Filter =
   | { kind: "all" }
@@ -53,15 +52,15 @@ export default function BenchPage() {
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
-    for (const p of bench) for (const t of p.specialties ?? []) tags.add(t);
+    for (const p of bench) for (const t of p.bench?.specialties ?? []) tags.add(t);
     return [...tags].sort();
   }, [bench]);
 
+  // Every Lab Leader and Contributor is listed — the backend has no
+  // per-person "hide me from the directory" flag, only contact-visibility
+  // toggles (bench.showEmail/showPhone), enforced server-side in bootstrap.
   const visiblePeople = useMemo(
-    () =>
-      bench.filter(
-        (p) => (p.role === "Lab Leader" || p.role === "Contributor") && p.visible !== false
-      ),
+    () => bench.filter((p) => p.role === "Lab Leader" || p.role === "Contributor"),
     [bench]
   );
 
@@ -71,11 +70,12 @@ export default function BenchPage() {
       if (filter.kind === "lab-leaders" && p.role !== "Lab Leader") return false;
       if (filter.kind === "contributors" && p.role !== "Contributor") return false;
       if (filter.kind === "lab" && !(p.labs ?? []).includes(filter.labId)) return false;
-      if (filter.kind === "tag" && !(p.specialties ?? []).includes(filter.tag)) return false;
+      if (filter.kind === "tag" && !(p.bench?.specialties ?? []).includes(filter.tag))
+        return false;
       if (!q) return true;
       const name = fullName(p).toLowerCase();
-      const blurb = (p.blurb ?? "").toLowerCase();
-      const specialties = p.specialties ?? [];
+      const blurb = (p.bench?.blurb ?? "").toLowerCase();
+      const specialties = p.bench?.specialties ?? [];
       return (
         name.includes(q) ||
         blurb.includes(q) ||
@@ -174,10 +174,11 @@ export default function BenchPage() {
         server enforces it, so hidden details never leave the API.
       </p>
 
-      {editingPerson && (
+      {editingPerson && editingKey && (
         <EditProfileDialog
           person={editingPerson}
-          mine={editingPerson.username === me}
+          username={editingKey}
+          mine={editingKey === me}
           open={!!editingKey}
           onOpenChange={(open) => {
             if (!open) setEditingKey(null);
@@ -199,7 +200,7 @@ function PersonCard({
   canEdit,
   onEdit,
 }: {
-  person: Person;
+  person: PersonWithUsername;
   labs: { id: string; name: string }[];
   mine: boolean;
   canEdit: boolean;
@@ -208,6 +209,7 @@ function PersonCard({
   const labNames = (person.labs ?? [])
     .map((id) => labs.find((l) => l.id === id)?.name ?? id)
     .join(", ");
+  const specialties = person.bench?.specialties ?? [];
 
   return (
     <div className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
@@ -236,10 +238,10 @@ function PersonCard({
       </div>
 
       <p className="text-sm text-ink">
-        {person.blurb ? (
+        {person.bench?.blurb ? (
           <>
             <span className="text-ink-mute">Engage for: </span>
-            {person.blurb}
+            {person.bench.blurb}
           </>
         ) : (
           <span className="text-ink-mute">
@@ -248,13 +250,20 @@ function PersonCard({
         )}
       </p>
 
-      {person.specialties && person.specialties.length > 0 && (
+      {specialties.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
-          {person.specialties.map((t) => (
+          {specialties.map((t) => (
             <Badge key={t} variant="secondary">
               {t}
             </Badge>
           ))}
+        </div>
+      )}
+
+      {(person.bench?.email || person.bench?.phone) && (
+        <div className="text-xs text-ink-mute">
+          {person.bench?.email && <div>{person.bench.email}</div>}
+          {person.bench?.phone && <div>{person.bench.phone}</div>}
         </div>
       )}
     </div>
@@ -263,20 +272,27 @@ function PersonCard({
 
 function EditProfileDialog({
   person,
+  username,
   mine,
   open,
   onOpenChange,
   onSaved,
 }: {
-  person: Person;
+  person: import("@/lib/types").Person;
+  username: string;
   mine: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
 }) {
-  const [blurb, setBlurb] = useState(person.blurb ?? "");
-  const [specialties, setSpecialties] = useState((person.specialties ?? []).join(", "));
-  const [visible, setVisible] = useState(person.visible ?? true);
+  const [blurb, setBlurb] = useState(person.bench?.blurb ?? "");
+  const [specialties, setSpecialties] = useState(
+    (person.bench?.specialties ?? []).join(", ")
+  );
+  const [contactEmail, setContactEmail] = useState(person.bench?.email ?? "");
+  const [phone, setPhone] = useState(person.bench?.phone ?? "");
+  const [showEmail, setShowEmail] = useState(person.bench?.showEmail ?? true);
+  const [showPhone, setShowPhone] = useState(person.bench?.showPhone ?? false);
   const [photo, setPhoto] = useState<string | undefined>(person.photo);
   const [saving, setSaving] = useState(false);
 
@@ -293,7 +309,7 @@ function EditProfileDialog({
   const save = async () => {
     setSaving(true);
     try {
-      const path = mine ? "/profile" : `/profile/${person.username}`;
+      const path = mine ? "/profile" : `/profile/${username}`;
       await api(path, {
         method: "PATCH",
         body: JSON.stringify({
@@ -302,7 +318,10 @@ function EditProfileDialog({
             .split(",")
             .map((s) => s.trim())
             .filter(Boolean),
-          visible,
+          email: contactEmail,
+          phone,
+          showEmail,
+          showPhone,
           photo,
         }),
       });
@@ -359,9 +378,27 @@ function EditProfileDialog({
             />
           </div>
 
+          <div className="flex flex-col gap-1.5">
+            <Label>Contact email (shown on your card unless hidden below)</Label>
+            <Input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+            />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label>Phone (hidden unless you opt in below)</Label>
+            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+          </div>
+
           <label className="flex items-center gap-2 text-sm text-ink">
-            <Checkbox checked={visible} onCheckedChange={(c) => setVisible(!!c)} />
-            Visible in the bench directory
+            <Checkbox checked={showEmail} onCheckedChange={(c) => setShowEmail(!!c)} />
+            Show my email on the bench directory
+          </label>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <Checkbox checked={showPhone} onCheckedChange={(c) => setShowPhone(!!c)} />
+            Show my phone on the bench directory
           </label>
         </div>
 
