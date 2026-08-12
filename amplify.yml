@@ -8,6 +8,14 @@ frontend:
     build:
       commands:
         - npm run build
+    postBuild:
+      commands:
+        # Next's static export writes out/pipeline.html but no
+        # out/pipeline/index.html, so /pipeline resolves while /pipeline/
+        # 404s on a directory that holds only RSC payloads. Mirror every page
+        # into a directory index so both spellings resolve to the same page.
+        - cd out
+        - find . -name '*.html' ! -name 'index.html' -exec sh -c 'd="${1%.html}"; mkdir -p "$d" && cp "$1" "$d/index.html"' _ {} \;
   artifacts:
     baseDirectory: web/out
     files:
