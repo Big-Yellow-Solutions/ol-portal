@@ -15,6 +15,7 @@ import * as contracts from "./contracts.mjs";
 import * as recurring from "./recurring.mjs";
 import * as assist from "./assist.mjs";
 import * as profile from "./profile.mjs";
+import { fullName } from "./util.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -87,7 +88,7 @@ async function bootstrap(ctx) {
   const [labs, people] = await Promise.all([listType("LAB"), listType("PERSON")]);
   return resp(200, {
     me: ctx.me.sk, role: ctx.role,
-    ...(ctx.actingAs ? { actingAs: { by: ctx.realMe.sk, byName: ctx.realMe.name } } : {}),
+    ...(ctx.actingAs ? { actingAs: { by: ctx.realMe.sk, byName: fullName(ctx.realMe) } } : {}),
     labs: Object.fromEntries(labs.map(({ pk, sk, ...l }) => [sk, l])),
     people: Object.fromEntries(people.map(({ pk, sk, ...p }) =>
       [sk, profile.publicView(p, ctx.me.sk, ctx.role, sk)]))

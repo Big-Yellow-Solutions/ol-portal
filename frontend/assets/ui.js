@@ -18,9 +18,9 @@ function overlay(html, cls) {
 const labOptions = sel => assignableLabs()
   .map(k => `<option value="${k}"${k === sel ? " selected" : ""}>${LABS[k].name}</option>`).join("");
 const ownerOptions = sel => Object.entries(PEOPLE).filter(([, p]) => p.role === "Lab Leader")
-  .map(([k, p]) => `<option value="${k}"${k === sel ? " selected" : ""}>${p.name}</option>`).join("");
+  .map(([k, p]) => `<option value="${k}"${k === sel ? " selected" : ""}>${fullName(p)}</option>`).join("");
 const dealOwnerOptions = sel => Object.entries(PEOPLE).filter(([, p]) => p.role === "Lab Leader" || p.role === "Admin")
-  .map(([k, p]) => `<option value="${k}"${k === sel ? " selected" : ""}>${p.name}</option>`).join("");
+  .map(([k, p]) => `<option value="${k}"${k === sel ? " selected" : ""}>${fullName(p)}</option>`).join("");
 const stageOptions = (d) => STAGES.map(s =>
   `<option value="${s}"${(d && d.stage === s) ? " selected" : ""}>${s}</option>`).join("");
 
@@ -204,7 +204,7 @@ function openDealDrawer(id, onDone) {
   const back = overlay(`
     <div class="modal-head">
       <div><h2>${d.client}</h2>
-        <small class="drawer-sub">${d.id} · ${LABS[d.lab].name} · owned by ${PEOPLE[d.owner].name}</small></div>
+        <small class="drawer-sub">${d.id} · ${LABS[d.lab].name} · owned by ${fullName(PEOPLE[d.owner])}</small></div>
       <button class="x" aria-label="Close">×</button>
     </div>
     ${editable ? dealFormHTML(d) : `

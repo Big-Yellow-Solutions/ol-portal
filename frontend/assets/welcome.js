@@ -22,7 +22,7 @@ async function renderWelcome() {
 
   card.innerHTML = `
     <img class="logo" src="assets/ol-logo.svg" alt="Optimistic Labs">
-    <h1>Welcome, ${me.name.split(" ")[0]}</h1>
+    <h1>Welcome, ${me.firstName}</h1>
     <p class="lead">Your account is set. This is the part other people see: it puts you on the
       bench directory so the right work finds you. Two minutes, and you can change any of it later.</p>
 
@@ -73,7 +73,7 @@ async function renderWelcome() {
   $("welPick").onclick = () => $("welFile").click();
   if ($("welClear")) $("welClear").onclick = () => {
     photo = "";
-    $("welFace").innerHTML = `<span class="face">${initials(me.name)}</span>`;
+    $("welFace").innerHTML = `<span class="face">${initials(me)}</span>`;
   };
   $("welFile").addEventListener("change", async e => {
     if (!e.target.files[0]) return;

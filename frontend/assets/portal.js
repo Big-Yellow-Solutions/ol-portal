@@ -33,7 +33,7 @@ function renderActingAsBanner() {
   const bar = existing || document.createElement("div");
   bar.id = "actAsBanner";
   bar.className = "act-as-banner";
-  bar.innerHTML = `${ACTING_AS_BY.byName} is viewing/acting as <b>${me.name}</b> (${me.role})
+  bar.innerHTML = `${ACTING_AS_BY.byName} is viewing/acting as <b>${fullName(me)}</b> (${me.role})
     <button id="actAsExit" type="button">Exit</button>`;
   if (!existing) document.body.prepend(bar);
   document.getElementById("actAsExit").onclick = async () => {
@@ -59,7 +59,7 @@ function buildShell(pageTitle) {
     <div class="side-logo"><img src="assets/ol-logo-white.svg" alt="Optimistic Labs"></div>
     <div class="side-tag">The Portal</div>
     <div class="side-label">Workspace</div>${nav}
-    <div class="side-foot">Signed in as ${PEOPLE[ME].name}<br>
+    <div class="side-foot">Signed in as ${fullName(PEOPLE[ME])}<br>
       <a href="#" id="signOut" style="color:var(--violet-light);font-weight:600">Sign out</a></div>`;
 
   const me = PEOPLE[ME];
@@ -68,7 +68,7 @@ function buildShell(pageTitle) {
     <span class="top-title">${pageTitle}</span>
     <div class="top-right">
       <span class="top-role">${ROLE}</span>
-      <span class="top-ava" title="${me.name} (${ROLE})">${faceHTML(me)}</span>
+      <span class="top-ava" title="${fullName(me)} (${ROLE})">${faceHTML(me)}</span>
     </div>`;
 
   document.getElementById("signOut").addEventListener("click", e => { e.preventDefault(); logout(); });
@@ -91,7 +91,7 @@ const labCell = key => {
 };
 const personCell = key => {
   const p = PEOPLE[key];
-  return `<span class="who">${faceHTML(p)}<span><b>${p.name}</b><small>${p.role}</small></span></span>`;
+  return `<span class="who">${faceHTML(p)}<span><b>${fullName(p)}</b><small>${p.role}</small></span></span>`;
 };
 
 function dealRows(deals) {
@@ -122,7 +122,7 @@ function renderDashboard() {
         .map(d => ({ lab: d.lab, owner: d.owner, amount: Math.round(d.amount / 12) }));
   const mrr = mrrItems.reduce((s, x) => s + x.amount, 0);
 
-  document.getElementById("helloName").textContent = PEOPLE[ME].name.split(" ")[0];
+  document.getElementById("helloName").textContent = PEOPLE[ME].firstName;
 
   document.getElementById("bannerStats").innerHTML = `
     <div class="banner-chip"><b>${open.length}</b><span>Open deals</span></div>
@@ -197,7 +197,7 @@ function renderDashboard() {
     ...props.filter(p => p.status === "In Review").map(p =>
       ({ c: "var(--amber)", t: "Proposal awaiting admin review", s: p.title })),
     ...invs.filter(i => i.status === "Admin review").map(i =>
-      ({ c: "var(--violet)", t: "Invoice request to review: " + fmt$(i.amount), s: i.client + " · requested by " + PEOPLE[i.requestedBy].name })),
+      ({ c: "var(--violet)", t: "Invoice request to review: " + fmt$(i.amount), s: i.client + " · requested by " + fullName(PEOPLE[i.requestedBy]) })),
     ...props.filter(p => p.status === "Revision Requested").map(p =>
       ({ c: "var(--red)", t: "Client requested revisions", s: p.title }))
   ];
@@ -229,7 +229,7 @@ function renderDashboard() {
           <div><h3 style="margin:0 0 8px;font-size:13px;color:var(--ink-mute)">BY LAB</h3>
             ${rows(groupSum("lab"), k => LABS[k]?.name || k)}</div>
           <div><h3 style="margin:0 0 8px;font-size:13px;color:var(--ink-mute)">BY LAB LEADER</h3>
-            ${rows(groupSum("owner"), k => PEOPLE[k]?.name || k)}</div>
+            ${rows(groupSum("owner"), k => fullName(PEOPLE[k]) || k)}</div>
         </div>
         <small style="display:block;margin-top:10px;color:var(--ink-mute)">Org-wide MRR: <b>${fmt$(mrr)}</b> · ${monthInstances.length ? "from this month's generated instances" : "projected from recurring Closed-Won deals"}</small>`;
     }
@@ -244,7 +244,7 @@ function renderDashboard() {
         <span class="dot" style="background:${f.status === "Analyzed" ? "var(--green, #3B6D11)" : "var(--amber, #BA7517)"};margin-top:6px"></span>
         <span style="min-width:0">
           <b>${f.name}</b> <span class="badge ${FILE_CLASS[f.status] || "b-draft"}" style="margin-left:6px"><i></i>${f.status}</span>
-          <small style="display:block">${f.analysis ? f.analysis.summary : "Uploaded by " + (PEOPLE[f.uploader]?.name || f.uploader)}</small>
+          <small style="display:block">${f.analysis ? f.analysis.summary : "Uploaded by " + (fullName(PEOPLE[f.uploader]) || f.uploader)}</small>
         </span>
       </div>`).join("") + '<a class="more" href="files.html" style="display:inline-block;margin-top:10px">All files →</a>'
       : '<div class="empty">No files yet. <a href="files.html">Upload the first one</a> and the analysis will appear here.</div>';
@@ -274,7 +274,7 @@ function renderFiles() {
           <span class="badge ${FILE_CLASS[f.status] || "b-draft"}" style="margin-left:8px"><i></i>${f.status}</span>
           ${f.lab && LABS[f.lab] ? `<span class="lab-dot" style="margin-left:8px"><i style="background:${LABS[f.lab].color}"></i>${LABS[f.lab].name}</span>` : ""}
           <small style="display:block;color:var(--ink-mute)">
-            ${fmtBytes(f.size)} · uploaded by ${PEOPLE[f.uploader]?.name || f.uploader} · ${(f.date || "").slice(0, 10)}
+            ${fmtBytes(f.size)} · uploaded by ${fullName(PEOPLE[f.uploader]) || f.uploader} · ${(f.date || "").slice(0, 10)}
             ${f.analysis?.docType ? " · " + f.analysis.docType : ""}
           </small>
           ${f.analysis?.summary ? `<small style="display:block;margin-top:4px">${f.analysis.summary}</small>` : ""}
@@ -342,7 +342,7 @@ function renderPipeline() {
     labKeys.map(k => `<option value="${k}">${LABS[k].name}</option>`).join("");
   const owners = [...new Set(mine.map(d => d.owner))];
   ownerSel.innerHTML = '<option value="">All lab leaders</option>' +
-    owners.map(k => `<option value="${k}">${PEOPLE[k].name}</option>`).join("");
+    owners.map(k => `<option value="${k}">${fullName(PEOPLE[k])}</option>`).join("");
 
   if (can.addDeal()) {
     const btn = document.createElement("button");
@@ -368,7 +368,7 @@ function renderPipeline() {
             <b>${d.client}</b>
             <div class="meta">${labCell(d.lab)}</div>
             <div class="amt">${fmt$(d.amount)}</div>
-            <div class="foot">${faceHTML(PEOPLE[d.owner])} ${PEOPLE[d.owner].name.split(" ")[0]} · closes ${d.close.slice(5).replace("-", "/")}
+            <div class="foot">${faceHTML(PEOPLE[d.owner])} ${PEOPLE[d.owner].firstName} · closes ${d.close.slice(5).replace("-", "/")}
               ${d.stage === "Closed" ? `<span class="badge ${stageClass(d)}" style="margin-left:auto"><i></i>${d.outcome}</span>` : d.recurring ? '<span class="rec">↻ RECURRING</span>' : ""}</div>
           </div>`).join("") || '<div class="empty" style="padding:18px 0;font-size:12px">No deals</div>'}
       </div>`;
@@ -393,9 +393,54 @@ function renderPipeline() {
 /* ---------- proposals: see assets/proposals.js (editor, send, AI assist) ---------- */
 
 /* ---------- invoices ---------- */
+const INVOICE_SORTERS = {
+  client: i => (i.client || "").toLowerCase(),
+  lab: i => (LABS[i.lab]?.name || i.lab || "").toLowerCase(),
+  requestedBy: i => fullName(PEOPLE[i.requestedBy]).toLowerCase(),
+  amount: i => i.amount || 0,
+  cadence: i => i.recurring ? 1 : 0,
+  status: i => i.status || "",
+  date: i => i.date || ""
+};
+
 function renderInvoices() {
+  const labSel = document.getElementById("ifLab"), statusSel = document.getElementById("ifStatus"),
+    cadenceSel = document.getElementById("ifCadence"), search = document.getElementById("ifSearch");
+  let sortKey = "date", sortDir = "desc";
+
   const draw = () => {
-    const invs = visibleInvoices();
+    const all = visibleInvoices();
+    const labKeys = [...new Set(all.map(i => i.lab))];
+    labSel.innerHTML = '<option value="">All labs</option>' +
+      labKeys.map(k => `<option value="${k}">${LABS[k]?.name || k}</option>`).join("");
+    const statuses = [...new Set(all.map(i => i.status))];
+    statusSel.innerHTML = '<option value="">All statuses</option>' +
+      statuses.map(s => `<option value="${s}">${s}</option>`).join("");
+
+    const lab = labSel.value, status = statusSel.value, cadence = cadenceSel.value,
+      q = search.value.trim().toLowerCase();
+    let invs = all.filter(i =>
+      (!lab || i.lab === lab) &&
+      (!status || i.status === status) &&
+      (!cadence || (cadence === "recurring" ? i.recurring : !i.recurring)) &&
+      (!q || i.client.toLowerCase().includes(q) || fullName(PEOPLE[i.requestedBy]).toLowerCase().includes(q)));
+
+    const getter = INVOICE_SORTERS[sortKey] || INVOICE_SORTERS.date;
+    invs = invs.slice().sort((a, b) => {
+      const av = getter(a), bv = getter(b);
+      const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+
+    document.querySelectorAll("#invTable th[data-sort]").forEach(th => {
+      const active = th.dataset.sort === sortKey;
+      th.classList.toggle("sorted", active);
+      th.dataset.dir = active ? sortDir : "";
+    });
+
+    document.getElementById("invCount").textContent =
+      `${invs.length} of ${all.length} invoice request${all.length === 1 ? "" : "s"}`;
+
     document.getElementById("invRows").innerHTML = invs.length ? invs.map(i => {
       const next = i.status === "Admin review" ? "Sent to client" : i.status === "Sent to client" ? "Paid" : null;
       const action = can.reviewInvoices() && next
@@ -409,8 +454,19 @@ function renderInvoices() {
         <td><span class="badge ${INVOICE_CLASS[i.status]}"><i></i>${i.status}</span> ${action}</td>
         <td>${i.date}</td>
       </tr>`;
-    }).join("") : '<tr><td colspan="7" class="empty">No invoice requests visible for this role.</td></tr>';
+    }).join("") : `<tr><td colspan="7" class="empty">${all.length ? "No invoice requests match these filters." : "No invoice requests visible for this role."}</td></tr>`;
   };
+
+  document.querySelectorAll("#invTable th[data-sort]").forEach(th => {
+    th.addEventListener("click", () => {
+      if (sortKey === th.dataset.sort) sortDir = sortDir === "asc" ? "desc" : "asc";
+      else { sortKey = th.dataset.sort; sortDir = "asc"; }
+      draw();
+    });
+  });
+  labSel.onchange = statusSel.onchange = cadenceSel.onchange = draw;
+  search.oninput = draw;
+
   document.getElementById("invRows").addEventListener("click", async e => {
     const b = e.target.closest("[data-inv]");
     if (!b) return;
