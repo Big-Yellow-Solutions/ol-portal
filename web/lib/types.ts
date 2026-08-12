@@ -72,10 +72,27 @@ export interface Lab {
   name: string;
 }
 
+// Mirrors backend/src/app.mjs's sanitizeAssignmentNotice/isValidAssignmentNotice
+// exactly. `labLeaders` fee shares must sum to 100; each named Lab Leader (plus
+// the Admin-only "ol" / Optimistic Labs line) signs in-portal by typing their
+// name while authenticated — that's what lands in `signatures`.
+export interface AssignmentNoticeSignature {
+  by: string;
+  verifiedName?: string;
+  name: string;
+  at: string;
+}
+
+export interface AssignmentNoticeLabLeader {
+  key: string;
+  feeSharePct: number;
+}
+
 export interface AssignmentNotice {
-  clientContactName: string;
-  scopeSummary: string;
-  [key: string]: unknown;
+  labLeaders: AssignmentNoticeLabLeader[];
+  subcontractorCosts: number;
+  hardCosts: number;
+  signatures: Record<string, AssignmentNoticeSignature>;
 }
 
 // Field names match backend/src/app.mjs's raw DEAL record shape.
