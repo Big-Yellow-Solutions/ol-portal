@@ -172,6 +172,22 @@ export function pricingText(p) {
 
 export const formatMoney = fmt;
 
+/* A proposal offers a menu; a contract is for one thing at one price. Once the
+   customer has picked a package, collapse the tier list to that single line so
+   the agreement they sign doesn't also quote the options they declined. Only
+   used at contract generation — the proposal keeps its full tier list. */
+export function collapseToSelected(p) {
+  if (p?.kind !== "tiered") return p || null;
+  const chosen = p.tiers?.find(t => t.id === p.selected);
+  if (!chosen) return p;
+  return {
+    kind: "flat",
+    amount: chosen.amount,
+    label: chosen.name,
+    notes: chosen.summary || ""
+  };
+}
+
 /* Deviation detection (FR11). Compares the priced substance only: a renamed
    package or an edited summary is presentation, a changed number is a
    deviation the contract has to declare. Tier order is normalized so

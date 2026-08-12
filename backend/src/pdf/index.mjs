@@ -162,10 +162,17 @@ async function loadDocument(kind, id) {
    a contract that departs from the approved proposal says so on its face. */
 function deviationNotes(c) {
   if (!c?.inherited || !Array.isArray(c.deviationLog)) return [];
-  return c.deviationLog.map(d => ({ summary: d.summary, note: d.note, at: d.at }));
+  // The log is append-only, so a field edited, reverted and edited again has
+  // several entries. The contract's face should state each departure once,
+  // with the most recent explanation; the full history stays on the record.
+  const latest = new Map();
+  for (const d of c.deviationLog) latest.set(d.field, d);
+  return [...latest.values()].map(d => ({ summary: d.summary, note: d.note, at: d.at }));
 }
 
-function pricingTable(pricing) {
+/* `withHeading: false` when the caller has already written the Pricing heading
+   above the prose that introduces the table. */
+function pricingTable(pricing, withHeading = true) {
   const rows = pricingLines(pricing);
   if (!rows.length) return "";
   const total = pricingTotal(pricing);
@@ -178,7 +185,7 @@ function pricingTable(pricing) {
     ? `<tr class="tot"><td>Total</td><td class="amt">Pending package selection</td></tr>`
     : `<tr class="tot"><td>Total</td><td class="amt">${fmt$(total)}</td></tr>`;
   const note = pricing?.notes ? `<div class="sub" style="margin-top:6px">${esc(pricing.notes)}</div>` : "";
-  return `<h2>Pricing</h2><table class="price">${body}${foot}</table>${note}`;
+  return `${withHeading ? "<h2>Pricing</h2>" : ""}<table class="price">${body}${foot}</table>${note}`;
 }
 
 function signatureBlock(sig, fallbackLabel) {
@@ -286,8 +293,9 @@ function renderHtml(d) {
     <table class="info">${metaRows}</table>
     ${sections || (d.clauses || []).length ? "" : "<p>No sections on file yet.</p>"}
     ${sections}
-    ${pricingTable(d.pricing)}
-    ${prosePricing}
+    ${prosePricing
+      ? `<h2>Pricing</h2>${prosePricing}${pricingTable(d.pricing, false)}`
+      : pricingTable(d.pricing)}
     ${clauses}
     ${deviations}
     <div class="sign">

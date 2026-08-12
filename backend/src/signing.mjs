@@ -32,6 +32,7 @@ import { resp, today, get, put, listType, fullName } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { deviationsOf } from "./contracts.mjs";
+import { mergeClauses, templateVars } from "./templates.mjs";
 import { pricingTotal, formatMoney } from "./pricing.mjs";
 
 const s3 = new S3Client({});
@@ -87,6 +88,21 @@ export async function sendForSignature(ctx, id, body) {
   if (c.status === "Signed") return resp(409, { error: "This contract is already fully executed" });
   if (c.status === "Out for Signature")
     return resp(409, { error: "This contract is already out for signature" });
+
+  /* Re-merge the terms before checking readiness. updateContract() already
+     does this on every save, but a contract generated before that existed
+     would carry a stale unresolved list and could never be sent; re-merging
+     here is idempotent and lets those self-heal. */
+  if ((c.clauses || []).length) {
+    const [deal, lab, owner] = await Promise.all([
+      c.deal ? get("DEAL", c.deal) : null,
+      get("LAB", c.lab),
+      c.owner ? get("PERSON", c.owner) : null
+    ]);
+    const merged = mergeClauses(c.clauses, templateVars({ contract: c, deal, lab, owner, signatory: null }));
+    c.clauses = merged.clauses;
+    c.unresolvedVars = merged.unresolved;
+  }
 
   // Everything that would make a signed document defective is checked here,
   // once, rather than discovered by the customer on the signing page.

@@ -22,7 +22,16 @@ import { resp, today, get, put, listType, nextId } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { approvedSnapshot } from "./proposals.mjs";
 import { contractTemplateFor, mergeClauses, templateVars } from "./templates.mjs";
-import { cleanPricing, samePricing, pricingTotal, pricingDiffSummary } from "./pricing.mjs";
+import {
+  cleanPricing, samePricing, pricingTotal, pricingDiffSummary, collapseToSelected
+} from "./pricing.mjs";
+
+/* Human labels for deviation messages. The raw section keys leak into a
+   customer-visible PDF otherwise. */
+const SECTION_LABEL = {
+  summary: "Client and problem summary", scope: "Scope", deliverables: "Deliverables",
+  timeline: "Timeline", pricing: "Pricing", terms: "Terms"
+};
 
 /* "Sent" is retained only so contracts written before this build still validate
    on read; nothing sets it any more. */
@@ -64,6 +73,13 @@ export async function generateContract(ctx, body) {
     get("DEAL", p.deal), get("LAB", p.lab), get("PERSON", p.owner), contractTemplateFor(p.lab)
   ]);
 
+  /* Collapse a chosen package to a single priced line. The proposal offered a
+     menu; the contract is for the one thing they bought, and an agreement that
+     also quotes the declined options invites an argument later. Both the frozen
+     `inherited` copy and the live one use the collapsed form so deviation
+     detection still compares like with like. */
+  const pricing = collapseToSelected(snapshot.pricing);
+
   const id = await nextId("CONTRACT", "C-");
   const base = {
     pk: "CONTRACT", sk: id, proposal: p.sk, deal: p.deal, client: p.client,
@@ -74,12 +90,12 @@ export async function generateContract(ctx, body) {
       version: snapshot.version,
       approvedAt: snapshot.approvedAt,
       sections: snapshot.sections,
-      pricing: snapshot.pricing
+      pricing
     },
     // The live, editable copy. Starts identical to `inherited`.
     sections: snapshot.sections,
-    pricing: snapshot.pricing,
-    amount: pricingTotal(snapshot.pricing) ?? deal?.amount,
+    pricing,
+    amount: pricingTotal(pricing) ?? deal?.amount,
     deviationLog: [],
     ...(template ? { templateId: template.sk, templateName: template.name } : {})
   };
@@ -128,7 +144,7 @@ export function deviationsOf(c) {
     const before = (c.inherited.sections?.[k] || "").trim();
     const after = (c.sections?.[k] || "").trim();
     if (before !== after)
-      out.push({ field: k, summary: `"${k}" differs from the approved proposal` });
+      out.push({ field: k, summary: `${SECTION_LABEL[k] ?? k} differs from the approved proposal` });
   }
   if (!samePricing(c.inherited.pricing || null, c.pricing || null))
     out.push({ field: "pricing", summary: pricingDiffSummary(c.inherited.pricing, c.pricing) });
@@ -239,7 +255,24 @@ export async function updateContract(ctx, id, body) {
       heading: str(x?.heading, MAX_FIELD),
       text: String(x?.text ?? "").slice(0, MAX_SECTION_CHARS)
     }));
-    next.unresolvedVars = [];
+  }
+
+  /* Re-merge the standard terms against the current field values.
+     mergeClauses() is idempotent — a placeholder that has already been filled
+     is no longer in the text — so re-running it on every save is what lets
+     {{paymentSchedule}} resolve the moment the Lab Leader types one in.
+     Without this the unresolved list stays frozen at whatever was missing at
+     generation time and blocks sending for the life of the contract. */
+  if ((next.clauses || []).length) {
+    const [deal, lab, owner, signatory] = await Promise.all([
+      next.deal ? get("DEAL", next.deal) : null,
+      get("LAB", next.lab),
+      next.owner ? get("PERSON", next.owner) : null,
+      next.olSignatory ? get("PERSON", next.olSignatory) : null
+    ]);
+    const merged = mergeClauses(next.clauses, templateVars({ contract: next, deal, lab, owner, signatory }));
+    next.clauses = merged.clauses;
+    next.unresolvedVars = merged.unresolved;
   }
 
   /* --- status --- */
