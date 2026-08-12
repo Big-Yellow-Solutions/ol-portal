@@ -74,14 +74,14 @@
   --paper: #f8f6f2;
   --ink: #111111;
   --ink-soft: rgba(17, 17, 17, 0.82);
-  --ink-mute: rgba(17, 17, 17, 0.55);
+  --ink-mute: rgba(17, 17, 17, 0.62);
   --warm-gray: #9e9589;
   --hair: rgba(124, 109, 245, 0.18);
-  --green: #1fa97c;
+  --green: #0f7350;
   --green-pale: #e2f6ee;
-  --red: #d94f4f;
+  --red: #b52d2d;
   --red-pale: #fbeaea;
-  --amber: #c98a1b;
+  --amber: #8a5c07;
   --amber-pale: #fbf3e2;
   --font-serif: var(--font-playfair), Georgia, serif;
 
@@ -96,7 +96,7 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  --muted-foreground: oklch(0.52 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);

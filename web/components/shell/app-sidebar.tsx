@@ -68,7 +68,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar open={open} setOpen={setOpen}>
-      <SidebarBody className="justify-between gap-10 bg-violet-deep dark:bg-violet-deep">
+      <SidebarBody className="justify-between gap-10 bg-violet-deep dark:bg-violet-deep text-white">
         <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
           <div className="flex items-center gap-2 py-1">
             <Image
@@ -89,7 +89,7 @@ export function AppSidebar() {
           </div>
           <div
             className={cn(
-              "mt-8 mb-2 text-xs uppercase tracking-wide text-white/50",
+              "mt-8 mb-2 text-xs uppercase tracking-wide text-white/75",
               !open && "hidden"
             )}
           >
