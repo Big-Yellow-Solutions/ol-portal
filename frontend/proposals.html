@@ -26,14 +26,19 @@
           for what the client sees.</p>
       </div>
 
-      <div class="card">
+      <div class="card" id="propTableCard">
         <div class="card-head"><h2>All proposals</h2></div>
         <div class="tbl-wrap">
           <table>
-            <thead><tr><th>Proposal</th><th>Lab</th><th>Author</th><th>Status</th><th>Version</th><th>Updated</th></tr></thead>
+            <thead><tr><th>Proposal</th><th>Lab</th><th>Author</th><th>Status</th><th>Version</th><th>Contributor</th><th>Updated</th></tr></thead>
             <tbody id="propRows"></tbody>
           </table>
         </div>
+      </div>
+
+      <div class="card" id="propCardsCard" style="display:none">
+        <div class="card-head"><h2>Proposals shared with you</h2></div>
+        <div id="propCards"></div>
       </div>
 
       <p class="footnote">
@@ -42,6 +47,8 @@
         Approve / Reject / Revision decision is captured on the shared link, and approval
         auto-creates the contract. <span class="em-italic">The Optimist</span> writes from the
         knowledge base admins maintain on the Admin page — and only drafts: people mark Final and send.
+        Naming a Contributor (✎) shares a proposal with them, read-only — the only way a Contributor
+        sees a proposal at all.
       </p>
     </main>
   </div>

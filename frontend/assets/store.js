@@ -106,11 +106,11 @@ function visibleInvoices() { return INVOICES; }
 
 const can = {
   addDeal: () => ROLE === "Admin" || (ROLE === "Lab Leader" && MY_LABS.length > 0),
-  editDeal: d => ROLE === "Admin" || (ROLE === "Lab Leader" && MY_LABS.includes(d.lab)),
+  editDeal: d => ROLE === "Admin" || (ROLE === "Lab Leader" && (MY_LABS.includes(d.lab) || d.owner === ME)),
   deleteDeal: () => ROLE === "Admin",
   changeLab: () => ROLE === "Admin",
   reviewInvoices: () => ROLE === "Admin",
-  editProposal: p => ROLE === "Admin" || (ROLE === "Lab Leader" && MY_LABS.includes(p.lab)),
+  editProposal: p => ROLE === "Admin" || (ROLE === "Lab Leader" && (MY_LABS.includes(p.lab) || p.owner === ME)),
   approveProposal: () => ROLE === "Admin"
 };
 
@@ -195,6 +195,15 @@ async function toggleProposalFinal(id, value) {
 async function refreshProposals() {
   const list = await api("/proposals");
   PROPOSALS.length = 0; PROPOSALS.push(...list);
+}
+
+/* Naming a Contributor here is what makes the proposal visible to them
+   (PRD 3.3 "shared with them") — mirrors updateContractApi's contributor fields. */
+async function setProposalContributor(id, { contributorName, contributorEmail }) {
+  const p = await api(`/proposals/${id}`, { method: "PATCH", body: { contributorName, contributorEmail } });
+  const i = PROPOSALS.findIndex(x => x.id === id);
+  if (i > -1) PROPOSALS[i] = p;
+  return p;
 }
 
 /* ---------- proposals: structured template, send, AI assistant ---------- */

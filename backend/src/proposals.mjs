@@ -81,12 +81,26 @@ export async function createProposal(ctx, body) {
   const id = await nextId("PROPOSAL", "P-");
   const p = {
     pk: "PROPOSAL", sk: id, title: title.trim(), deal: deal.sk, client: deal.client,
-    lab: deal.lab, author: ctx.me.sk, status: "Draft", version: 0, final: false,
+    // `owner` mirrors the deal's Lab Leader (PRD 3.3 "leading a project in
+    // another lab" exception) — same pattern contracts.mjs uses.
+    lab: deal.lab, owner: deal.owner, author: ctx.me.sk, status: "Draft", version: 0, final: false,
     dirty: false, updated: today(), sections: emptySections(), versions: []
   };
   await put(p);
   const { pk, sk, ...rest } = p;
   return resp(201, { id: sk, ...rest });
+}
+
+/* Contributors have no lab scope, so a proposal is only visible to one when a
+   Lab Leader/Admin names their email on it (PRD 3.3 "shared with them") —
+   same share-by-email pattern contracts.mjs already uses. */
+export async function listProposals(ctx) {
+  const items = await listType("PROPOSAL");
+  const visible = ctx.role === "Contributor"
+    ? items.filter(p => (p.contributorEmail || "").toLowerCase() === (ctx.me.email || "").toLowerCase())
+    : items.filter(p => ctx.can.seesLab(p.lab) || (ctx.role === "Lab Leader" && p.owner === ctx.me.sk));
+  visible.sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
+  return resp(200, visible.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }
 
 export async function updateProposal(ctx, id, body) {
@@ -127,6 +141,14 @@ export async function updateProposal(ctx, id, body) {
       next.final = false;
       delete next.finalVersion;
     }
+  }
+  // Naming a Contributor here is what makes the proposal visible to them
+  // (PRD 3.3 "shared with them") — mirrors contracts.mjs's contributorEmail.
+  if ("contributorName" in b) next.contributorName = String(b.contributorName || "").slice(0, 120);
+  if ("contributorEmail" in b) {
+    const email = String(b.contributorEmail || "").trim();
+    if (email && !EMAIL_RE.test(email)) return resp(400, { error: "invalid contributor email" });
+    next.contributorEmail = email;
   }
   next.updated = today();
   await put(next);
