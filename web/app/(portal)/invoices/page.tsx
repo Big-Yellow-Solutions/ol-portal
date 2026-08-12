@@ -221,7 +221,7 @@ function QboCard() {
             <Button
               onClick={connect}
               disabled={connecting}
-              className="w-fit bg-violet-deep hover:bg-violet"
+              className="w-fit"
             >
               {connecting ? "Connecting…" : "Connect to QuickBooks"}
             </Button>

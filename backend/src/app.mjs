@@ -15,6 +15,8 @@ import * as contracts from "./contracts.mjs";
 import * as recurring from "./recurring.mjs";
 import * as assist from "./assist.mjs";
 import * as profile from "./profile.mjs";
+import * as templates from "./templates.mjs";
+import * as signing from "./signing.mjs";
 import { fullName } from "./util.mjs";
 
 const TABLE = process.env.TABLE_NAME;
@@ -416,7 +418,18 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1], body);
   if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
   if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
+  // Base Contract PRD 5.4: generation is an explicit action on an approved
+  // proposal, not a side effect of the customer's approval.
+  if (method === "POST" && path === "/contracts") return await contracts.generateContract(ctx, body);
+  if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "send-for-signature")
+    return await signing.sendForSignature(ctx, seg[1], body);
+  if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "countersign")
+    return await signing.countersign(ctx, seg[1], body, ctx.meta);
   if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);
+  if (method === "GET" && path === "/templates") return await templates.listTemplates(ctx);
+  if (method === "POST" && path === "/templates") return await templates.createTemplate(ctx, body);
+  if (method === "PATCH" && seg[0] === "templates" && seg[1]) return await templates.updateTemplate(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "templates" && seg[1]) return await templates.deleteTemplate(ctx, seg[1]);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
   if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
@@ -456,13 +469,32 @@ export const handler = async event => {
     const rawPath = event.rawPath.replace(/\/+$/, "");
     if (rawMethod === "GET" && rawPath === "/qbo/callback") return await qboCallback(event);
 
-    // Public customer routes (Authorizer NONE) — the share token is the credential.
+    /* Public customer routes (Authorizer NONE) — the token is the credential.
+       `meta` carries the caller's source IP and user-agent, which the customer
+       flows need for open tracking and, on the signing side, for the ESIGN/UETA
+       attribution record. Reading it here keeps the raw event out of the
+       modules. */
+    const meta = {
+      ip: event.requestContext?.http?.sourceIp || "",
+      ua: event.headers?.["user-agent"] || ""
+    };
+    let publicBody = null;
+    if (event.body) { try { publicBody = JSON.parse(event.body); } catch { return resp(400, { error: "invalid JSON body" }); } }
+
     const shareMatch = rawPath.match(/^\/share\/([0-9a-f]+)(\/decision)?$/);
     if (shareMatch) {
-      let shareBody = null;
-      if (event.body) { try { shareBody = JSON.parse(event.body); } catch { return resp(400, { error: "invalid JSON body" }); } }
-      if (rawMethod === "GET" && !shareMatch[2]) return await proposals.shareView(shareMatch[1]);
-      if (rawMethod === "POST" && shareMatch[2]) return await proposals.shareDecision(shareMatch[1], shareBody);
+      if (rawMethod === "GET" && !shareMatch[2]) return await proposals.shareView(shareMatch[1], meta);
+      if (rawMethod === "POST" && shareMatch[2]) return await proposals.shareDecision(shareMatch[1], publicBody, meta);
+      return resp(404, { error: "no such route" });
+    }
+
+    // Contract signing: view the frozen document, sign it, download the
+    // countersigned copy afterwards.
+    const signMatch = rawPath.match(/^\/sign\/([0-9a-f]+)(\/pdf)?$/);
+    if (signMatch) {
+      if (rawMethod === "GET" && signMatch[2]) return await signing.signPdf(signMatch[1]);
+      if (rawMethod === "GET") return await signing.signView(signMatch[1]);
+      if (rawMethod === "POST" && !signMatch[2]) return await signing.signSubmit(signMatch[1], publicBody, meta);
       return resp(404, { error: "no such route" });
     }
 
@@ -485,18 +517,16 @@ export const handler = async event => {
       const target = await get("PERSON", actAsTarget);
       if (!target) return resp(404, { error: "No such user to act as" });
       if (target.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
-      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true };
+      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true, meta };
     } else {
-      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false };
+      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false, meta };
     }
 
     const method = event.requestContext.http.method;
     const path = event.rawPath.replace(/\/+$/, "");
     const seg = path.split("/").filter(Boolean);
-    let body = null;
-    if (event.body) {
-      try { body = JSON.parse(event.body); } catch { return resp(400, { error: "invalid JSON body" }); }
-    }
+    // Already parsed above, alongside the public routes.
+    const body = publicBody;
 
     const result = await route(ctx, method, path, seg, body);
     if (ctx.actingAs && MUTATING_METHODS.has(method) && !ACT_AS_ROUTES.has(path) && result.statusCode < 300) {

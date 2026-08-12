@@ -120,19 +120,19 @@ function WelcomeForm() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Engage me for…</Label>
-            <Textarea value={blurb} onChange={(e) => setBlurb(e.target.value)} rows={3} />
+            <Label htmlFor="welcome-engage-me-for">Engage me for…</Label>
+            <Textarea id="welcome-engage-me-for" value={blurb} onChange={(e) => setBlurb(e.target.value)} rows={3} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Specialties (comma-separated)</Label>
-            <Input value={specialties} onChange={(e) => setSpecialties(e.target.value)} />
+            <Label htmlFor="welcome-specialties-comma-separated">Specialties (comma-separated)</Label>
+            <Input id="welcome-specialties-comma-separated" value={specialties} onChange={(e) => setSpecialties(e.target.value)} />
           </div>
 
           {error && <p className="text-sm text-red">{error}</p>}
 
           <div className="mt-2 flex gap-3">
-            <Button onClick={save} disabled={saving} className="flex-1 bg-violet-deep hover:bg-violet">
+            <Button onClick={save} disabled={saving} className="flex-1">
               {saving ? "Saving…" : "Save & continue"}
             </Button>
             <Button variant="outline" onClick={skip} disabled={saving}>

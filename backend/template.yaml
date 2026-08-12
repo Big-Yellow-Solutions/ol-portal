@@ -26,6 +26,7 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
+              - https://portal.optimisticlabs.com
               - https://main.d2rvkunvze2ixv.amplifyapp.com
               - http://localhost:8761
             AllowedMethods: [PUT, GET]
@@ -93,7 +94,7 @@ Resources:
           EmailMessage: >-
             Hi! You've been invited to the Optimistic Labs Portal.
             Sign in with your email ({username}) and the temporary password
-            {####} at https://main.d2rvkunvze2ixv.amplifyapp.com/login.html
+            {####} at https://portal.optimisticlabs.com/login.html
             within 7 days. You'll choose your own password and set up
             two-factor authentication on first sign-in.
       AutoVerifiedAttributes: [email]
@@ -177,6 +178,7 @@ Resources:
     Properties:
       CorsConfiguration:
         AllowOrigins:
+          - https://portal.optimisticlabs.com
           - https://main.d2rvkunvze2ixv.amplifyapp.com
           - http://localhost:8761
         AllowMethods: [GET, POST, PATCH, DELETE, OPTIONS]
@@ -270,7 +272,7 @@ Resources:
           TABLE_NAME: !Ref PortalTable
           ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
           FILES_BUCKET: !Ref FilesBucket
-          FRONTEND_URL: https://main.d2rvkunvze2ixv.amplifyapp.com
+          FRONTEND_URL: https://portal.optimisticlabs.com
           QBO_CREDS_PARAM: /ol-portal/qbo-credentials
           QBO_ENV: sandbox
           # Hardcoded (like the frontend's config.js): !Sub ${PortalApi} here would
@@ -278,6 +280,11 @@ Resources:
           # Must exactly match a redirect URI registered in the Intuit dashboard.
           QBO_REDIRECT_URI: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/qbo/callback
           USER_POOL_ID: !Ref UserPool
+          # Base Contract PRD FR15: on full execution, signing.mjs invokes the
+          # PDF renderer directly to produce the countersigned copy. Not
+          # circular — the PDF function depends only on the API *gateway*, not
+          # on this function.
+          PDF_FUNCTION_NAME: !Ref ContractPdfFunction
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
@@ -287,6 +294,9 @@ Resources:
             ParameterName: ol-portal/qbo-credentials
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/anthropic-api-key
+        # Base Contract PRD FR15: render the countersigned PDF at execution time.
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ContractPdfFunction
         # PRD 2.2/2.5: invite lifecycle + admin 2FA reset (admin routes only)
         - Statement:
             - Effect: Allow
@@ -361,6 +371,26 @@ Resources:
           Properties:
             ApiId: !Ref PortalApi
             Path: /share/{proxy+}
+            Method: POST
+            Auth:
+              Authorizer: NONE
+        # Customer-facing contract signing (Base Contract PRD 5.5). Same model
+        # as /share: the client has no portal account, and the per-contract
+        # signing token minted at send time is the only credential. GET serves
+        # the frozen document and, once executed, the countersigned PDF.
+        SignGetRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /sign/{proxy+}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        SignPostRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /sign/{proxy+}
             Method: POST
             Auth:
               Authorizer: NONE

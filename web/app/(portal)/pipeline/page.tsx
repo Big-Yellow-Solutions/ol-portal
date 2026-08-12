@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Calendar, GripVertical, Repeat } from "lucide-react";
 import { fmtDollars, fullName, initials } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
@@ -68,6 +68,22 @@ export default function PipelinePage() {
   const [openDeal, setOpenDeal] = useState<Deal | "new" | null>(null);
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
+  // Under "Reduce motion" the cards still cross-fade so a restage is visible,
+  // but they don't slide or scale.
+  const reduceMotion = useReducedMotion();
+  const cardMotion = reduceMotion
+    ? {
+        initial: { opacity: 0 },
+        animate: { opacity: 1 },
+        exit: { opacity: 0 },
+        transition: { duration: 0 },
+      }
+    : {
+        initial: { opacity: 0, y: 8 },
+        animate: { opacity: 1, y: 0 },
+        exit: { opacity: 0, scale: 0.96 },
+        transition: { duration: 0.15 },
+      };
 
   // Drag-to-restage. Closing a deal is deliberately NOT done by dragging:
   // the server rejects a move to "Closed" without an Assignment Notice, and
@@ -140,7 +156,7 @@ export default function PipelinePage() {
           <p className="mt-1 text-sm text-ink-mute">Deals by stage, across labs.</p>
         </div>
         {can.addDeal(role!, myLabs) && (
-          <Button className="bg-violet-deep hover:bg-violet" onClick={() => setOpenDeal("new")}>
+          <Button onClick={() => setOpenDeal("new")}>
             + New deal
           </Button>
         )}
@@ -224,11 +240,8 @@ export default function PipelinePage() {
                   {stageDeals.map((deal) => (
                     <motion.div
                       key={deal.id}
-                      layout
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, scale: 0.96 }}
-                      transition={{ duration: 0.15 }}
+                      layout={!reduceMotion}
+                      {...cardMotion}
                     >
                       <DealCard
                         deal={deal}
@@ -576,9 +589,9 @@ function DealDialog({
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-1.5">
-              <Label>Outcome</Label>
+              <Label htmlFor="deal-outcome">Outcome</Label>
               <Select value={pendingOutcome} onValueChange={(v) => setPendingOutcome(v as Outcome)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="deal-outcome"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Won">Won</SelectItem>
                   <SelectItem value="Lost">Lost</SelectItem>
@@ -594,8 +607,8 @@ function DealDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <Label>Subcontractor costs</Label>
-                <Input
+                <Label htmlFor="deal-subcontractor-costs">Subcontractor costs</Label>
+                <Input id="deal-subcontractor-costs"
                   type="number"
                   min={0}
                   value={noticeSubcontractorCosts}
@@ -603,8 +616,8 @@ function DealDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Hard costs</Label>
-                <Input
+                <Label htmlFor="deal-hard-costs">Hard costs</Label>
+                <Input id="deal-hard-costs"
                   type="number"
                   min={0}
                   value={noticeHardCosts}
@@ -618,7 +631,6 @@ function DealDialog({
               Cancel
             </Button>
             <Button
-              className="bg-violet-deep hover:bg-violet"
               disabled={saving}
               onClick={confirmAssignmentAndSave}
             >
@@ -639,14 +651,14 @@ function DealDialog({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label>Client</Label>
-            <Input value={client} onChange={(e) => setClient(e.target.value)} disabled={!editable} />
+            <Label htmlFor="deal-client">Client</Label>
+            <Input id="deal-client" value={client} onChange={(e) => setClient(e.target.value)} disabled={!editable} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Lab</Label>
+            <Label htmlFor="deal-lab">Lab</Label>
             <Select value={lab} onValueChange={setLab} disabled={!editable}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="deal-lab"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {labs.map((l) => (
                   <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
@@ -656,9 +668,9 @@ function DealDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Stage</Label>
+            <Label htmlFor="deal-stage">Stage</Label>
             <Select value={stage} onValueChange={(v) => setStage(v as Stage)} disabled={!editable}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="deal-stage"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {STAGES.map((s) => (
                   <SelectItem key={s} value={s}>{s}</SelectItem>
@@ -668,9 +680,9 @@ function DealDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Owner (Lab Leader)</Label>
+            <Label htmlFor="deal-owner-lab-leader">Owner (Lab Leader)</Label>
             <Select value={owner} onValueChange={setOwner} disabled={!editable}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="deal-owner-lab-leader"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {leaders.map((p) => (
                   <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
@@ -680,9 +692,9 @@ function DealDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Deal owner</Label>
+            <Label htmlFor="deal-deal-owner">Deal owner</Label>
             <Select value={dealOwner} onValueChange={setDealOwner} disabled={!editable}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="deal-deal-owner"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {leaders.map((p) => (
                   <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
@@ -692,8 +704,8 @@ function DealDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Amount</Label>
-            <Input
+            <Label htmlFor="deal-amount">Amount</Label>
+            <Input id="deal-amount"
               type="number"
               min={0}
               value={amount}
@@ -703,14 +715,14 @@ function DealDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Expected close</Label>
-            <Input type="date" value={close} onChange={(e) => setClose(e.target.value)} disabled={!editable} />
+            <Label htmlFor="deal-expected-close">Expected close</Label>
+            <Input id="deal-expected-close" type="date" value={close} onChange={(e) => setClose(e.target.value)} disabled={!editable} />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Source</Label>
+            <Label htmlFor="deal-source">Source</Label>
             <Select value={source} onValueChange={(v) => setSource(v as Source)} disabled={!editable}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="deal-source"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {SOURCES.map((s) => (
                   <SelectItem key={s} value={s}>{s}</SelectItem>
@@ -738,8 +750,8 @@ function DealDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
-                <Label>Subcontractor costs</Label>
-                <Input
+                <Label htmlFor="deal-subcontractor-costs-2">Subcontractor costs</Label>
+                <Input id="deal-subcontractor-costs-2"
                   type="number"
                   min={0}
                   value={noticeSubcontractorCosts}
@@ -748,8 +760,8 @@ function DealDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Hard costs</Label>
-                <Input
+                <Label htmlFor="deal-hard-costs-2">Hard costs</Label>
+                <Input id="deal-hard-costs-2"
                   type="number"
                   min={0}
                   value={noticeHardCosts}
@@ -759,8 +771,14 @@ function DealDialog({
               </div>
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label>Signatures</Label>
+            {/* A caption over a list of rows, not a label for one control, so
+                it names a group rather than pointing htmlFor at anything. */}
+            <div
+              className="flex flex-col gap-2"
+              role="group"
+              aria-labelledby="deal-signatures-label"
+            >
+              <Label id="deal-signatures-label">Signatures</Label>
               {[...existingNotice.labLeaders.map((l) => l.key), OL_SIGNER_KEY].map((key) => {
                 const sig = existingNotice.signatures[key];
                 const label = key === OL_SIGNER_KEY ? "Optimistic Labs" : fullName(people[key]) || key;
@@ -817,7 +835,7 @@ function DealDialog({
             )}
           </div>
           {editable && (
-            <Button className="bg-violet-deep hover:bg-violet" onClick={save} disabled={saving}>
+            <Button onClick={save} disabled={saving}>
               {saving ? "Saving…" : isNew ? "Create deal" : "Save"}
             </Button>
           )}
@@ -841,8 +859,12 @@ function LabLeaderFeeSplitEditor({
   const total = rows.reduce((sum, r) => sum + (Number(r.feeSharePct) || 0), 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      <Label>Lab Leader fee split</Label>
+    <div
+      className="flex flex-col gap-2"
+      role="group"
+      aria-labelledby="deal-fee-split-label"
+    >
+      <Label id="deal-fee-split-label">Lab Leader fee split</Label>
       {rows.map((row, i) => (
         <div key={i} className="flex items-center gap-2">
           <Select
@@ -852,7 +874,9 @@ function LabLeaderFeeSplitEditor({
             }
             disabled={disabled}
           >
-            <SelectTrigger className="flex-1"><SelectValue placeholder="Lab Leader" /></SelectTrigger>
+            <SelectTrigger className="flex-1" aria-label={`Lab Leader for fee-share row ${i + 1}`}>
+              <SelectValue placeholder="Lab Leader" />
+            </SelectTrigger>
             <SelectContent>
               {options.map((p) => (
                 <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
@@ -869,6 +893,7 @@ function LabLeaderFeeSplitEditor({
             }
             disabled={disabled}
             className="w-20"
+            aria-label={`Fee share percent for row ${i + 1}`}
           />
           <span className="text-xs text-ink-mute">%</span>
           {!disabled && rows.length > 1 && (

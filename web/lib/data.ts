@@ -43,8 +43,10 @@ export const INVOICE_VARIANT: Record<InvoiceStatus, BadgeVariant> = {
 export const CONTRACT_VARIANT: Record<ContractStatus, BadgeVariant> = {
   Draft: "outline",
   "Internal Review": "secondary",
-  Sent: "warning",
+  "Out for Signature": "warning",
   Signed: "success",
+  // Legacy: contracts written before the signature flow existed.
+  Sent: "warning",
 };
 
 export const FILE_VARIANT: Record<FileStatus, BadgeVariant> = {

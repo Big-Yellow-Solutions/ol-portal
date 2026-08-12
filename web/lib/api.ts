@@ -20,9 +20,14 @@ export function clearActingAs() {
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Full parsed error body. Some routes return structured detail alongside
+   *  `error` — the contract editor reads `needsDeviationAck`/`deviations` off
+   *  a 409 to offer "save as a declared deviation" rather than just failing. */
+  body: unknown;
+  constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -60,7 +65,7 @@ export async function api<T = unknown>(
       clearActingAs();
       return api<T>(path, { ...opts, skipActAs: true });
     }
-    throw new ApiError(message, res.status);
+    throw new ApiError(message, res.status, data);
   }
 
   return data as T;
