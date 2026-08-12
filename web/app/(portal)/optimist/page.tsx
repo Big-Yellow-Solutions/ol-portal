@@ -27,7 +27,8 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { usePortalData } from "@/lib/portal-data";
 import { SECTION_KEYS, SECTION_LABELS } from "@/lib/types";
-import type { Proposal, ProposalStatus } from "@/lib/types";
+import type { Pricing, Proposal, ProposalStatus } from "@/lib/types";
+import { PricingTable } from "@/components/pricing-table";
 
 interface ChatMessage {
   role: "user" | "assistant";
@@ -87,6 +88,9 @@ function OptimistView() {
   const [showNew, setShowNew] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftSections, setDraftSections] = useState<Record<string, string>>({});
+  // Structured pricing rides alongside the section text (FR3). The Optimist
+  // writes it; null means the proposal isn't priced yet.
+  const [draftPricing, setDraftPricing] = useState<Pricing | null>(null);
   const [input, setInput] = useState("");
   const [attachment, setAttachment] = useState<{ type: string; data: string; name: string } | null>(
     null
@@ -94,6 +98,7 @@ function OptimistView() {
   const [sending, setSending] = useState(false);
   const [showSend, setShowSend] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
+  const attachInputRef = useRef<HTMLInputElement>(null);
 
   const selected = proposals.find((p) => p.id === selectedId) ?? null;
 
@@ -105,9 +110,11 @@ function OptimistView() {
     if (selected) {
       setMessages(loadChat(selected.id));
       setDraftSections({ ...selected.sections });
+      setDraftPricing(selected.pricing ?? null);
     } else {
       setMessages([]);
       setDraftSections({});
+      setDraftPricing(null);
     }
   }, [selected?.id]);
 
@@ -135,12 +142,14 @@ function OptimistView() {
     setProposals((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   };
 
-  const persistDraft = async (sections: Record<string, string>) => {
+  const persistDraft = async (sections: Record<string, string>, pricing: Pricing | null) => {
     if (!selected) return;
     try {
       const saved = await api<Proposal>(`/proposals/${selected.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ sections, draft: true }),
+        // Pricing rides along with the draft save so the structured figures and
+        // the prose that describes them can never be a version out of step.
+        body: JSON.stringify({ sections, pricing, draft: true }),
       });
       updateProposal(saved);
     } catch {
@@ -161,30 +170,35 @@ function OptimistView() {
     setAttachment(null);
 
     try {
-      const result = await api<{ reply: string; sections: Record<string, string> }>(
-        "/assist",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            proposalId: selected.id,
-            messages: nextMessages,
-            draft: draftSections,
-            ...(sentAttachment ? { attachment: sentAttachment } : {}),
-          }),
-        }
-      );
+      const result = await api<{
+        reply: string;
+        sections: Record<string, string>;
+        pricing: Pricing | null;
+      }>("/assist", {
+        method: "POST",
+        body: JSON.stringify({
+          proposalId: selected.id,
+          messages: nextMessages,
+          draft: draftSections,
+          ...(sentAttachment ? { attachment: sentAttachment } : {}),
+        }),
+      });
       const merged = { ...draftSections };
       for (const key of SECTION_KEYS) {
         if (result.sections[key]) merged[key] = result.sections[key];
       }
       setDraftSections(merged);
+      // Null means the turn didn't touch pricing, which is the common case —
+      // only overwrite when The Optimist actually produced figures.
+      const mergedPricing = result.pricing ?? draftPricing;
+      setDraftPricing(mergedPricing);
       const withReply: ChatMessage[] = [
         ...nextMessages,
         { role: "assistant", content: result.reply },
       ];
       setMessages(withReply);
       saveChat(selected.id, withReply);
-      await persistDraft(merged);
+      await persistDraft(merged, mergedPricing);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "The Optimist didn't respond.");
     } finally {
@@ -215,7 +229,7 @@ function OptimistView() {
     try {
       const saved = await api<Proposal>(`/proposals/${selected.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ sections: draftSections, commit: true }),
+        body: JSON.stringify({ sections: draftSections, pricing: draftPricing, commit: true }),
       });
       updateProposal(saved);
       toast.success(`Saved as v${saved.version}`);
@@ -273,7 +287,7 @@ function OptimistView() {
   return (
     <div className="grid h-[calc(100vh-8rem)] gap-4 md:grid-cols-[220px_1fr_360px]">
       <div className="flex flex-col gap-2 overflow-y-auto rounded-lg bg-card p-3 ring-1 ring-foreground/10">
-        <Button size="sm" className="bg-violet-deep hover:bg-violet" onClick={() => setShowNew(true)}>
+        <Button size="sm" onClick={() => setShowNew(true)}>
           + New
         </Button>
         {proposals.map((p) => (
@@ -327,10 +341,27 @@ function OptimistView() {
                 <Button variant="outline" size="sm" onClick={autoFill} disabled={sending}>
                   Auto-fill the rest
                 </Button>
-                <label className="flex cursor-pointer items-center text-xs text-ink-mute underline underline-offset-2">
+                {/*
+                  A real Button driving a hidden input via ref, not a <label>
+                  wrapping it: display:none makes the input unfocusable and a
+                  label isn't focusable either, so the old markup had no
+                  keyboard path at all. Same pattern as files/page.tsx.
+                */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => attachInputRef.current?.click()}
+                  disabled={sending}
+                >
                   {attachment ? attachment.name : "Attach a file"}
-                  <input type="file" className="hidden" onChange={onAttach} />
-                </label>
+                </Button>
+                <input
+                  ref={attachInputRef}
+                  type="file"
+                  hidden
+                  onChange={onAttach}
+                  disabled={sending}
+                />
               </div>
               <div className="flex gap-2">
                 <Textarea
@@ -347,7 +378,6 @@ function OptimistView() {
                   disabled={sending}
                 />
                 <Button
-                  className="bg-violet-deep hover:bg-violet"
                   onClick={() => send(input)}
                   disabled={sending || !input.trim()}
                 >
@@ -383,6 +413,15 @@ function OptimistView() {
                 <p className="mt-1 whitespace-pre-wrap text-sm text-ink-soft">
                   {draftSections[key] || <span className="text-ink-mute">Not yet written.</span>}
                 </p>
+                {/* FR4: the preview shows the same pricing table the customer
+                    will see, right under the prose that introduces it. */}
+                {key === "pricing" && <PricingTable pricing={draftPricing} />}
+                {key === "pricing" && !draftPricing && (
+                  <p className="mt-1 text-xs text-ink-mute">
+                    No figures recorded yet. Tell The Optimist the numbers and it will build the
+                    pricing table.
+                  </p>
+                )}
               </div>
             ))}
 
@@ -398,7 +437,6 @@ function OptimistView() {
               </Button>
               <Button
                 size="sm"
-                className="bg-violet-deep hover:bg-violet"
                 onClick={() => setShowSend(true)}
                 disabled={!selected.final}
               >
@@ -479,9 +517,9 @@ function NewProposalDialog({
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label>Deal</Label>
+            <Label htmlFor="opt-deal">Deal</Label>
             <Select value={dealId} onValueChange={setDealId}>
-              <SelectTrigger><SelectValue placeholder="Pick a deal" /></SelectTrigger>
+              <SelectTrigger id="opt-deal"><SelectValue placeholder="Pick a deal" /></SelectTrigger>
               <SelectContent>
                 {deals.map((d) => (
                   <SelectItem key={d.id} value={d.id}>{d.client}</SelectItem>
@@ -490,13 +528,12 @@ function NewProposalDialog({
             </Select>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Title</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Label htmlFor="opt-title">Title</Label>
+            <Input id="opt-title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
         </div>
         <DialogFooter>
           <Button
-            className="bg-violet-deep hover:bg-violet"
             onClick={create}
             disabled={creating || !dealId || !title.trim()}
           >
@@ -567,8 +604,8 @@ function SendDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-1.5">
-          <Label>Client email</Label>
-          <Input
+          <Label htmlFor="opt-client-email">Client email</Label>
+          <Input id="opt-client-email"
             type="email"
             value={clientEmail}
             onChange={(e) => setClientEmail(e.target.value)}
@@ -579,7 +616,6 @@ function SendDialog({
             Copy email text
           </Button>
           <Button
-            className="bg-violet-deep hover:bg-violet"
             onClick={() => sendVia(true)}
             disabled={sending || !clientEmail}
           >

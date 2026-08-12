@@ -9,6 +9,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { resp, today, get, put, del, listType, nextId } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { SECTION_KEYS } from "./proposals.mjs";
+import { cleanPricing, pricingText } from "./pricing.mjs";
 
 const ssm = new SSMClient({});
 let anthropic;
@@ -78,6 +79,80 @@ export async function deleteKb(ctx, id) {
    problem, scope, budget, timing) and writes/updates the proposal sections as
    it learns. The client sends the running conversation; every reply may carry
    section updates (empty string = leave that section alone). */
+/* Pricing is structured data now (Base Contract PRD FR3), so The Optimist has
+   to emit the numbers as well as the prose. The union of flat/tiered/itemized
+   is flattened into one object with an explicit `action`, because a strict
+   JSON schema handles one shape with unused fields far more reliably than a
+   discriminated union, and `action: "none"` is the common case where the turn
+   didn't touch pricing at all. */
+const PRICING_SCHEMA = {
+  type: "object",
+  properties: {
+    action: {
+      type: "string",
+      enum: ["none", "set"],
+      description: "\"none\" leaves the existing pricing untouched. Use \"set\" only when you have real numbers to record."
+    },
+    kind: {
+      type: "string",
+      enum: ["flat", "tiered", "itemized"],
+      description: "flat = one project fee. tiered = named packages the client picks from. itemized = line items with quantity and rate."
+    },
+    flatAmount: { type: "number", description: "The fee, when kind is flat. 0 otherwise." },
+    flatLabel: { type: "string", description: "What the flat fee is called, e.g. \"Project fee\". Empty otherwise." },
+    tiers: {
+      type: "array",
+      description: "Packages, when kind is tiered. Empty otherwise. Mark exactly one as recommended.",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          amount: { type: "number" },
+          summary: { type: "string", description: "One line on what this package includes" },
+          recommended: { type: "boolean" }
+        },
+        required: ["name", "amount", "summary", "recommended"],
+        additionalProperties: false
+      }
+    },
+    items: {
+      type: "array",
+      description: "Line items, when kind is itemized. Empty otherwise.",
+      items: {
+        type: "object",
+        properties: {
+          description: { type: "string" },
+          qty: { type: "number" },
+          rate: { type: "number" }
+        },
+        required: ["description", "qty", "rate"],
+        additionalProperties: false
+      }
+    },
+    discount: { type: "number", description: "Flat discount off an itemized subtotal, or 0." },
+    notes: { type: "string", description: "Short caveat shown under the pricing table, or empty." }
+  },
+  required: ["action", "kind", "flatAmount", "flatLabel", "tiers", "items", "discount", "notes"],
+  additionalProperties: false
+};
+
+/* Collapses the flattened schema back into the real pricing shape. Returns
+   null when the turn didn't set pricing or produced something invalid — a bad
+   pricing guess must never cost the Lab Leader the rest of the reply. */
+function pricingFromModel(out) {
+  if (!out || out.action !== "set") return null;
+  const draft =
+    out.kind === "flat" ? { kind: "flat", amount: out.flatAmount, label: out.flatLabel, notes: out.notes }
+      : out.kind === "tiered" ? { kind: "tiered", tiers: out.tiers }
+        : { kind: "itemized", items: out.items, discount: out.discount, notes: out.notes };
+  const { value, error } = cleanPricing(draft);
+  if (error) {
+    console.error(JSON.stringify({ level: "warn", message: "assist produced invalid pricing", detail: error }));
+    return null;
+  }
+  return value;
+}
+
 const CHAT_SCHEMA = {
   type: "object",
   properties: {
@@ -93,9 +168,10 @@ const CHAT_SCHEMA = {
       }])),
       required: SECTION_KEYS,
       additionalProperties: false
-    }
+    },
+    pricing: PRICING_SCHEMA
   },
-  required: ["reply", "sections"],
+  required: ["reply", "sections", "pricing"],
   additionalProperties: false
 };
 
@@ -166,6 +242,7 @@ Your job: interview them and build the proposal as you go.
 - If they attach a document (their own draft, notes, a prior proposal), extract its content into the matching sections in the same turn, preferring their wording and structure; fill obvious gaps yourself and say what you pulled in.
 - If they ask you to auto-fill or auto-draft, immediately write EVERY section that's missing using your best assumptions from whatever you have — even from just a one-line summary, and even if imperfect. Don't ask questions first; state your two or three key assumptions briefly in the reply so they can correct you.
 - Ground pricing and tone in OL's knowledge base below; do not invent OL policies that aren't there. Write sections in plain, confident prose. Never use em-dashes.
+- Pricing is both prose and numbers. The "pricing" section holds the narrative the client reads; the separate "pricing" object holds the actual figures, which flow straight into the contract. Whenever you write or change a number, set both, and keep them saying the same thing. Use action "none" on turns that don't touch pricing. Pick tiered when you're offering packages to choose between, itemized when the client is buying discrete pieces of work, flat otherwise. Never invent a number the Lab Leader hasn't given you or that the knowledge base doesn't support; ask instead.
 - You draft only. You cannot send, approve, or finalize anything; the Lab Leader reviews the preview and uses the controls under it.
 
 ${kbSections}`;
@@ -177,7 +254,8 @@ ${JSON.stringify(
   typeof draft === "object" && draft !== null
     ? Object.fromEntries(SECTION_KEYS.map(k => [k, String(draft[k] || "").slice(0, 20_000)]))
     : p.sections || {}
-)}`;
+)}
+Structured pricing currently recorded: ${p.pricing ? `\n${pricingText(p.pricing)}` : "(none yet)"}`;
 
   const c = await client();
   const response = await c.messages.create({
@@ -205,5 +283,10 @@ ${JSON.stringify(
   const text = response.content.find(x => x.type === "text")?.text;
   if (!text) return resp(502, { error: "The assistant returned nothing; try again" });
   await writeAudit(ctx.me.sk, "assist.chat", `${proposalId} (${p.client})`);
-  return resp(200, JSON.parse(text));
+
+  const out = JSON.parse(text);
+  // The flattened pricing shape is a schema convenience, not something the
+  // frontend should have to understand: hand back either a real pricing object
+  // or null, matching what PATCH /proposals/{id} accepts.
+  return resp(200, { reply: out.reply, sections: out.sections, pricing: pricingFromModel(out.pricing) });
 }

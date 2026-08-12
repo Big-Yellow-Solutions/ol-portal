@@ -1,5 +1,12 @@
 "use client";
 
+/* Contracts (Base Contract PRD 5.4-5.5).
+
+   The page walks the second half of the flow end to end: approved proposals
+   waiting for a contract sit at the top, contracts in flight sit below with
+   whatever action is actually next on each one, and the Admin countersignature
+   is offered only to the Admin the contract routes to. */
+
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -16,13 +23,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
@@ -30,17 +30,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ContractEditor } from "@/components/contract-editor";
+import { CountersignDialog } from "@/components/countersign-dialog";
 import { CONTRACT_VARIANT, fmtDollars, fullName } from "@/lib/data";
+import { pricingTotal } from "@/lib/pricing";
 import { api, ApiError } from "@/lib/api";
 import { usePortalData } from "@/lib/portal-data";
-import type { Contract, ContractStatus } from "@/lib/types";
-
-const CONTRACT_STATUSES: ContractStatus[] = ["Draft", "Internal Review", "Sent", "Signed"];
+import type { Contract, Proposal } from "@/lib/types";
 
 export default function ContractsPage() {
-  const { loading, error, contracts, labs, people, role, me, setContracts } = usePortalData();
+  const {
+    loading, error, contracts, proposals, labs, people, role, me, setContracts, setProposals,
+  } = usePortalData();
   const [editing, setEditing] = useState<Contract | null>(null);
   const [inviting, setInviting] = useState<Contract | null>(null);
+  const [countersigning, setCountersigning] = useState<Contract | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
   const personName = (username?: string) =>
@@ -51,20 +56,63 @@ export default function ContractsPage() {
 
   const isReadOnly = role === "Contributor";
 
-  const setStatus = async (contract: Contract, status: ContractStatus) => {
+  // PRD 5.4.1: only a customer-approved proposal can become a contract, and
+  // only once. Anything already converted drops off this list.
+  const contractedProposals = new Set(contracts.map((c) => c.proposal).filter(Boolean));
+  const awaitingContract = proposals.filter(
+    (p) => p.approvedVersion && !contractedProposals.has(p.id)
+  );
+
+  const replace = (saved: Contract) =>
+    setContracts((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+
+  const generate = async (proposal: Proposal) => {
+    setBusy(proposal.id);
     try {
-      const saved = await api<Contract>(`/contracts/${contract.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status }),
+      const created = await api<Contract & { alreadyExisted?: boolean }>("/contracts", {
+        method: "POST",
+        body: JSON.stringify({ proposalId: proposal.id }),
       });
-      setContracts((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
-      toast.success(`Contract marked ${status}`);
+      setContracts((prev) =>
+        prev.some((c) => c.id === created.id) ? prev.map((c) => (c.id === created.id ? created : c)) : [created, ...prev]
+      );
+      if (!created.templateId) {
+        toast.warning(
+          `${created.id} created, but ${labName(created.lab)} has no contract template, so it has no standard terms yet.`
+        );
+      } else {
+        toast.success(`${created.id} created from ${proposal.id}`);
+      }
+      setEditing(created);
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not update this contract.");
+      toast.error(err instanceof ApiError ? err.message : "Could not generate the contract.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const sendForSignature = async (contract: Contract) => {
+    setBusy(contract.id);
+    try {
+      const saved = await api<Contract & { emailSent?: boolean; emailError?: string }>(
+        `/contracts/${contract.id}/send-for-signature`,
+        { method: "POST" }
+      );
+      replace(saved);
+      toast[saved.emailSent ? "success" : "warning"](
+        saved.emailSent
+          ? `Sent to ${contract.clientSignerEmail} for signature.`
+          : `Marked out for signature, but the email did not send: ${saved.emailError ?? "unknown error"}`
+      );
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not send this contract.");
+    } finally {
+      setBusy(null);
     }
   };
 
   const generatePdf = async (contract: Contract) => {
+    setBusy(contract.id);
     try {
       const { fileId } = await api<{ fileId: string }>(`/contracts/${contract.id}/pdf`, {
         method: "POST",
@@ -73,7 +121,22 @@ export default function ContractsPage() {
       window.open(url, "_blank");
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not generate the PDF.");
+    } finally {
+      setBusy(null);
     }
+  };
+
+  /* Exactly one action is "next" on any contract, so the row offers that one
+     rather than a menu the Lab Leader has to reason about. */
+  const nextAction = (c: Contract) => {
+    if (c.status === "Signed") return null;
+    if (c.status === "Out for Signature") {
+      if (!c.signatures?.client) return { label: "Waiting on client", disabled: true };
+      if (role === "Admin" && (!c.olSignatory || c.olSignatory === me))
+        return { label: "Countersign", run: () => setCountersigning(c) };
+      return { label: `Waiting on ${c.olSignatoryName ?? "OL"}`, disabled: true };
+    }
+    return { label: "Send for signature", run: () => sendForSignature(c) };
   };
 
   return (
@@ -81,10 +144,43 @@ export default function ContractsPage() {
       <div>
         <h1 className="font-serif text-2xl italic text-ink">Contracts</h1>
         <p className="mt-1 text-sm text-ink-mute">
-          Auto-created once a proposal is customer-approved. Draft → Internal Review → Sent →
-          Signed.
+          Generated from an approved proposal, then signed by the client and countersigned by an
+          Admin.
         </p>
       </div>
+
+      {!isReadOnly && awaitingContract.length > 0 && (
+        <Card className="border-green/40 bg-green-pale/40">
+          <CardHeader>
+            <CardTitle className="font-serif text-base">
+              Approved and ready for a contract
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            {awaitingContract.map((p) => (
+              <div
+                key={p.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-white px-3 py-2"
+              >
+                <div className="text-sm">
+                  <span className="font-medium text-ink">{p.client}</span>
+                  <span className="text-ink-mute">
+                    {" "}
+                    · {p.title} · approved v{p.approvedVersion}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  disabled={busy === p.id}
+                  onClick={() => generate(p)}
+                >
+                  {busy === p.id ? "Generating…" : "Generate contract"}
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {isReadOnly ? (
         contracts.length === 0 ? (
@@ -101,10 +197,10 @@ export default function ContractsPage() {
                   <Badge variant={CONTRACT_VARIANT[c.status]} className="w-fit">
                     {c.status}
                   </Badge>
-                  {c.amount != null && (
-                    <div className="tabular-nums text-ink">{fmtDollars(c.amount)}</div>
-                  )}
-                  {c.pdfFileId && (
+                  <div className="tabular-nums text-ink">
+                    {fmtDollars(pricingTotal(c.pricing) ?? c.amount)}
+                  </div>
+                  {(c.executedFileId || c.pdfFileId) && (
                     <Button variant="outline" size="sm" onClick={() => generatePdf(c)}>
                       Download PDF
                     </Button>
@@ -124,73 +220,109 @@ export default function ContractsPage() {
                 <TableHead>Client</TableHead>
                 <TableHead>Lab</TableHead>
                 <TableHead>Owner</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Contributor</TableHead>
+                <TableHead>Value</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Next</TableHead>
                 <TableHead>PDF</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contracts.map((c) => (
-                <TableRow key={c.id}>
-                  <TableCell className="font-medium text-ink">{c.client}</TableCell>
-                  <TableCell>{labName(c.lab)}</TableCell>
-                  <TableCell>{personName(c.owner)}</TableCell>
-                  <TableCell className="tabular-nums">{fmtDollars(c.amount)}</TableCell>
-                  <TableCell>
-                    <button
-                      className="text-left hover:text-violet-deep"
-                      onClick={() => setEditing(c)}
-                    >
-                      {c.contributorName || "— add contributor —"}
-                    </button>
-                  </TableCell>
-                  <TableCell>
-                    {role === "Admin" ? (
-                      <Select
-                        value={c.status}
-                        onValueChange={(v) => setStatus(c, v as ContractStatus)}
+              {contracts.map((c) => {
+                const action = nextAction(c);
+                return (
+                  <TableRow key={c.id}>
+                    <TableCell>
+                      <button
+                        className="text-left font-medium text-ink hover:text-violet-deep"
+                        onClick={() => setEditing(c)}
                       >
-                        <SelectTrigger className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CONTRACT_STATUSES.map((s) => (
-                            <SelectItem key={s} value={s}>{s}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
+                        {c.client}
+                      </button>
+                      <div className="text-xs text-ink-mute">{c.id}</div>
+                      {c.hasDeviations && (
+                        <Badge variant="warning" className="mt-1">
+                          Deviates from proposal
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>{labName(c.lab)}</TableCell>
+                    <TableCell>{personName(c.owner)}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {fmtDollars(pricingTotal(c.pricing) ?? c.amount)}
+                    </TableCell>
+                    <TableCell>
                       <Badge variant={CONTRACT_VARIANT[c.status]}>{c.status}</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="flex gap-2">
-                    {role === "Admin" && (
-                      <Button variant="outline" size="sm" onClick={() => generatePdf(c)}>
-                        Generate
+                      {c.status === "Signed" && c.executedAt && (
+                        <div className="mt-1 text-xs text-ink-mute">
+                          {new Date(c.executedAt).toLocaleDateString("en-US")}
+                        </div>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {action &&
+                        (action.disabled ? (
+                          <span className="text-xs text-ink-mute">{action.label}</span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant={action.label === "Countersign" ? "default" : "outline"}
+                            disabled={busy === c.id}
+                            onClick={action.run}
+                          >
+                            {busy === c.id ? "Working…" : action.label}
+                          </Button>
+                        ))}
+                      {c.status === "Signed" && c.contributorEmail && (
+                        <Button size="sm" variant="outline" onClick={() => setInviting(c)}>
+                          Invite contributor
+                        </Button>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy === c.id}
+                        onClick={() => generatePdf(c)}
+                      >
+                        {c.status === "Signed" ? "Executed copy" : "Draft PDF"}
                       </Button>
-                    )}
-                    {c.status === "Signed" && c.contributorEmail && (
-                      <Button variant="outline" size="sm" onClick={() => setInviting(c)}>
-                        Invite
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
       )}
 
+      {/* `role` is always set past the loading guard above; the fallback is the
+          non-privileged one so a null can never widen permissions. */}
       {editing && (
-        <ContributorDialog
+        <ContractEditor
           contract={editing}
+          people={people}
+          role={role ?? "Lab Leader"}
           open={!!editing}
           onOpenChange={(open) => !open && setEditing(null)}
           onSaved={(saved) => {
-            setContracts((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
-            setEditing(null);
+            replace(saved);
+            setEditing(saved);
+          }}
+        />
+      )}
+
+      {countersigning && (
+        <CountersignDialog
+          contract={countersigning}
+          open={!!countersigning}
+          onOpenChange={(open) => !open && setCountersigning(null)}
+          onSigned={async (saved) => {
+            replace(saved);
+            setCountersigning(null);
+            // Execution rolls the deal forward server-side, so pull proposals
+            // back down to keep the "ready for a contract" list honest.
+            setProposals(await api<Proposal[]>("/proposals"));
           }}
         />
       )}
@@ -203,66 +335,6 @@ export default function ContractsPage() {
         />
       )}
     </div>
-  );
-}
-
-function ContributorDialog({
-  contract,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  contract: Contract;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: (contract: Contract) => void;
-}) {
-  const [name, setName] = useState(contract.contributorName ?? "");
-  const [email, setEmail] = useState(contract.contributorEmail ?? "");
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const saved = await api<Contract>(`/contracts/${contract.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ contributorName: name, contributorEmail: email }),
-      });
-      toast.success("Contributor saved");
-      onSaved(saved);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save the contributor.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Contributor for {contract.client}</DialogTitle>
-          <DialogDescription>
-            Once this contract is Signed, the named contributor can be invited to the portal.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button className="bg-violet-deep hover:bg-violet" onClick={save} disabled={saving}>
-            {saving ? "Saving…" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -313,7 +385,7 @@ function InviteDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button className="bg-violet-deep hover:bg-violet" onClick={send} disabled={sending}>
+          <Button onClick={send} disabled={sending}>
             {sending ? "Sending…" : "Send invite"}
           </Button>
         </DialogFooter>

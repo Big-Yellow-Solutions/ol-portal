@@ -53,7 +53,7 @@ export default function ProposalsPage() {
           </p>
         </div>
         {canWrite && (
-          <Button asChild className="bg-violet-deep hover:bg-violet">
+          <Button asChild>
             <Link href="/optimist?new=1">✦ Write with The Optimist</Link>
           </Button>
         )}
@@ -204,16 +204,16 @@ function ShareDialog({
         </DialogHeader>
         <div className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label>Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
+            <Label htmlFor="share-name">Name</Label>
+            <Input id="share-name" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label>Email</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+            <Label htmlFor="share-email">Email</Label>
+            <Input id="share-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
           </div>
         </div>
         <DialogFooter>
-          <Button className="bg-violet-deep hover:bg-violet" onClick={save} disabled={saving}>
+          <Button onClick={save} disabled={saving}>
             {saving ? "Saving…" : "Save"}
           </Button>
         </DialogFooter>

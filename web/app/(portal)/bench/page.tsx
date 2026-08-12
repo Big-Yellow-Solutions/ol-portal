@@ -124,7 +124,7 @@ export default function BenchPage() {
         />
         {me && people[me] && (
           <Button
-            className="shrink-0 bg-violet-deep hover:bg-violet"
+            className="shrink-0"
             onClick={() => setEditingKey(me)}
           >
             Edit my profile
@@ -359,8 +359,8 @@ function EditProfileDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>&ldquo;Engage me for&rdquo; blurb</Label>
-            <Textarea
+            <Label htmlFor="bench-engage-me-for-blurb">&ldquo;Engage me for&rdquo; blurb</Label>
+            <Textarea id="bench-engage-me-for-blurb"
               value={blurb}
               onChange={(e) => setBlurb(e.target.value)}
               rows={3}
@@ -370,8 +370,8 @@ function EditProfileDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Specialties (comma-separated tags)</Label>
-            <Input
+            <Label htmlFor="bench-specialties">Specialties (comma-separated tags)</Label>
+            <Input id="bench-specialties"
               value={specialties}
               onChange={(e) => setSpecialties(e.target.value)}
               placeholder="grant writing, faith-based orgs"
@@ -379,8 +379,8 @@ function EditProfileDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Contact email (shown on your card unless hidden below)</Label>
-            <Input
+            <Label htmlFor="bench-contact-email">Contact email (shown on your card unless hidden below)</Label>
+            <Input id="bench-contact-email"
               type="email"
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
@@ -388,8 +388,8 @@ function EditProfileDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label>Phone (hidden unless you opt in below)</Label>
-            <Input value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <Label htmlFor="bench-phone">Phone (hidden unless you opt in below)</Label>
+            <Input id="bench-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
 
           <label className="flex items-center gap-2 text-sm text-ink">
@@ -407,7 +407,6 @@ function EditProfileDialog({
             Cancel
           </Button>
           <Button
-            className="bg-violet-deep hover:bg-violet"
             onClick={save}
             disabled={saving}
           >

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, useEffect, useId, useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
@@ -241,7 +241,7 @@ export default function LoginPage() {
           {error && <p className="text-sm text-red">{error}</p>}
           {pwnedWarning && <p className="text-sm text-amber">{pwnedWarning}</p>}
 
-          <Button type="submit" disabled={busy} className="mt-2 bg-violet-deep hover:bg-violet">
+          <Button type="submit" disabled={busy} className="mt-2">
             {busy ? "…" : BTN_LABEL[step]}
           </Button>
 
@@ -263,11 +263,21 @@ export default function LoginPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+// The Label has to carry htmlFor and the control a matching id: a bare <label>
+// sitting next to an input associates with nothing, which left every field on
+// this page with an empty accessible name.
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactElement<{ id?: string }>;
+}) {
+  const id = useId();
   return (
     <div className="flex flex-col gap-1.5">
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={id}>{label}</Label>
+      {cloneElement(children, { id })}
     </div>
   );
 }
