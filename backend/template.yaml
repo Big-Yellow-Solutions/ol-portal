@@ -166,10 +166,10 @@ Resources:
       GroupName: LabLeader
       UserPoolId: !Ref UserPool
 
-  SubcontractorGroup:
+  ContributorGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
-      GroupName: Subcontractor
+      GroupName: Contributor
       UserPoolId: !Ref UserPool
 
   PortalApi:

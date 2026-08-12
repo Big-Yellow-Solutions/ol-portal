@@ -70,11 +70,15 @@ function identity(event) {
   return { username, role };
 }
 
-const perms = (role, myLabs) => ({
+const perms = (role, myLabs, myKey) => ({
   inMyLabs: lab => myLabs.includes(lab),
   seesLab: lab => role === "Admin" || (role === "Lab Leader" && myLabs.includes(lab)),
+  // PRD 3.3: a Lab Leader also sees/edits a deal (and can request its invoices)
+  // outside their own lab(s) when they're the Lab Leader named on that deal —
+  // "projects in other labs that they are leading."
+  leadsDeal: d => role === "Lab Leader" && d.owner === myKey,
   addDeal: () => role === "Admin" || (role === "Lab Leader" && myLabs.length > 0),
-  editDeal: d => role === "Admin" || (role === "Lab Leader" && myLabs.includes(d.lab)),
+  editDeal: d => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(d.lab) || d.owner === myKey)),
   deleteDeal: () => role === "Admin",
   changeLab: () => role === "Admin",
   reviewInvoices: () => role === "Admin",
@@ -94,10 +98,10 @@ async function bootstrap(ctx) {
   });
 }
 
-async function listScoped(ctx, pk) {
+async function listScoped(ctx, pk, extraVisible) {
   if (ctx.role === "Contributor") return resp(200, []);
   const items = await listType(pk);
-  const visible = items.filter(x => ctx.can.seesLab(x.lab));
+  const visible = items.filter(x => ctx.can.seesLab(x.lab) || (extraVisible && extraVisible(x)));
   return resp(200, visible.map(({ pk: _, sk, ...rest }) => ({ id: sk, ...rest })));
 }
 
@@ -312,9 +316,10 @@ async function qboCallback(event) {
 /* ---------- router ---------- */
 async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
-  if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL");
+  if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL", ctx.can.leadsDeal);
   if (method === "GET" && path === "/proposals") return await listScoped(ctx, "PROPOSAL");
-  if (method === "GET" && path === "/invoices") return await listScoped(ctx, "INVOICE");
+  if (method === "GET" && path === "/invoices")
+    return await listScoped(ctx, "INVOICE", i => ctx.role === "Lab Leader" && i.requestedBy === ctx.me.sk);
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
   if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
@@ -397,9 +402,9 @@ export const handler = async event => {
       const target = await get("PERSON", actAsTarget);
       if (!target) return resp(404, { error: "No such user to act as" });
       if (target.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
-      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || []), realMe: me, realRole: role, actingAs: true };
+      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true };
     } else {
-      ctx = { me, role, can: perms(role, me.labs || []), realMe: me, realRole: role, actingAs: false };
+      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false };
     }
 
     const method = event.requestContext.http.method;

@@ -106,7 +106,7 @@ function visibleInvoices() { return INVOICES; }
 
 const can = {
   addDeal: () => ROLE === "Admin" || (ROLE === "Lab Leader" && MY_LABS.length > 0),
-  editDeal: d => ROLE === "Admin" || (ROLE === "Lab Leader" && MY_LABS.includes(d.lab)),
+  editDeal: d => ROLE === "Admin" || (ROLE === "Lab Leader" && (MY_LABS.includes(d.lab) || d.owner === ME)),
   deleteDeal: () => ROLE === "Admin",
   changeLab: () => ROLE === "Admin",
   reviewInvoices: () => ROLE === "Admin",

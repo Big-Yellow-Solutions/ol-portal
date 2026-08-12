@@ -394,8 +394,19 @@ function renderPipeline() {
 
 /* ---------- invoices ---------- */
 function renderInvoices() {
+  const labSel = document.getElementById("ifLab"), reqSel = document.getElementById("ifRequester");
+  const all = visibleInvoices();
+  const labKeys = [...new Set(all.map(i => i.lab))];
+  labSel.innerHTML = '<option value="">All labs</option>' +
+    labKeys.map(k => `<option value="${k}">${LABS[k].name}</option>`).join("");
+  const requesters = [...new Set(all.map(i => i.requestedBy))];
+  reqSel.innerHTML = '<option value="">All requesters</option>' +
+    requesters.map(k => `<option value="${k}">${PEOPLE[k].name}</option>`).join("");
+
   const draw = () => {
-    const invs = visibleInvoices();
+    const lab = labSel.value, requester = reqSel.value;
+    const invs = visibleInvoices().filter(i =>
+      (!lab || i.lab === lab) && (!requester || i.requestedBy === requester));
     document.getElementById("invRows").innerHTML = invs.length ? invs.map(i => {
       const next = i.status === "Admin review" ? "Sent to client" : i.status === "Sent to client" ? "Paid" : null;
       const action = can.reviewInvoices() && next
@@ -411,6 +422,7 @@ function renderInvoices() {
       </tr>`;
     }).join("") : '<tr><td colspan="7" class="empty">No invoice requests visible for this role.</td></tr>';
   };
+  labSel.onchange = reqSel.onchange = draw;
   document.getElementById("invRows").addEventListener("click", async e => {
     const b = e.target.closest("[data-inv]");
     if (!b) return;
