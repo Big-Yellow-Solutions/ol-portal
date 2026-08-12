@@ -233,7 +233,7 @@ async function updateDeal(ctx, id, body) {
 async function signAssignmentNotice(ctx, id, body) {
   const deal = await get("DEAL", id);
   if (!deal) return resp(404, { error: "deal not found" });
-  if (!ctx.can.seesLab(deal.lab)) return resp(403, { error: "Not allowed to access this deal" });
+  if (!ctx.can.seesLab(deal.lab) && !ctx.can.leadsDeal(deal)) return resp(403, { error: "Not allowed to access this deal" });
   if (deal.stage !== "Closed" || !deal.assignmentNotice)
     return resp(400, { error: "This deal has no Assignment Notice to sign" });
   const signerKey = body?.signerKey;
