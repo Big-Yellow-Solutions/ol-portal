@@ -24,20 +24,18 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { PROPOSAL_VARIANT, fullName } from "@/lib/data";
+import { PROPOSAL_VARIANT } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { usePortalData } from "@/lib/portal-data";
 import { SECTION_LABELS } from "@/lib/types";
 import type { Proposal } from "@/lib/types";
 
 export default function ProposalsPage() {
-  const { loading, error, proposals, labs, people, role, setProposals } = usePortalData();
+  const { loading, error, proposals, labs, role, setProposals } = usePortalData();
   const [sharing, setSharing] = useState<Proposal | null>(null);
   const [previewing, setPreviewing] = useState<Proposal | null>(null);
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
-  const personName = (username?: string) =>
-    username ? fullName(people[username]) || username : "—";
 
   if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;

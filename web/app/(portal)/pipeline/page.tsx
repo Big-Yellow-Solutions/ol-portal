@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fmtDollars, fullName, STAGE_VARIANT } from "@/lib/data";
+import { fmtDollars, fullName } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { usePortalData } from "@/lib/portal-data";
@@ -32,7 +32,7 @@ import type { AssignmentNotice, Deal, Outcome, Source, Stage } from "@/lib/types
 const OPEN_STAGES = STAGES.filter((s) => s !== "Closed");
 
 export default function PipelinePage() {
-  const { loading, error, deals, labs, people, role, me, myLabs, setDeals } =
+  const { loading, error, deals, labs, people, role, myLabs, setDeals } =
     usePortalData();
   const [search, setSearch] = useState("");
   const [labFilter, setLabFilter] = useState<string>("all");
