@@ -107,10 +107,39 @@ async function isValidDealOwner(key) {
   return !!p && (p.role === "Admin" || p.role === "Lab Leader");
 }
 
-function isValidAssignmentNotice(n) {
-  return !!n && typeof n.clientContactName === "string" && n.clientContactName.trim() &&
-    typeof n.scopeSummary === "string" && n.scopeSummary.trim();
+function sanitizeAssignmentNotice(n, existingSignatures) {
+  if (!n) return null;
+  return {
+    labLeaders: Array.isArray(n.labLeaders)
+      ? n.labLeaders.map(l => ({ key: l && l.key, feeSharePct: l && l.feeSharePct }))
+      : [],
+    subcontractorCosts: n.subcontractorCosts,
+    hardCosts: n.hardCosts,
+    signatures: existingSignatures || {}
+  };
 }
+
+async function isValidAssignmentNotice(n) {
+  if (!n || !Array.isArray(n.labLeaders) || !n.labLeaders.length) return false;
+  const seen = new Set();
+  let pctSum = 0;
+  for (const ll of n.labLeaders) {
+    if (!ll || typeof ll.key !== "string" || !ll.key || seen.has(ll.key)) return false;
+    seen.add(ll.key);
+    if (!Number.isFinite(ll.feeSharePct) || ll.feeSharePct < 0) return false;
+    pctSum += ll.feeSharePct;
+    const p = await get("PERSON", ll.key);
+    if (!p || p.role !== "Lab Leader") return false;
+  }
+  if (Math.abs(pctSum - 100) > 0.01) return false;
+  if (!Number.isFinite(n.subcontractorCosts) || n.subcontractorCosts < 0) return false;
+  if (!Number.isFinite(n.hardCosts) || n.hardCosts < 0) return false;
+  return true;
+}
+
+const sameAssignmentTerms = (a, b) =>
+  JSON.stringify(a?.labLeaders) === JSON.stringify(b?.labLeaders) &&
+  a?.subcontractorCosts === b?.subcontractorCosts && a?.hardCosts === b?.hardCosts;
 
 async function createDeal(ctx, body) {
   if (!ctx.can.addDeal()) return resp(403, { error: "Not allowed to add deals" });
@@ -127,15 +156,19 @@ async function createDeal(ctx, body) {
   if (!(await get("PERSON", ownerKey))) return resp(400, { error: "unknown owner" });
   const dealOwnerKey = dealOwner || ownerKey;
   if (!(await isValidDealOwner(dealOwnerKey))) return resp(400, { error: "unknown deal owner" });
-  if (stage === "Closed" && !isValidAssignmentNotice(body.assignmentNotice))
-    return resp(400, { error: "Assignment Notice is required when closing a deal" });
+  let assignmentNotice = null;
+  if (stage === "Closed") {
+    assignmentNotice = sanitizeAssignmentNotice(body.assignmentNotice, {});
+    if (!(await isValidAssignmentNotice(assignmentNotice)))
+      return resp(400, { error: "Assignment Notice is required when closing a deal" });
+  }
 
   const id = await nextId("DEAL", "D-");
   const deal = {
     pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
     stage, amount, close, source, recurring: !!recurring,
     ...(stage === "Closed" && ["Won", "Lost"].includes(body.outcome) ? { outcome: body.outcome } : {}),
-    ...(stage === "Closed" ? { assignmentNotice: body.assignmentNotice } : {})
+    ...(stage === "Closed" ? { assignmentNotice } : {})
   };
   await put(deal);
   const { pk, sk, ...rest } = deal;
@@ -163,12 +196,50 @@ async function updateDeal(ctx, id, body) {
   if ("outcome" in patch && !["Won", "Lost"].includes(patch.outcome)) return resp(400, { error: "invalid outcome" });
   if ("owner" in patch && !(await get("PERSON", patch.owner))) return resp(400, { error: "unknown owner" });
   if ("dealOwner" in patch && !(await isValidDealOwner(patch.dealOwner))) return resp(400, { error: "unknown deal owner" });
-  if (patch.stage === "Closed" && deal.stage !== "Closed" &&
-    !isValidAssignmentNotice(patch.assignmentNotice || deal.assignmentNotice))
+
+  let mergedNotice = deal.assignmentNotice;
+  if ("assignmentNotice" in patch) {
+    mergedNotice = sanitizeAssignmentNotice(patch.assignmentNotice, deal.assignmentNotice?.signatures);
+    const hasSignatures = Object.keys(deal.assignmentNotice?.signatures || {}).length > 0;
+    if (hasSignatures && !sameAssignmentTerms(deal.assignmentNotice, mergedNotice))
+      return resp(409, { error: "Assignment Notice terms are locked after a signature has been recorded" });
+  }
+  const noticeValid = await isValidAssignmentNotice(mergedNotice);
+  if ("assignmentNotice" in patch) {
+    if (!noticeValid) return resp(400, { error: "invalid assignment notice" });
+    patch.assignmentNotice = mergedNotice;
+  }
+  if (patch.stage === "Closed" && deal.stage !== "Closed" && !noticeValid)
     return resp(400, { error: "Assignment Notice is required when closing a deal" });
 
   const next = { ...deal, ...patch };
   if (next.stage !== "Closed") delete next.outcome;
+  await put(next);
+  const { pk, sk, ...rest } = next;
+  return resp(200, { id: sk, ...rest });
+}
+
+/* Lightweight "signature" like contracts (PRD 3.7 defers real e-signature): a
+   named person attests by hitting Sign, recorded server-side with their key
+   and a server timestamp. "ol" is the Optimistic Labs line, Admin-only. */
+async function signAssignmentNotice(ctx, id, body) {
+  const deal = await get("DEAL", id);
+  if (!deal) return resp(404, { error: "deal not found" });
+  if (!ctx.can.seesLab(deal.lab)) return resp(403, { error: "Not allowed to access this deal" });
+  if (deal.stage !== "Closed" || !deal.assignmentNotice)
+    return resp(400, { error: "This deal has no Assignment Notice to sign" });
+  const signerKey = body?.signerKey;
+  const isLabLeaderLine = deal.assignmentNotice.labLeaders.some(l => l.key === signerKey);
+  if (signerKey !== "ol" && !isLabLeaderLine) return resp(400, { error: "unknown signer" });
+  if (signerKey === "ol") {
+    if (ctx.role !== "Admin") return resp(403, { error: "Only an Admin can sign for Optimistic Labs" });
+  } else if (ctx.me.sk !== signerKey && ctx.role !== "Admin") {
+    return resp(403, { error: "You can only sign your own line" });
+  }
+  const signatures = { ...(deal.assignmentNotice.signatures || {}) };
+  if (signatures[signerKey]) return resp(409, { error: "This line is already signed" });
+  signatures[signerKey] = { by: ctx.me.sk, name: fullName(ctx.me), at: new Date().toISOString() };
+  const next = { ...deal, assignmentNotice: { ...deal.assignmentNotice, signatures } };
   await put(next);
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
@@ -319,6 +390,8 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
   if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "assignment-notice" && seg[3] === "sign")
+    return await signAssignmentNotice(ctx, seg[1], body);
   if (method === "GET" && path === "/files") return await listFiles(ctx);
   if (method === "POST" && path === "/files") return await createFile(ctx, body);
   if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);
