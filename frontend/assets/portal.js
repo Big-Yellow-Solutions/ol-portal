@@ -368,7 +368,7 @@ function renderPipeline() {
             <b>${d.client}</b>
             <div class="meta">${labCell(d.lab)}</div>
             <div class="amt">${fmt$(d.amount)}</div>
-            <div class="foot">${faceHTML(PEOPLE[d.owner])} ${PEOPLE[d.owner].firstName} · closes ${d.close.slice(5).replace("-", "/")}
+            <div class="foot">${faceHTML(PEOPLE[d.owner])} ${PEOPLE[d.owner].firstName} · ${d.stage === "Closed" ? "closed" : "closes"} ${d.close.slice(5).replace("-", "/")}
               ${d.stage === "Closed" ? `<span class="badge ${stageClass(d)}" style="margin-left:auto"><i></i>${d.outcome}</span>` : d.recurring ? '<span class="rec">↻ RECURRING</span>' : ""}</div>
           </div>`).join("") || '<div class="empty" style="padding:18px 0;font-size:12px">No deals</div>'}
       </div>`;

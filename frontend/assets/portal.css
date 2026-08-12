@@ -273,6 +273,10 @@ td .who small{display:block;font-weight:400;font-size:11.5px;color:var(--ink-mut
 .btn-mini{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-pale);
   border:none;border-radius:999px;padding:4px 11px;margin-left:6px;transition:all .18s}
 .btn-mini:hover{background:var(--violet-deep);color:#fff}
+.sig-line{display:flex;flex-direction:column;align-items:flex-end;gap:1px;line-height:1.15}
+.sig-script{font-family:'Caveat',cursive;font-size:24px;color:var(--ink)}
+.sig-preview{border-bottom:2px solid var(--ink-mute);min-height:38px;padding:8px 4px;margin:8px 0 2px;
+  font-family:'Caveat',cursive;font-size:28px;color:var(--ink);word-break:break-word}
 .row-sel{display:block;margin-top:6px;font-family:var(--sans);font-size:11.5px;font-weight:500;
   border:1px solid var(--hair);border-radius:8px;padding:4px 8px;background:var(--card);color:var(--ink-soft)}
 .top-ava img,.top-ava .face{width:34px;height:34px;border-radius:50%;object-fit:cover;
