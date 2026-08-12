@@ -22,7 +22,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { fmtDollars, fullName } from "@/lib/data";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { AnimatePresence, motion } from "framer-motion";
+import { Calendar, GripVertical, Repeat } from "lucide-react";
+import { fmtDollars, fullName, initials } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
@@ -33,6 +36,7 @@ import type {
   AssignmentNoticeLabLeader,
   Deal,
   Outcome,
+  Person,
   Source,
   Stage,
 } from "@/lib/types";
@@ -41,13 +45,65 @@ const OL_SIGNER_KEY = "ol";
 
 const OPEN_STAGES = STAGES.filter((s) => s !== "Closed");
 
+const BOARD_STAGES: Stage[] = [...OPEN_STAGES, "Closed"];
+
+// deal.close is a plain "YYYY-MM-DD" string. Parsing it with `new Date(iso)`
+// would read it as UTC midnight and render the previous day in western
+// timezones, so build the date from its parts instead.
+function fmtClose(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function PipelinePage() {
-  const { loading, error, deals, labs, people, role, myLabs, setDeals } =
+  const { loading, error, deals, labs, people, role, me, myLabs, setDeals } =
     usePortalData();
   const [search, setSearch] = useState("");
   const [labFilter, setLabFilter] = useState<string>("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [openDeal, setOpenDeal] = useState<Deal | "new" | null>(null);
+  const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
+  const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
+
+  // Drag-to-restage. Closing a deal is deliberately NOT done by dragging:
+  // the server rejects a move to "Closed" without an Assignment Notice, and
+  // closing also needs a Won/Lost outcome, so a drop on Closed hands off to
+  // DealDialog which already runs that flow.
+  const moveDeal = async (deal: Deal, stage: Stage) => {
+    if (deal.stage === stage) return;
+    if (!can.editDeal(deal, role!, myLabs, me)) {
+      toast.error("You don't have permission to move this deal.");
+      return;
+    }
+    if (stage === "Closed") {
+      toast.info("Closing a deal needs an outcome and an Assignment Notice.");
+      setOpenDeal(deal);
+      return;
+    }
+
+    const previous = deal.stage;
+    setDeals((prev) =>
+      prev.map((d) => (d.id === deal.id ? { ...d, stage } : d))
+    );
+    try {
+      const saved = await api<Deal>(`/deals/${deal.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ stage }),
+      });
+      setDeals((prev) => prev.map((d) => (d.id === saved.id ? saved : d)));
+    } catch (err) {
+      setDeals((prev) =>
+        prev.map((d) => (d.id === deal.id ? { ...d, stage: previous } : d))
+      );
+      toast.error(
+        err instanceof ApiError ? err.message : "Could not move this deal."
+      );
+    }
+  };
 
   const leaders = useMemo(
     () =>
@@ -119,45 +175,88 @@ export default function PipelinePage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-5">
-        {OPEN_STAGES.map((stage) => (
-          <div key={stage} className="flex flex-col gap-3">
-            <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-ink-mute">
-              <span>{stage}</span>
-              <span>{filtered.filter((d) => d.stage === stage).length}</span>
-            </div>
-            <div className="flex flex-col gap-2">
-              {filtered
-                .filter((d) => d.stage === stage)
-                .map((deal) => (
-                  <DealCard
-                    key={deal.id}
-                    deal={deal}
-                    labName={labName(deal.lab)}
-                    ownerName={personName(deal.owner)}
-                    onClick={() => setOpenDeal(deal)}
-                  />
-                ))}
-            </div>
-          </div>
-        ))}
+        {BOARD_STAGES.map((stage) => {
+          const stageDeals =
+            stage === "Closed"
+              ? closedDeals
+              : filtered.filter((d) => d.stage === stage);
+          const isDropTarget =
+            !!draggingDeal &&
+            dragOverStage === stage &&
+            draggingDeal.stage !== stage;
 
-        <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-ink-mute">
-            <span>Closed</span>
-            <span>{closedDeals.length}</span>
-          </div>
-          <div className="flex flex-col gap-2">
-            {closedDeals.map((deal) => (
-              <DealCard
-                key={deal.id}
-                deal={deal}
-                labName={labName(deal.lab)}
-                ownerName={personName(deal.owner)}
-                onClick={() => setOpenDeal(deal)}
-              />
-            ))}
-          </div>
-        </div>
+          return (
+            <div
+              key={stage}
+              onDragOver={(e) => {
+                if (!draggingDeal) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverStage !== stage) setDragOverStage(stage);
+              }}
+              onDragLeave={(e) => {
+                // ignore bubbling from children still inside this column
+                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                setDragOverStage((s) => (s === stage ? null : s));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverStage(null);
+                const id = e.dataTransfer.getData("text/plain");
+                const dropped = deals.find((d) => d.id === id) ?? draggingDeal;
+                setDraggingDeal(null);
+                if (dropped) void moveDeal(dropped, stage);
+              }}
+              className={cn(
+                "flex flex-col gap-3 rounded-2xl p-1 transition-colors",
+                isDropTarget && "bg-violet-pale ring-2 ring-violet-deep/40"
+              )}
+            >
+              <div className="flex items-center gap-2 px-1">
+                <h3 className="text-sm font-semibold text-ink">{stage}</h3>
+                <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">
+                  {stageDeals.length}
+                </span>
+              </div>
+
+              <div className="flex min-h-[96px] flex-col gap-3">
+                <AnimatePresence initial={false}>
+                  {stageDeals.map((deal) => (
+                    <motion.div
+                      key={deal.id}
+                      layout
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.96 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <DealCard
+                        deal={deal}
+                        labName={labName(deal.lab)}
+                        ownerName={personName(deal.owner)}
+                        owner={people[deal.owner]}
+                        canDrag={can.editDeal(deal, role!, myLabs, me)}
+                        isDragging={draggingDeal?.id === deal.id}
+                        onDragStart={() => setDraggingDeal(deal)}
+                        onDragEnd={() => {
+                          setDraggingDeal(null);
+                          setDragOverStage(null);
+                        }}
+                        onClick={() => setOpenDeal(deal)}
+                      />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+
+                {stageDeals.length === 0 && (
+                  <div className="flex h-24 items-center justify-center rounded-2xl border-2 border-dashed border-foreground/15 text-xs text-ink-mute">
+                    {draggingDeal ? "Drop here" : "No deals"}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {openDeal && (
@@ -188,30 +287,91 @@ function DealCard({
   deal,
   labName,
   ownerName,
+  owner,
+  canDrag,
+  isDragging,
+  onDragStart,
+  onDragEnd,
   onClick,
 }: {
   deal: Deal;
   labName: string;
   ownerName: string;
+  owner: Person | undefined;
+  canDrag: boolean;
+  isDragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
   onClick: () => void;
 }) {
   return (
     <button
       onClick={onClick}
-      className="flex flex-col gap-1 rounded-lg bg-card p-3 text-left ring-1 ring-foreground/10 transition hover:ring-violet-deep"
+      draggable={canDrag}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", deal.id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={cn(
+        "group relative flex w-full flex-col gap-4 rounded-2xl border border-foreground/10 bg-card p-4 text-left shadow-sm transition hover:border-violet-deep hover:shadow-md",
+        canDrag && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-40"
+      )}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium text-ink">{deal.client}</span>
+      {canDrag && (
+        <span
+          aria-hidden
+          className="absolute left-0.5 top-1/2 -translate-y-1/2 text-ink-mute opacity-0 transition-opacity group-hover:opacity-100"
+        >
+          <GripVertical size={14} />
+        </span>
+      )}
+
+      <div className="flex items-start justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-md bg-violet-pale px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-violet-deep">
+          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-deep" />
+          {labName}
+        </span>
         {deal.stage === "Closed" && deal.outcome && (
           <Badge variant={deal.outcome === "Won" ? "success" : "destructive"}>
             {deal.outcome}
           </Badge>
         )}
       </div>
-      <div className="text-xs text-ink-mute">{labName}</div>
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-ink-mute">{ownerName}</span>
-        <span className="tabular-nums text-ink">{fmtDollars(deal.amount)}</span>
+
+      <div className="flex flex-col gap-1">
+        <h4 className="text-[15px] font-semibold leading-snug text-ink">
+          {deal.client}
+        </h4>
+        <p className="text-xs text-ink-mute">{ownerName}</p>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-foreground/10 pt-3">
+        <div className="flex min-w-0 items-center gap-2.5 text-xs text-ink-mute">
+          {deal.close && (
+            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+              <Calendar size={14} aria-hidden />
+              {fmtClose(deal.close)}
+            </span>
+          )}
+          {deal.recurring && (
+            <span className="flex shrink-0 items-center" title="Recurring deal">
+              <Repeat size={14} aria-hidden />
+              <span className="sr-only">Recurring deal</span>
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="tabular-nums text-sm font-semibold text-ink">
+            {fmtDollars(deal.amount)}
+          </span>
+          <Avatar size="sm">
+            {owner?.photo && <AvatarImage src={owner.photo} alt="" />}
+            <AvatarFallback>{owner ? initials(owner) : "—"}</AvatarFallback>
+          </Avatar>
+        </div>
       </div>
     </button>
   );
