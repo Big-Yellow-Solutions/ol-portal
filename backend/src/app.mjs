@@ -82,7 +82,7 @@ const perms = (role, myLabs, myKey) => ({
   deleteDeal: () => role === "Admin",
   changeLab: () => role === "Admin",
   reviewInvoices: () => role === "Admin",
-  editProposal: p => role === "Admin" || (role === "Lab Leader" && myLabs.includes(p.lab)),
+  editProposal: p => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(p.lab) || p.owner === myKey)),
   approveProposal: () => role === "Admin"
 });
 
@@ -317,7 +317,7 @@ async function qboCallback(event) {
 async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
   if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL", ctx.can.leadsDeal);
-  if (method === "GET" && path === "/proposals") return await listScoped(ctx, "PROPOSAL");
+  if (method === "GET" && path === "/proposals") return await proposals.listProposals(ctx);
   if (method === "GET" && path === "/invoices")
     return await listScoped(ctx, "INVOICE", i => ctx.role === "Lab Leader" && i.requestedBy === ctx.me.sk);
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);

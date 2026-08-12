@@ -28,9 +28,12 @@ export async function listContracts(ctx) {
   const items = await listType("CONTRACT");
   // Contributors aren't lab-scoped like Lab Leaders — they only ever see the
   // contract(s) naming their own email (their copy, downloadable as a PDF).
+  // A Lab Leader also sees a contract outside their own lab(s) when they're
+  // the Lab Leader named on its deal (PRD 3.3 "leading a project" exception,
+  // same as Pipeline/Proposals) — visibility only; edits stay admin-only.
   const visible = ctx.role === "Contributor"
     ? items.filter(c => (c.contributorEmail || "").toLowerCase() === (ctx.me.email || "").toLowerCase())
-    : items.filter(c => ctx.can.seesLab(c.lab));
+    : items.filter(c => ctx.can.seesLab(c.lab) || (ctx.role === "Lab Leader" && c.owner === ctx.me.sk));
   visible.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   return resp(200, visible.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }
