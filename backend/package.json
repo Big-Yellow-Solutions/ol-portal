@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "seed": "node scripts/seed.mjs"
+    "seed": "node scripts/seed.mjs",
+    "migrate-users": "node scripts/migrate-users.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.0.0",

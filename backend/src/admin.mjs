@@ -11,6 +11,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand
 } from "@aws-sdk/lib-dynamodb";
+import { fullName } from "./util.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const POOL = process.env.USER_POOL_ID;
@@ -64,7 +65,9 @@ export async function listPortalUsers(ctx) {
       status: u.UserStatus,
       created: (u.UserCreateDate || new Date(0)).toISOString().slice(0, 10),
       mfaEnrolled,
-      name: person?.name || u.Username,
+      firstName: person?.firstName || "",
+      lastName: person?.lastName || "",
+      name: fullName(person) || u.Username,
       role: person?.role || "",
       labs: person?.labs || []
     };
@@ -88,7 +91,7 @@ async function signedContractUnlocks(labs, email) {
 }
 
 export async function createInvite(ctx, body) {
-  const { username, name, email, role, labs } = body || {};
+  const { firstName, lastName, email, role, labs } = body || {};
   if (!isAdmin(ctx)) {
     if (ctx.role !== "Lab Leader") return forbidden();
     if (role !== "Contributor")
@@ -96,9 +99,8 @@ export async function createInvite(ctx, body) {
     if (!(await signedContractUnlocks(ctx.me.labs || [], email)))
       return resp(403, { error: "No signed contract names this Contributor's email in your lab yet" });
   }
-  if (!/^[a-z][a-z0-9._-]{1,30}$/.test(username || ""))
-    return resp(400, { error: "username must be lowercase letters/numbers, 2-31 chars" });
-  if (typeof name !== "string" || !name.trim()) return resp(400, { error: "name is required" });
+  if (typeof firstName !== "string" || !firstName.trim()) return resp(400, { error: "first name is required" });
+  if (typeof lastName !== "string" || !lastName.trim()) return resp(400, { error: "last name is required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) return resp(400, { error: "valid email is required" });
   if (!GROUP_OF_ROLE[role]) return resp(400, { error: "role must be Admin, Lab Leader, or Contributor" });
   const labList = Array.isArray(labs) ? labs : [];
@@ -108,23 +110,27 @@ export async function createInvite(ctx, body) {
     const known = (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk: "LAB", sk: lab } }))).Item;
     if (!known) return resp(400, { error: `unknown lab: ${lab}` });
   }
+
+  // Username = email (lowercased, matching Cognito's case-insensitive Username
+  // config) so people sign in with the address they already know.
+  const username = email.trim().toLowerCase();
   const existing = (await doc.send(new GetCommand({
     TableName: TABLE, Key: { pk: "PERSON", sk: username }
   }))).Item;
-  if (existing) return resp(409, { error: "that username already has a portal profile" });
+  if (existing) return resp(409, { error: "that email already has a portal profile" });
 
   try {
     await idp.send(new AdminCreateUserCommand({
       UserPoolId: POOL, Username: username,
       UserAttributes: [
-        { Name: "email", Value: email },
+        { Name: "email", Value: email.trim() },
         { Name: "email_verified", Value: "true" }
       ],
       DesiredDeliveryMediums: ["EMAIL"]
     }));
   } catch (err) {
     if (err.name === "UsernameExistsException")
-      return resp(409, { error: "that username already exists in Cognito" });
+      return resp(409, { error: "that email already exists in Cognito" });
     throw err;
   }
   await idp.send(new AdminAddUserToGroupCommand({
@@ -132,9 +138,12 @@ export async function createInvite(ctx, body) {
   }));
   await doc.send(new PutCommand({
     TableName: TABLE,
-    Item: { pk: "PERSON", sk: username, name: name.trim(), role, labs: labList, email }
+    Item: {
+      pk: "PERSON", sk: username, firstName: firstName.trim(), lastName: lastName.trim(),
+      role, labs: labList, email: email.trim()
+    }
   }));
-  await writeAudit(ctx.me.sk, "invite.created", `${username} (${role}) → ${email}`);
+  await writeAudit(ctx.me.sk, "invite.created", `${username} (${role})`);
   return resp(201, { invited: username });
 }
 
@@ -238,7 +247,7 @@ export async function startActingAs(ctx, body) {
   if (!person) return resp(404, { error: "no such user" });
   if (person.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
   await writeAudit(ctx.realMe.sk, "admin.act-as-start", `${target} (${person.role})`);
-  return resp(200, { username: target, name: person.name, role: person.role });
+  return resp(200, { username: target, name: fullName(person), role: person.role });
 }
 
 export async function stopActingAs(ctx) {

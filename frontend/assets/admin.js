@@ -33,7 +33,7 @@ async function renderAdmin() {
       const pending = u.status === "FORCE_CHANGE_PASSWORD";
       const self = u.username === ME;
       return `<tr>
-        <td><b>${u.name}</b><br><small style="color:var(--ink-mute)">${u.username}</small></td>
+        <td><b>${u.name}</b></td>
         <td>${u.email || '<span style="color:var(--red)">no email</span>'}
           <button class="btn-mini" data-email="${u.username}" title="Change email">✎</button></td>
         <td>${u.role || "—"}<br><small style="color:var(--ink-mute)">${(u.labs || []).map(k => LABS[k]?.name || k).join(", ")}</small></td>
@@ -72,8 +72,8 @@ async function renderAdmin() {
       await api("/admin/invites", {
         method: "POST",
         body: {
-          name: f.invName.value.trim(),
-          username: f.invUser.value.trim().toLowerCase(),
+          firstName: f.invFirstName.value.trim(),
+          lastName: f.invLastName.value.trim(),
           email: f.invEmail.value.trim(),
           role: f.invRole.value,
           labs: [...f.querySelectorAll('input[name="invLab"]:checked')].map(c => c.value)
@@ -89,12 +89,6 @@ async function renderAdmin() {
     }
     btn.disabled = false;
   });
-
-  document.getElementById("invName").addEventListener("input", e => {
-    const u = document.getElementById("invUser");
-    if (!u.dataset.touched) u.value = e.target.value.trim().split(/\s+/)[0].toLowerCase().replace(/[^a-z0-9._-]/g, "");
-  });
-  document.getElementById("invUser").addEventListener("input", e => { e.target.dataset.touched = "1"; });
 
   document.getElementById("userRows").addEventListener("click", async e => {
     const b = e.target.closest("button");
@@ -113,7 +107,7 @@ async function renderAdmin() {
           await api(`/admin/users/${b.dataset.mfa}/reset-mfa`, { method: "POST" });
         }
       } else if (b.dataset.email) {
-        const email = prompt(`New email for ${b.dataset.email}:`);
+        const email = prompt(`New contact email for ${b.dataset.email}:\n(their sign-in username stays ${b.dataset.email} — Cognito usernames can't be renamed)`);
         if (email) await api(`/admin/users/${b.dataset.email}`, { method: "PATCH", body: { email } });
       } else if (b.dataset.actas) {
         if (confirm(`View and act as ${b.dataset.actas}? You'll see exactly what they see and can make changes as them until you exit — every action is logged.`)) {

@@ -27,7 +27,8 @@ const fmt$ = n => "$" + n.toLocaleString("en-US");
 const fmtK = n => n >= 1000 ? "$" + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + "k" : "$" + n;
 const stageLabel = d => d.stage === "Closed" ? "Closed " + d.outcome : d.stage;
 const stageClass = d => STAGE_CLASS[stageLabel(d)] || "b-lead";
-const initials = name => name.split(" ").map(w => w[0]).join("").slice(0, 2);
+const fullName = p => [p?.firstName, p?.lastName].filter(Boolean).join(" ");
+const initials = p => ((p?.firstName || "")[0] || "") + ((p?.lastName || "")[0] || "");
 const faceHTML = p => p.photo
-  ? `<img src="${p.photo}" alt="${p.name}">`
-  : `<span class="face">${initials(p.name)}</span>`;
+  ? `<img src="${p.photo}" alt="${fullName(p)}">`
+  : `<span class="face">${initials(p)}</span>`;
