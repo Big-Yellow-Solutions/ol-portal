@@ -38,10 +38,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PricingTable } from "@/components/pricing-table";
+import { PricingEditor } from "@/components/pricing-editor";
 import { api, ApiError } from "@/lib/api";
 import { fullName } from "@/lib/data";
-import type { Contract, Deviation, Person, Role } from "@/lib/types";
+import type { Contract, Deviation, Person, Pricing, Role } from "@/lib/types";
 
 interface DeviationError {
   needsDeviationAck?: boolean;
@@ -75,6 +75,7 @@ export function ContractEditor({
   const [timeline, setTimeline] = useState(contract.sections?.timeline ?? "");
   const [contributorName, setContributorName] = useState(contract.contributorName ?? "");
   const [contributorEmail, setContributorEmail] = useState(contract.contributorEmail ?? "");
+  const [pricing, setPricing] = useState<Pricing | null>(contract.pricing ?? null);
 
   const [pendingDeviations, setPendingDeviations] = useState<Deviation[] | null>(null);
   const [deviationNote, setDeviationNote] = useState("");
@@ -92,6 +93,7 @@ export function ContractEditor({
     clientSignerEmail: signerEmail,
     olSignatory,
     sections: { ...(contract.sections ?? {}), scope, deliverables, timeline },
+    pricing,
     // Naming a Contributor is admin-only server-side, so only send the fields
     // when an Admin is driving — otherwise a Lab Leader's save would 403.
     ...(role === "Admin" ? { contributorName, contributorEmail } : {}),
@@ -243,7 +245,7 @@ export function ContractEditor({
 
           <section className="flex flex-col gap-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
-              Inherited from the approved proposal
+              {contract.inherited ? "Inherited from the approved proposal" : "Scope and pricing"}
             </h3>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="scope">Scope</Label>
@@ -267,13 +269,15 @@ export function ContractEditor({
                 onChange={(e) => setTimeline(e.target.value)}
               />
             </div>
-            <div>
+            <div className="flex flex-col gap-1.5">
               <Label>Pricing</Label>
-              <PricingTable pricing={contract.pricing} />
-              <p className="mt-1 text-xs text-ink-mute">
-                Pricing comes from the approved proposal. Changing it is a deviation, so it is
-                edited from the proposal rather than here.
-              </p>
+              <PricingEditor value={pricing} onChange={setPricing} disabled={locked} />
+              {contract.inherited && (
+                <p className="text-xs text-ink-mute">
+                  These figures came from the approved proposal. Changing them is a deviation and
+                  has to be confirmed before it saves.
+                </p>
+              )}
             </div>
           </section>
 

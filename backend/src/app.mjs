@@ -419,8 +419,9 @@ async function route(ctx, method, path, seg, body) {
   if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
   if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
   // Base Contract PRD 5.4: generation is an explicit action on an approved
-  // proposal, not a side effect of the customer's approval.
-  if (method === "POST" && path === "/contracts") return await contracts.generateContract(ctx, body);
+  // proposal, not a side effect of the customer's approval. The same route also
+  // creates a contract directly, with no proposal behind it.
+  if (method === "POST" && path === "/contracts") return await contracts.createContract(ctx, body);
   if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "send-for-signature")
     return await signing.sendForSignature(ctx, seg[1], body);
   if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "countersign")

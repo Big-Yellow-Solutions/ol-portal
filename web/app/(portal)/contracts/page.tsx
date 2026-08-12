@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table";
 import { ContractEditor } from "@/components/contract-editor";
 import { CountersignDialog } from "@/components/countersign-dialog";
+import { NewContractDialog } from "@/components/new-contract-dialog";
 import { CONTRACT_VARIANT, fmtDollars, fullName } from "@/lib/data";
 import { pricingTotal } from "@/lib/pricing";
 import { api, ApiError } from "@/lib/api";
@@ -45,6 +46,7 @@ export default function ContractsPage() {
   const [editing, setEditing] = useState<Contract | null>(null);
   const [inviting, setInviting] = useState<Contract | null>(null);
   const [countersigning, setCountersigning] = useState<Contract | null>(null);
+  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
@@ -141,12 +143,19 @@ export default function ContractsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-serif text-2xl italic text-ink">Contracts</h1>
-        <p className="mt-1 text-sm text-ink-mute">
-          Generated from an approved proposal, then signed by the client and countersigned by an
-          Admin.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-serif text-2xl italic text-ink">Contracts</h1>
+          <p className="mt-1 text-sm text-ink-mute">
+            Generated from an approved proposal, or written directly. Signed by the client, then
+            countersigned by an Admin.
+          </p>
+        </div>
+        {!isReadOnly && (
+          <Button className="bg-violet-deep hover:bg-violet" onClick={() => setCreating(true)}>
+            New contract
+          </Button>
+        )}
       </div>
 
       {!isReadOnly && awaitingContract.length > 0 && (
@@ -323,6 +332,20 @@ export default function ContractsPage() {
             // Execution rolls the deal forward server-side, so pull proposals
             // back down to keep the "ready for a contract" list honest.
             setProposals(await api<Proposal[]>("/proposals"));
+          }}
+        />
+      )}
+
+      {creating && (
+        <NewContractDialog
+          open={creating}
+          onOpenChange={setCreating}
+          onCreated={(created) => {
+            setContracts((prev) => [created, ...prev]);
+            setCreating(false);
+            // Straight into the editor: a fresh contract still needs terms,
+            // signatories and a payment schedule before it can go anywhere.
+            setEditing(created);
           }}
         />
       )}

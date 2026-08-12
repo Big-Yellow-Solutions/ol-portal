@@ -51,6 +51,94 @@ const str = (v, max) => String(v ?? "").trim().slice(0, max);
 
 /* ---------- generation (FR10) ---------- */
 
+/* Two ways a contract comes into being, both on POST /contracts:
+
+     with proposalId   the PRD 5.4 path — inherits scope and pricing from the
+                       version the customer approved, and carries the deviation
+                       machinery that keeps the two honest.
+
+     without           a contract written directly in the Contracts tab. Not
+                       every engagement starts with a formal proposal: renewals,
+                       handshake deals, and work already agreed by email all
+                       need paper without a proposal round. There is nothing to
+                       inherit, so there is nothing to deviate from — the
+                       deviation guard simply doesn't apply (deviationsOf()
+                       returns nothing without an `inherited` block).
+
+   Everything downstream is identical: same template merge, same signing flow,
+   same audit trail. */
+export async function createContract(ctx, body) {
+  return body?.proposalId ? generateContract(ctx, body) : createStandalone(ctx, body);
+}
+
+async function createStandalone(ctx, body) {
+  const b = body || {};
+  if (ctx.role === "Contributor") return resp(403, { error: "Not allowed to create contracts" });
+
+  // A deal is optional but preferred: attaching one is what lets the contract
+  // roll the pipeline forward and feed invoicing on execution.
+  let deal = null;
+  if (b.dealId) {
+    deal = await get("DEAL", b.dealId);
+    if (!deal) return resp(404, { error: "deal not found" });
+    if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to contract on this deal" });
+  }
+
+  const lab = str(b.lab, 80) || deal?.lab;
+  if (!lab) return resp(400, { error: "lab is required" });
+  if (!(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
+  if (ctx.role !== "Admin" && !ctx.can.seesLab(lab) && deal?.owner !== ctx.me.sk)
+    return resp(403, { error: "Not allowed to create contracts for that lab" });
+
+  const client = str(b.client, 200) || deal?.client;
+  if (!client) return resp(400, { error: "client is required" });
+
+  const { value: pricing, error: pricingError } = cleanPricing(b.pricing);
+  if (pricingError) return resp(400, { error: pricingError });
+
+  // An explicit template wins; otherwise fall back to the lab's own, then the
+  // OL-wide one — same resolution the proposal path uses.
+  let template = null;
+  if (b.templateId) {
+    template = await get("TEMPLATE", b.templateId);
+    if (!template || template.kind !== "contract")
+      return resp(400, { error: "unknown contract template" });
+    if (template.lab && !ctx.can.seesLab(template.lab))
+      return resp(403, { error: "That template belongs to another lab" });
+  } else {
+    template = await contractTemplateFor(lab);
+  }
+
+  const ownerKey = deal?.owner || ctx.me.sk;
+  const owner = await get("PERSON", ownerKey);
+
+  const id = await nextId("CONTRACT", "C-");
+  const base = {
+    pk: "CONTRACT", sk: id, client, lab, owner: ownerKey,
+    ...(deal ? { deal: deal.sk } : {}),
+    status: "Draft", created: today(), updated: today(),
+    sections: Object.fromEntries(INHERITED_SECTIONS.map(k => [k, str(b.sections?.[k], MAX_SECTION_CHARS)])),
+    pricing,
+    amount: pricingTotal(pricing) ?? deal?.amount,
+    deviationLog: [],
+    ...(template ? { templateId: template.sk, templateName: template.name } : {})
+  };
+
+  if (template) {
+    const vars = templateVars({ contract: base, deal, lab: await get("LAB", lab), owner, signatory: null });
+    const { clauses, unresolved } = mergeClauses(template.clauses, vars);
+    base.clauses = clauses;
+    base.unresolvedVars = unresolved;
+  }
+
+  await put(base);
+  await writeAudit(ctx.me.sk, "contract.created",
+    `${id} direct (${client})${deal ? " · deal " + deal.sk : " · no deal"}${template ? " · template " + template.name : " · NO TEMPLATE"}`);
+
+  const { pk, sk, ...rest } = base;
+  return resp(201, { id: sk, ...rest });
+}
+
 export async function generateContract(ctx, body) {
   const proposalId = body?.proposalId;
   const p = await get("PROPOSAL", proposalId);
