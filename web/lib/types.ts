@@ -33,6 +33,13 @@ export type ContractStatus =
   | "Signed"
   | "Sent";
 
+/* Mirrors DOC_KINDS in backend/src/util.mjs. Every agreement is a CONTRACT
+   record; this says which kind of paper it is. The API always sends it
+   explicitly (contracts.mjs decorate()), so nothing on this side has to know
+   that an absent value means "client" — but the field stays optional because
+   a Contract can also be built locally before a round trip. */
+export type DocKind = "client" | "msa" | "task-order";
+
 export type FileStatus =
   | "Uploading"
   | "Analyzing"
@@ -152,7 +159,11 @@ export interface DeviationLogEntry extends Deviation {
 }
 
 /* Admin-maintained reusable content and contract terms (FR1, FR12). */
-export type TemplateKind = "proposal" | "block" | "contract";
+/* Mirrors TEMPLATE_KINDS in backend/src/templates.mjs. "contract", "msa" and
+   "task-order" are structurally identical clause lists; they're separate kinds
+   so customer and contributor paper can be maintained apart, and so template
+   resolution can't hand a Contributor the client agreement. */
+export type TemplateKind = "proposal" | "block" | "contract" | "msa" | "task-order";
 
 export interface ContentTemplate {
   id: string;
@@ -338,8 +349,16 @@ export interface FileRecord {
 // Field names match backend/src/contracts.mjs's raw record shape.
 export interface Contract {
   id: string;
+  /** Which kind of agreement this is. Absent on locally built objects only. */
+  docKind?: DocKind;
+  /** Human label for that kind ("Contract", "MSA", "Task Order"), server-sent. */
+  docLabel?: string;
+  /** The signed MSA a task order was issued under (Contributor MSA PRD FR6). */
+  parentId?: string;
   proposal?: string;
   deal?: string;
+  /** The counterparty: the customer on client paper, the Contributor on an MSA
+   *  or task order. One stored field, two labels — see templateVars() server-side. */
   client: string;
   lab: string;
   owner?: string;

@@ -12,6 +12,7 @@ import * as qbo from "./qbo.mjs";
 import * as admin from "./admin.mjs";
 import * as proposals from "./proposals.mjs";
 import * as contracts from "./contracts.mjs";
+import * as contractsCreate from "./contracts-create.mjs";
 import * as recurring from "./recurring.mjs";
 import * as assist from "./assist.mjs";
 import * as profile from "./profile.mjs";
@@ -420,10 +421,12 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && seg[0] === "proposals" && seg[2] === "send") return await proposals.sendProposal(ctx, seg[1], body);
   if (method === "PATCH" && seg[0] === "proposals" && seg[1]) return await proposals.updateProposal(ctx, seg[1], body);
   if (method === "GET" && path === "/contracts") return await contracts.listContracts(ctx);
-  // Base Contract PRD 5.4: generation is an explicit action on an approved
-  // proposal, not a side effect of the customer's approval. The same route also
-  // creates a contract directly, with no proposal behind it.
-  if (method === "POST" && path === "/contracts") return await contracts.createContract(ctx, body);
+  /* Base Contract PRD 5.4: generation is an explicit action on an approved
+     proposal, not a side effect of the customer's approval. The same route also
+     creates a contract directly with no proposal behind it, and — with
+     `docKind` in the body — a Contributor MSA or a task order under one. One
+     route because they're one record type; see DOC_KINDS in util.mjs. */
+  if (method === "POST" && path === "/contracts") return await contractsCreate.createContract(ctx, body);
   if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "send-for-signature")
     return await signing.sendForSignature(ctx, seg[1], body);
   if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "countersign")

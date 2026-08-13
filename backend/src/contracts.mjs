@@ -15,16 +15,22 @@
    - Standard terms come from an Admin-maintained, lab-specific contract
      template merged at generation time (FR12).
 
-   Signing lives in signing.mjs. Signed remains reachable manually by an Admin,
-   which is the paper fallback for a client who insists on wet ink. */
+   Creating one lives in contracts-create.mjs; signing lives in signing.mjs.
+   Signed remains reachable manually by an Admin, which is the paper fallback
+   for a client who insists on wet ink.
 
-import { resp, today, get, put, listType, nextId } from "./util.mjs";
+   The Contributor MSA PRD added two more kinds of paper to this module rather
+   than a parallel stack (see DOC_KINDS in util.mjs). An MSA and a task order
+   are the same record shape as a contract, so they inherit the signing flow,
+   the tamper hash, the PDF renderer and the audit trail unchanged; what
+   differs per kind is which fields are required, which template supplies the
+   standard terms, and what the document is called. Those differences are
+   data (DOC_META) rather than branches wherever that was possible. */
+
+import { resp, today, get, put, listType, docKind, docMeta, isContributorDoc } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
-import { approvedSnapshot } from "./proposals.mjs";
-import { contractTemplateFor, mergeClauses, templateVars } from "./templates.mjs";
-import {
-  cleanPricing, samePricing, pricingTotal, pricingDiffSummary, collapseToSelected
-} from "./pricing.mjs";
+import { mergeClauses, templateVars } from "./templates.mjs";
+import { cleanPricing, samePricing, pricingTotal, pricingDiffSummary } from "./pricing.mjs";
 
 /* Human labels for deviation messages. The raw section keys leak into a
    customer-visible PDF otherwise. */
@@ -41,185 +47,62 @@ const LL_CONTRACT_STATUSES = ["Draft", "Internal Review"];
    looking at a hashed document and changing it underneath them would break the
    audit trail signing.mjs depends on. */
 const EDITABLE_STATUSES = ["Draft", "Internal Review"];
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MAX_SECTION_CHARS = 20_000;
-const MAX_FIELD = 200;
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const MAX_SECTION_CHARS = 20_000;
+export const MAX_FIELD = 200;
+export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-const INHERITED_SECTIONS = ["summary", "scope", "deliverables", "timeline", "pricing", "terms"];
-const str = (v, max) => String(v ?? "").trim().slice(0, max);
-
-/* ---------- generation (FR10) ---------- */
-
-/* Two ways a contract comes into being, both on POST /contracts:
-
-     with proposalId   the PRD 5.4 path — inherits scope and pricing from the
-                       version the customer approved, and carries the deviation
-                       machinery that keeps the two honest.
-
-     without           a contract written directly in the Contracts tab. Not
-                       every engagement starts with a formal proposal: renewals,
-                       handshake deals, and work already agreed by email all
-                       need paper without a proposal round. There is nothing to
-                       inherit, so there is nothing to deviate from — the
-                       deviation guard simply doesn't apply (deviationsOf()
-                       returns nothing without an `inherited` block).
-
-   Everything downstream is identical: same template merge, same signing flow,
-   same audit trail. */
-export async function createContract(ctx, body) {
-  return body?.proposalId ? generateContract(ctx, body) : createStandalone(ctx, body);
-}
-
-async function createStandalone(ctx, body) {
-  const b = body || {};
-  if (ctx.role === "Contributor") return resp(403, { error: "Not allowed to create contracts" });
-
-  // A deal is optional but preferred: attaching one is what lets the contract
-  // roll the pipeline forward and feed invoicing on execution.
-  let deal = null;
-  if (b.dealId) {
-    deal = await get("DEAL", b.dealId);
-    if (!deal) return resp(404, { error: "deal not found" });
-    if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to contract on this deal" });
-  }
-
-  const lab = str(b.lab, 80) || deal?.lab;
-  if (!lab) return resp(400, { error: "lab is required" });
-  if (!(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
-  if (ctx.role !== "Admin" && !ctx.can.seesLab(lab) && deal?.owner !== ctx.me.sk)
-    return resp(403, { error: "Not allowed to create contracts for that lab" });
-
-  const client = str(b.client, 200) || deal?.client;
-  if (!client) return resp(400, { error: "client is required" });
-
-  const { value: pricing, error: pricingError } = cleanPricing(b.pricing);
-  if (pricingError) return resp(400, { error: pricingError });
-
-  // An explicit template wins; otherwise fall back to the lab's own, then the
-  // OL-wide one — same resolution the proposal path uses.
-  let template = null;
-  if (b.templateId) {
-    template = await get("TEMPLATE", b.templateId);
-    if (!template || template.kind !== "contract")
-      return resp(400, { error: "unknown contract template" });
-    if (template.lab && !ctx.can.seesLab(template.lab))
-      return resp(403, { error: "That template belongs to another lab" });
-  } else {
-    template = await contractTemplateFor(lab);
-  }
-
-  const ownerKey = deal?.owner || ctx.me.sk;
-  const owner = await get("PERSON", ownerKey);
-
-  const id = await nextId("CONTRACT", "C-");
-  const base = {
-    pk: "CONTRACT", sk: id, client, lab, owner: ownerKey,
-    ...(deal ? { deal: deal.sk } : {}),
-    status: "Draft", created: today(), updated: today(),
-    sections: Object.fromEntries(INHERITED_SECTIONS.map(k => [k, str(b.sections?.[k], MAX_SECTION_CHARS)])),
-    pricing,
-    amount: pricingTotal(pricing) ?? deal?.amount,
-    deviationLog: [],
-    ...(template ? { templateId: template.sk, templateName: template.name } : {})
-  };
-
-  if (template) {
-    const vars = templateVars({ contract: base, deal, lab: await get("LAB", lab), owner, signatory: null });
-    const { clauses, unresolved } = mergeClauses(template.clauses, vars);
-    base.clauses = clauses;
-    base.unresolvedVars = unresolved;
-  }
-
-  await put(base);
-  await writeAudit(ctx.me.sk, "contract.created",
-    `${id} direct (${client})${deal ? " · deal " + deal.sk : " · no deal"}${template ? " · template " + template.name : " · NO TEMPLATE"}`);
-
-  const { pk, sk, ...rest } = base;
-  return resp(201, { id: sk, ...rest });
-}
-
-export async function generateContract(ctx, body) {
-  const proposalId = body?.proposalId;
-  const p = await get("PROPOSAL", proposalId);
-  if (!p) return resp(404, { error: "proposal not found" });
-  if (!ctx.can.editProposal(p)) return resp(403, { error: "Not allowed to generate a contract for this proposal" });
-
-  const snapshot = approvedSnapshot(p);
-  if (!snapshot)
-    return resp(409, { error: "Only a customer-approved proposal can become a contract" });
-
-  // One contract per proposal (PRD 7). Pressing the button twice returns the
-  // contract that already exists rather than forking the audit trail.
-  const existing = (await listType("CONTRACT")).find(c => c.proposal === p.sk);
-  if (existing) {
-    const { pk, sk, ...rest } = existing;
-    return resp(200, { id: sk, ...rest, alreadyExisted: true });
-  }
-
-  const [deal, lab, owner, template] = await Promise.all([
-    get("DEAL", p.deal), get("LAB", p.lab), get("PERSON", p.owner), contractTemplateFor(p.lab)
-  ]);
-
-  /* Collapse a chosen package to a single priced line. The proposal offered a
-     menu; the contract is for the one thing they bought, and an agreement that
-     also quotes the declined options invites an argument later. Both the frozen
-     `inherited` copy and the live one use the collapsed form so deviation
-     detection still compares like with like. */
-  const pricing = collapseToSelected(snapshot.pricing);
-
-  const id = await nextId("CONTRACT", "C-");
-  const base = {
-    pk: "CONTRACT", sk: id, proposal: p.sk, deal: p.deal, client: p.client,
-    lab: p.lab, owner: deal?.owner || p.author,
-    status: "Draft", created: today(), updated: today(),
-    // Frozen record of what the customer approved. Never edited afterwards.
-    inherited: {
-      version: snapshot.version,
-      approvedAt: snapshot.approvedAt,
-      sections: snapshot.sections,
-      pricing
-    },
-    // The live, editable copy. Starts identical to `inherited`.
-    sections: snapshot.sections,
-    pricing,
-    amount: pricingTotal(pricing) ?? deal?.amount,
-    deviationLog: [],
-    ...(template ? { templateId: template.sk, templateName: template.name } : {})
-  };
-
-  // Standard terms merged from the lab's template (FR12). Placeholders that
-  // depend on fields the Lab Leader hasn't filled in yet stay visible and come
-  // back in `unresolved` so the UI can block sending until they're closed.
-  if (template) {
-    const vars = templateVars({ contract: base, deal, lab, owner, signatory: null });
-    const { clauses, unresolved } = mergeClauses(template.clauses, vars);
-    base.clauses = clauses;
-    base.unresolvedVars = unresolved;
-  }
-
-  await put(base);
-  await writeAudit(ctx.me.sk, "contract.generated",
-    `${id} from ${p.sk} v${snapshot.version} (${p.client})${template ? " · template " + template.name : " · NO TEMPLATE"}`);
-
-  const { pk, sk, ...rest } = base;
-  return resp(201, { id: sk, ...rest });
-}
+/* Doubles as the section vocabulary for every kind of document. Client
+   contracts inherit all six from an approved proposal; MSAs use `scope` and
+   `terms`; task orders use `scope`, `deliverables` and `timeline`. Keeping one
+   list means the PDF renderer and the editor don't branch per kind. */
+/* Shared with contracts-create.mjs. The dependency runs one way only:
+   creation reads the shapes and permission rules defined here, and nothing
+   here reaches back into creation. */
+export const INHERITED_SECTIONS = ["summary", "scope", "deliverables", "timeline", "pricing", "terms"];
+export const str = (v, max) => String(v ?? "").trim().slice(0, max);
 
 /* ---------- read ---------- */
 
 export async function listContracts(ctx) {
   const items = await listType("CONTRACT");
   // Contributors aren't lab-scoped like Lab Leaders — they only ever see the
-  // contract(s) naming their own email (their copy, downloadable as a PDF).
+  // documents they're a party to (their copy, downloadable as a PDF).
   // A Lab Leader also sees a contract outside their own lab(s) when they're
   // the Lab Leader named on its deal (PRD 3.3 "leading a project" exception,
   // same as Pipeline/Proposals).
   const visible = ctx.role === "Contributor"
-    ? items.filter(c => (c.contributorEmail || "").toLowerCase() === (ctx.me.email || "").toLowerCase())
+    ? contributorVisible(items, ctx.me.email)
     : items.filter(c => ctx.can.seesLab(c.lab) || (ctx.role === "Lab Leader" && c.owner === ctx.me.sk));
   visible.sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   return resp(200, visible.map(decorate));
+}
+
+/* FR10: a Contributor's own reference copy of everything they've signed — the
+   MSA, every task order under it, and any client contract that named them.
+
+   Two email fields both count, because they mean different things:
+   `clientSignerEmail` is who signs a document, `contributorEmail` is who the
+   invite gate names (admin.mjs signedContractUnlocks). A Contributor is a
+   party either way. The parent roll-up covers a task order whose inherited
+   signer email was later corrected on the MSA.
+
+   Restricted to executed documents. FR10 says "signed", and before signature
+   the Contributor's access to a document is the tokenized signing link, not
+   this list — so a draft naming them is not theirs to read yet.
+
+   Exported for tests: this is the boundary that decides what one Contributor
+   can read of another's, so it's worth pinning down rather than trusting to a
+   read of the code. */
+export function contributorVisible(items, email) {
+  const mine = String(email || "").toLowerCase();
+  if (!mine) return [];
+  const isParty = c =>
+    (c.clientSignerEmail || "").toLowerCase() === mine ||
+    (c.contributorEmail || "").toLowerCase() === mine;
+  const executed = items.filter(c => c.status === "Signed");
+  const mineDirectly = new Set(executed.filter(isParty).map(c => c.sk));
+  return executed.filter(c => mineDirectly.has(c.sk) || (c.parentId && mineDirectly.has(c.parentId)));
 }
 
 /* Deviations are computed on read rather than stored as the source of truth, so
@@ -239,15 +122,22 @@ export function deviationsOf(c) {
   return out;
 }
 
-function decorate({ pk, sk, ...rest }) {
-  const withId = { id: sk, ...rest };
+export function decorate({ pk, sk, ...rest }) {
   const deviations = deviationsOf({ ...rest, sk });
-  return { ...withId, deviations, hasDeviations: deviations.length > 0 };
+  const meta = docMeta(rest);
+  return {
+    id: sk, ...rest,
+    // Always explicit on the wire, so the client never has to know that an
+    // absent docKind means "client".
+    docKind: docKind(rest),
+    docLabel: meta.label,
+    deviations, hasDeviations: deviations.length > 0
+  };
 }
 
 /* ---------- edit ---------- */
 
-function canEdit(ctx, c) {
+export function canEdit(ctx, c) {
   if (ctx.role === "Admin") return true;
   if (ctx.role !== "Lab Leader") return false;
   return ctx.can.seesLab(c.lab) || c.owner === ctx.me.sk;
@@ -317,8 +207,14 @@ export async function updateContract(ctx, id, body) {
   if ("clientSignerTitle" in b) next.clientSignerTitle = str(b.clientSignerTitle, MAX_FIELD);
   if ("clientSignerEmail" in b) {
     const email = str(b.clientSignerEmail, MAX_FIELD);
-    if (email && !EMAIL_RE.test(email)) return resp(400, { error: "invalid client signer email" });
+    if (email && !EMAIL_RE.test(email)) return resp(400, { error: "invalid signer email" });
     next.clientSignerEmail = email;
+    /* On contributor paper the signer *is* the Contributor, so the invite
+       gate's field tracks it rather than being set separately by an Admin.
+       This is not a way around the admin-only rule below: edits stop at
+       EDITABLE_STATUSES, so nobody can retarget the email on a document that
+       has already been signed — which is the only state the gate reads. */
+    if (isContributorDoc(next)) next.contributorEmail = email;
   }
   for (const k of ["startDate", "endDate"]) {
     if (!(k in b)) continue;
@@ -352,13 +248,14 @@ export async function updateContract(ctx, id, body) {
      Without this the unresolved list stays frozen at whatever was missing at
      generation time and blocks sending for the life of the contract. */
   if ((next.clauses || []).length) {
-    const [deal, lab, owner, signatory] = await Promise.all([
+    const [deal, lab, owner, signatory, parent] = await Promise.all([
       next.deal ? get("DEAL", next.deal) : null,
       get("LAB", next.lab),
       next.owner ? get("PERSON", next.owner) : null,
-      next.olSignatory ? get("PERSON", next.olSignatory) : null
+      next.olSignatory ? get("PERSON", next.olSignatory) : null,
+      next.parentId ? get("CONTRACT", next.parentId) : null
     ]);
-    const merged = mergeClauses(next.clauses, templateVars({ contract: next, deal, lab, owner, signatory }));
+    const merged = mergeClauses(next.clauses, templateVars({ contract: next, deal, lab, owner, signatory, parent }));
     next.clauses = merged.clauses;
     next.unresolvedVars = merged.unresolved;
   }

@@ -1,17 +1,28 @@
 /* OL Portal · reusable content and contract templates (Base Contract PRD FR1,
    FR12). Admins own these; Lab Leaders read them and compose from them.
 
-   Three kinds share one record type because they're all "pre-approved text an
-   Admin maintains", and the portal already pays a full table scan per pk:
+   Several kinds share one record type because they're all "pre-approved text
+   an Admin maintains", and the portal already pays a full table scan per pk:
 
-     proposal  a starting set of the six proposal sections, plus optional
-               default pricing. Selected when a proposal is created.
-     block     one reusable snippet bound to a single section (a scope
-               paragraph, a standard timeline, a terms clause). Lab Leaders
-               insert these while drafting.
-     contract  the standard terms body — ordered clauses with {{placeholders}}
-               that merge against the contract at generation time. This is
-               where the Legal-approved Client Services Agreement lives.
+     proposal    a starting set of the six proposal sections, plus optional
+                 default pricing. Selected when a proposal is created.
+     block       one reusable snippet bound to a single section (a scope
+                 paragraph, a standard timeline, a terms clause). Lab Leaders
+                 insert these while drafting.
+     contract    the standard terms body — ordered clauses with {{placeholders}}
+                 that merge against the contract at generation time. This is
+                 where the Legal-approved Client Services Agreement lives.
+     msa         the same, for the OL-to-Contributor master agreement:
+                 relationship scope, IP, confidentiality, liability, general
+                 payment terms (Contributor MSA PRD FR2).
+     task-order  the standard terms for one engagement under a signed MSA.
+                 Short by design — the MSA's terms come in by reference (FR7),
+                 so this restates nothing.
+
+   The three clause kinds are structurally identical and share all the merge
+   machinery; they're separate kinds so an Admin can maintain contributor paper
+   without touching customer paper, and so template resolution can't hand a
+   Contributor the client agreement by accident.
 
    `lab` scopes a template to one lab; omitting it makes it OL-wide, which is
    how a lab without its own identity still gets the master OL terms. */
@@ -21,7 +32,9 @@ import { writeAudit } from "./admin.mjs";
 import { SECTION_KEYS } from "./proposals.mjs";
 import { cleanPricing, pricingTotal, formatMoney } from "./pricing.mjs";
 
-export const TEMPLATE_KINDS = ["proposal", "block", "contract"];
+export const TEMPLATE_KINDS = ["proposal", "block", "contract", "msa", "task-order"];
+/* The kinds whose body is an ordered clause list rather than sections. */
+export const CLAUSE_KINDS = ["contract", "msa", "task-order"];
 const MAX_CLAUSES = 60;
 const MAX_CLAUSE_CHARS = 20_000;
 const MAX_SECTION_CHARS = 20_000;
@@ -68,7 +81,8 @@ export async function createTemplate(ctx, body) {
   if (ctx.role !== "Admin") return resp(403, { error: "Templates are admin-only" });
   const b = body || {};
   const kind = b.kind;
-  if (!TEMPLATE_KINDS.includes(kind)) return resp(400, { error: "kind must be proposal, block, or contract" });
+  if (!TEMPLATE_KINDS.includes(kind))
+    return resp(400, { error: `kind must be one of: ${TEMPLATE_KINDS.join(", ")}` });
   const name = str(b.name, 200);
   if (!name) return resp(400, { error: "name is required" });
   if (b.lab && !(await get("LAB", b.lab))) return resp(400, { error: "unknown lab" });
@@ -132,7 +146,7 @@ export async function deleteTemplate(ctx, id) {
    put a contract template into a shape create would have rejected. */
 async function applyKindFields(item, b, kind) {
   const next = { ...item };
-  if (kind === "contract") {
+  if (CLAUSE_KINDS.includes(kind)) {
     if ("clauses" in b || next.clauses === undefined) {
       const { clauses, error } = cleanClauses(b.clauses ?? next.clauses);
       if (error) return { error };
@@ -166,13 +180,16 @@ async function applyKindFields(item, b, kind) {
   return { item: next };
 }
 
-/* ---------- contract template resolution + merge ---------- */
+/* ---------- clause template resolution + merge ---------- */
 
-/* The lab's own contract template wins; an OL-wide one is the fallback so a lab
-   without its own terms still contracts on the master agreement. */
-export async function contractTemplateFor(lab) {
+/* The lab's own template wins; an OL-wide one is the fallback so a lab without
+   its own terms still contracts on the master agreement. `kind` keeps customer
+   and contributor paper in separate pools — a lab with a bespoke client
+   agreement and no MSA of its own falls back to the OL-wide MSA, not to its
+   own client terms. */
+export async function templateFor(lab, kind = "contract") {
   const items = await listType("TEMPLATE");
-  const usable = items.filter(t => t.kind === "contract" && t.active !== false && Array.isArray(t.clauses));
+  const usable = items.filter(t => t.kind === kind && t.active !== false && Array.isArray(t.clauses));
   return usable.find(t => t.lab === lab) || usable.find(t => !t.lab) || null;
 }
 
@@ -204,14 +221,27 @@ function fill(text, vars, unresolved) {
   });
 }
 
-/* The variable bag every contract template can draw on. Kept in one place so
-   the admin UI can list exactly what's available to template authors. */
-export function templateVars({ contract, deal, lab, owner, signatory }) {
+/* The variable bag every clause template can draw on. Kept in one place so the
+   admin UI can list exactly what's available to template authors.
+
+   `client` and `contributor` are the same stored field (the counterparty name)
+   under two names, so contributor paper can read `{{contributor}}` and client
+   paper `{{client}}` without either template author having to know that one
+   record type backs both. `parent` carries the signed MSA a task order hangs
+   off, which is what makes incorporation by reference expressible in the
+   template rather than hardcoded (FR7). */
+export function templateVars({ contract, deal, lab, owner, signatory, parent }) {
   const total = pricingTotal(contract?.pricing);
+  const counterparty = contract?.client || "";
+  const signerName = contract?.clientSignerName || "";
+  const signerTitle = contract?.clientSignerTitle || "";
   return {
-    client: contract?.client || "",
-    clientSigner: contract?.clientSignerName || "",
-    clientSignerTitle: contract?.clientSignerTitle || "",
+    client: counterparty,
+    clientSigner: signerName,
+    clientSignerTitle: signerTitle,
+    contributor: counterparty,
+    contributorSigner: signerName,
+    contributorSignerTitle: signerTitle,
     lab: lab?.name || contract?.lab || "",
     labLeader: fullName(owner) || "",
     olSignatory: fullName(signatory) || contract?.olSignatoryName || "",
@@ -221,11 +251,15 @@ export function templateVars({ contract, deal, lab, owner, signatory }) {
     startDate: contract?.startDate || "",
     endDate: contract?.endDate || "",
     dealId: deal?.sk || contract?.deal || "",
+    msaId: parent?.sk || contract?.parentId || "",
+    msaDate: parent?.executedAt?.slice(0, 10) || parent?.signedAt?.slice(0, 10) || "",
     today: today()
   };
 }
 
 export const TEMPLATE_VAR_KEYS = [
-  "client", "clientSigner", "clientSignerTitle", "lab", "labLeader", "olSignatory",
-  "contractId", "total", "paymentSchedule", "startDate", "endDate", "dealId", "today"
+  "client", "clientSigner", "clientSignerTitle",
+  "contributor", "contributorSigner", "contributorSignerTitle",
+  "lab", "labLeader", "olSignatory", "contractId", "total", "paymentSchedule",
+  "startDate", "endDate", "dealId", "msaId", "msaDate", "today"
 ];

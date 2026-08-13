@@ -40,7 +40,7 @@ import {
 } from "@/components/ui/select";
 import { PricingEditor } from "@/components/pricing-editor";
 import { api, ApiError } from "@/lib/api";
-import { fullName } from "@/lib/data";
+import { DOC_KIND_LABEL, docKindOf, fullName, isContributorDoc } from "@/lib/data";
 import type { Contract, Deviation, Person, Pricing, Role } from "@/lib/types";
 
 interface DeviationError {
@@ -84,6 +84,15 @@ export function ContractEditor({
   const admins = Object.entries(people).filter(([, p]) => p.role === "Admin");
   const locked = contract.status === "Out for Signature" || contract.status === "Signed";
 
+  /* The same editor drives all three kinds of paper. What changes is the
+     vocabulary — a Contributor is not a client — and which sections are
+     meaningful: an MSA carries no price, and a task order's standard terms
+     come from its MSA rather than from anything typed here. */
+  const kind = docKindOf(contract);
+  const contributorSide = isContributorDoc(contract);
+  const kindLabel = contract.docLabel ?? DOC_KIND_LABEL[kind];
+  const signerLabel = contributorSide ? "Contributor signer" : "Client signer";
+
   const payload = (acknowledge: boolean) => ({
     paymentSchedule,
     startDate,
@@ -94,9 +103,12 @@ export function ContractEditor({
     olSignatory,
     sections: { ...(contract.sections ?? {}), scope, deliverables, timeline },
     pricing,
-    // Naming a Contributor is admin-only server-side, so only send the fields
-    // when an Admin is driving — otherwise a Lab Leader's save would 403.
-    ...(role === "Admin" ? { contributorName, contributorEmail } : {}),
+    /* Naming a Contributor is admin-only server-side, so only send the fields
+       when an Admin is driving — otherwise a Lab Leader's save would 403.
+       Never on contributor paper: there the counterparty *is* the Contributor,
+       and the server keeps these in step with the signer email itself. Sending
+       them would overwrite that with whatever this form happened to load. */
+    ...(role === "Admin" && !contributorSide ? { contributorName, contributorEmail } : {}),
     ...(acknowledge ? { acknowledgeDeviation: true, deviationNote } : {}),
   });
 
@@ -107,7 +119,7 @@ export function ContractEditor({
         method: "PATCH",
         body: JSON.stringify(payload(acknowledge)),
       });
-      toast.success("Contract saved");
+      toast.success(`${kindLabel} saved`);
       setPendingDeviations(null);
       onSaved(saved);
     } catch (err) {
@@ -130,17 +142,25 @@ export function ContractEditor({
         <DialogHeader>
           <DialogTitle>
             {contract.id} · {contract.client}
+            {contributorSide && (
+              <span className="ml-2 text-sm font-normal text-ink-mute">{kindLabel}</span>
+            )}
           </DialogTitle>
           <DialogDescription>
             {contract.inherited
               ? `Scope and pricing carried over from ${contract.proposal ?? "the proposal"} v${contract.inherited.version}, approved by the customer.`
-              : "This contract predates the approved-proposal link."}
+              : kind === "task-order"
+                ? `Issued under ${contract.parentId ?? "an MSA"}, whose terms govern this work and aren't restated here.`
+                : kind === "msa"
+                  ? "The master agreement with this Contributor. Task orders for specific work are written against it once it's signed."
+                  : "This contract predates the approved-proposal link."}
           </DialogDescription>
         </DialogHeader>
 
         {locked && (
           <p className="rounded-md bg-violet-pale px-3 py-2 text-sm text-ink">
-            This contract is {contract.status.toLowerCase()} and can no longer be edited.
+            This {kindLabel.toLowerCase()} is {contract.status.toLowerCase()} and can no longer be
+            edited.
           </p>
         )}
 
@@ -158,17 +178,29 @@ export function ContractEditor({
         <fieldset disabled={locked} className="flex flex-col gap-5">
           <section className="flex flex-col gap-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
-              Contract terms
+              {kindLabel} terms
             </h3>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="payment">Payment schedule</Label>
+              <Label htmlFor="payment">
+                Payment schedule{kind === "msa" ? " (optional)" : ""}
+              </Label>
               <Textarea
                 id="payment"
                 rows={3}
-                placeholder="e.g. 50% on signature, 50% on delivery of the final playbook"
+                placeholder={
+                  kind === "msa"
+                    ? "General payment terms usually live in the MSA template; leave this blank unless this Contributor is different"
+                    : "e.g. 50% on signature, 50% on delivery of the final playbook"
+                }
                 value={paymentSchedule}
                 onChange={(e) => setPaymentSchedule(e.target.value)}
               />
+              {kind === "msa" && (
+                <p className="text-xs text-ink-mute">
+                  An MSA can be sent without one. What each engagement pays is agreed on its task
+                  order.
+                </p>
+              )}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
@@ -198,7 +230,7 @@ export function ContractEditor({
             </h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="signer">Client signer</Label>
+                <Label htmlFor="signer">{signerLabel}</Label>
                 <Input
                   id="signer"
                   value={signerName}
@@ -238,14 +270,21 @@ export function ContractEditor({
                 </SelectContent>
               </Select>
               <p className="text-xs text-ink-mute">
-                Only an Admin countersigns for OL, never the Lab Leader on the deal.
+                Only an Admin countersigns for OL, never the Lab Leader
+                {contributorSide ? " who engaged them" : " on the deal"}.
               </p>
             </div>
           </section>
 
           <section className="flex flex-col gap-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
-              {contract.inherited ? "Inherited from the approved proposal" : "Scope and pricing"}
+              {contract.inherited
+                ? "Inherited from the approved proposal"
+                : kind === "msa"
+                  ? "Scope of the relationship"
+                  : kind === "task-order"
+                    ? "Work and compensation"
+                    : "Scope and pricing"}
             </h3>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="scope">Scope</Label>
@@ -269,19 +308,24 @@ export function ContractEditor({
                 onChange={(e) => setTimeline(e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1.5">
-              <Label>Pricing</Label>
-              <PricingEditor value={pricing} onChange={setPricing} disabled={locked} />
-              {contract.inherited && (
-                <p className="text-xs text-ink-mute">
-                  These figures came from the approved proposal. Changing them is a deviation and
-                  has to be confirmed before it saves.
-                </p>
-              )}
-            </div>
+            {/* An MSA has no figure of its own: it sets the terms of a
+                relationship, and what any given engagement pays is agreed on
+                its task order (PRD 5.1.2). */}
+            {kind !== "msa" && (
+              <div className="flex flex-col gap-1.5">
+                <Label>{kind === "task-order" ? "Compensation" : "Pricing"}</Label>
+                <PricingEditor value={pricing} onChange={setPricing} disabled={locked} />
+                {contract.inherited && (
+                  <p className="text-xs text-ink-mute">
+                    These figures came from the approved proposal. Changing them is a deviation and
+                    has to be confirmed before it saves.
+                  </p>
+                )}
+              </div>
+            )}
           </section>
 
-          {role === "Admin" && (
+          {role === "Admin" && !contributorSide && (
             <section className="flex flex-col gap-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-mute">
                 Contributor

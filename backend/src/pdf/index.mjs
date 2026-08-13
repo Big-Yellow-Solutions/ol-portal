@@ -85,6 +85,17 @@ function identity(event) {
   return { username, role };
 }
 
+/* Mirrors DOC_META in util.mjs. Duplicated rather than imported because this
+   is a separate Lambda bundle with its own package.json and no path back to
+   src/ — the same reason deviationNotes() below mirrors contracts.mjs. Keep
+   the two in step when a kind is added. */
+const DOC_TITLES = {
+  client: { label: "Contract", title: "Services Agreement", value: "Contract value" },
+  msa: { label: "MSA", title: "Master Services Agreement", value: null },
+  "task-order": { label: "Task Order", title: "Task Order", value: "Compensation" }
+};
+const titlesFor = c => DOC_TITLES[c?.docKind] || DOC_TITLES.client;
+
 /* Normalizes a CONTRACT or PROPOSAL record into the shape renderHtml() needs. */
 async function loadDocument(kind, id) {
   if (kind === "contracts") {
@@ -96,21 +107,33 @@ async function loadDocument(kind, id) {
     // metadata at that point, and printing it could contradict what was signed.
     const source = executed && c.executionCopy ? c.executionCopy : c;
     const total = pricingTotal(source.pricing);
+    const t = titlesFor(c);
+    const contributorSide = c.docKind === "msa" || c.docKind === "task-order";
     return {
-      record: c, lab: c.lab, kindLabel: executed ? "Executed Contract" : "Contract",
-      title: executed ? "Services Agreement (executed)" : "Services Agreement",
-      refLine: `${esc(c.sk)} &middot; prepared for <b>${esc(c.client)}</b>`,
+      record: c, lab: c.lab,
+      kindLabel: executed ? `Executed ${t.label}` : t.label,
+      title: executed ? `${t.title} (executed)` : t.title,
+      /* Customer paper is prepared *for* someone; contributor paper is an
+         agreement *between* two parties. The distinction is the plainest
+         signal on the page that this isn't a client document (PRD 8). */
+      refLine: contributorSide
+        ? `${esc(c.sk)} &middot; between <b>Optimistic Labs</b> and <b>${esc(c.client)}</b>`
+        : `${esc(c.sk)} &middot; prepared for <b>${esc(c.client)}</b>`,
       meta: [
         ["Lab", esc(lab?.name || c.lab)],
         ["Lab Leader", esc(fullName(owner) || c.owner || "—")],
-        ["Contract value", total === null ? fmt$(c.amount) : fmt$(total)],
+        // An MSA has no value of its own: money is agreed per task order.
+        ...(t.value ? [[t.value, total === null ? fmt$(c.amount) : fmt$(total)]] : []),
         ["Status", esc(c.status) + (c.executedAt ? " &middot; executed " + esc(c.executedAt.slice(0, 10)) : "")],
+        ...(c.parentId ? [["Under MSA", esc(c.parentId)]] : []),
         ...(source.paymentSchedule ? [["Payment schedule", esc(source.paymentSchedule)]] : []),
         ...(source.startDate || source.endDate
           ? [["Term", `${esc(source.startDate || "—")} to ${esc(source.endDate || "—")}`]] : []),
         ...(c.inherited?.version
           ? [["Approved proposal", `${esc(c.proposal || "—")} v${esc(c.inherited.version)}`]] : []),
-        ...(c.contributorName || c.contributorEmail
+        // Redundant on contributor paper, where the counterparty is already
+        // named in the reference line above.
+        ...(!contributorSide && (c.contributorName || c.contributorEmail)
           ? [["Contributor", esc(c.contributorName || "—") + (c.contributorEmail ? " &middot; " + esc(c.contributorEmail) : "")]]
           : []),
         ["Created", esc(c.created)]
@@ -339,13 +362,23 @@ export const handler = async event => {
       if (kind !== "contracts" && kind !== "proposals") return resp(404, { error: "no such route" });
       const preview = await loadDocument(kind, id);
       if (!preview) return resp(404, { error: `${kind === "proposals" ? "proposal" : "contract"} not found` });
-      // Contracts and proposals follow the same rule as editing one: Admin, or
-      // the Lab Leader who owns that lab — matches ctx.can in app.mjs. A
-      // Contributor named on a contract gets their own copy.
+      /* Contracts and proposals follow the same rule as editing one: Admin, or
+         the Lab Leader who owns that lab — matches ctx.can in app.mjs. A
+         Contributor who is a party to a document gets their own copy.
+
+         Both email fields count, and both must be checked, for the same reason
+         as contributorVisible() in contracts.mjs: `clientSignerEmail` is who
+         signs, `contributorEmail` is who the invite gate names, and on an MSA
+         or task order the Contributor is reachable under either. Matching only
+         the second would leave a Contributor able to see their MSA in the list
+         but not download it. */
+      const mine = (me.email || "").toLowerCase();
+      const partyTo = r => !!mine && (
+        (r.clientSignerEmail || "").toLowerCase() === mine ||
+        (r.contributorEmail || "").toLowerCase() === mine);
       const allowed = role === "Admin" ||
         (role === "Lab Leader" && ((me.labs || []).includes(preview.lab) || preview.record.owner === me.sk)) ||
-        (role === "Contributor" && kind === "contracts" &&
-          (preview.record.contributorEmail || "").toLowerCase() === (me.email || "").toLowerCase());
+        (role === "Contributor" && kind === "contracts" && partyTo(preview.record));
       if (!allowed) return resp(403, { error: "Generating this PDF isn't allowed for your role" });
     }
 

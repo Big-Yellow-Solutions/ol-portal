@@ -1,5 +1,6 @@
 import type {
   ContractStatus,
+  DocKind,
   FileStatus,
   InvoiceStatus,
   Person,
@@ -48,6 +49,26 @@ export const CONTRACT_VARIANT: Record<ContractStatus, BadgeVariant> = {
   // Legacy: contracts written before the signature flow existed.
   Sent: "warning",
 };
+
+/* Contributor MSA PRD 8: contributor paper has to read as visibly different
+   from customer paper, because the terms and the relationship are different in
+   kind. These are the labels that difference is made of. */
+export const DOC_KIND_LABEL: Record<DocKind, string> = {
+  client: "Contract",
+  msa: "MSA",
+  "task-order": "Task Order",
+};
+
+/* What the counterparty is called. One stored field on the record, two names
+   depending on which side of the business the document is on. */
+export const COUNTERPARTY_LABEL: Record<DocKind, string> = {
+  client: "Client",
+  msa: "Contributor",
+  "task-order": "Contributor",
+};
+
+export const docKindOf = (c: { docKind?: DocKind }): DocKind => c.docKind ?? "client";
+export const isContributorDoc = (c: { docKind?: DocKind }) => docKindOf(c) !== "client";
 
 export const FILE_VARIANT: Record<FileStatus, BadgeVariant> = {
   Uploading: "secondary",

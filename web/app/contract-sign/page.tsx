@@ -44,6 +44,11 @@ interface SignView {
   contractId: string;
   client: string;
   status: string;
+  /* What this document is called. Server-sent from the live record rather than
+     the frozen copy, so a contract sent before contributor paper existed still
+     labels itself instead of rendering blank. */
+  docTitle?: string;
+  parentId?: string | null;
   document: SigningDocument;
   documentHash: string;
   brand: { lab: string | null; accent: string | null; org: string };
@@ -147,10 +152,11 @@ function ContractSignView() {
                 {view.brand.lab ? `${view.brand.org} · ${view.brand.lab}` : view.brand.org}
               </p>
               <h1 className="mt-2 font-serif text-2xl italic text-ink sm:text-3xl">
-                Services Agreement
+                {view.docTitle ?? "Services Agreement"}
               </h1>
               <p className="mt-1 text-sm text-ink-mute">
                 {view.contractId} · between Optimistic Labs and {view.client}
+                {view.parentId && ` · issued under ${view.parentId}`}
               </p>
 
               {/* Commercial terms first: this is what a signer checks before

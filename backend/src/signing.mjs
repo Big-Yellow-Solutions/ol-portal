@@ -22,21 +22,25 @@
 
    Signing is sequential (FR13): the customer signs first, then the OL
    signatory countersigns. The OL side routes to an Admin — never the Lab
-   Leader who negotiated the deal. */
+   Leader who negotiated the deal.
+
+   The Contributor MSA PRD reuses all of this unchanged for MSAs and task
+   orders: same tokenized link, same hash, same countersignature routing "with
+   no exceptions" (PRD 5.2.2). What varies per kind is which fields must be
+   present before a document can go out, and what the emails call it. */
 
 import { createHash, randomBytes } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
-import { resp, today, get, put, listType, fullName } from "./util.mjs";
+import { resp, today, get, put, listType, fullName, esc, signUrl, docKind, docMeta } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { deviationsOf } from "./contracts.mjs";
 import { mergeClauses, templateVars } from "./templates.mjs";
-import { pricingTotal, formatMoney } from "./pricing.mjs";
+import { generateExecutedPdf, rollUpDeal, deliverCopies, inviteOnExecution } from "./execution.mjs";
+import { pricingTotal } from "./pricing.mjs";
 
 const s3 = new S3Client({});
-const lambda = new LambdaClient({});
 const FILES_BUCKET = process.env.FILES_BUCKET;
 
 const MAX_SIGNATURE_IMAGE_CHARS = 120_000;   // ~90KB PNG, well inside the 400KB item cap
@@ -59,9 +63,21 @@ export const hashOf = doc => createHash("sha256").update(canonical(doc)).digest(
 /* The exact document the signers see and the hash covers. Anything not in here
    is metadata and can change without invalidating a signature; anything in here
    is frozen for the life of the contract. */
-function executionCopy(c) {
+export function executionCopy(c) {
   return {
     contractId: c.sk,
+    /* What kind of paper this is, and what it hangs off, are part of the
+       agreement rather than metadata about it: a task order that could be
+       re-pointed at a different MSA after signature would not be the document
+       anyone signed.
+
+       Adding fields here is safe for documents already out for signature. The
+       tamper check rehashes the *stored* executionCopy, never a freshly built
+       one, so a contract sent before this deploy keeps its own copy and its
+       own hash and still verifies. Only documents sent from now on carry
+       these keys. */
+    docKind: docKind(c),
+    ...(c.parentId ? { parentId: c.parentId } : {}),
     client: c.client,
     lab: c.lab,
     sections: c.sections || {},
@@ -94,27 +110,22 @@ export async function sendForSignature(ctx, id, body) {
      would carry a stale unresolved list and could never be sent; re-merging
      here is idempotent and lets those self-heal. */
   if ((c.clauses || []).length) {
-    const [deal, lab, owner] = await Promise.all([
+    const [deal, lab, owner, parent] = await Promise.all([
       c.deal ? get("DEAL", c.deal) : null,
       get("LAB", c.lab),
-      c.owner ? get("PERSON", c.owner) : null
+      c.owner ? get("PERSON", c.owner) : null,
+      c.parentId ? get("CONTRACT", c.parentId) : null
     ]);
-    const merged = mergeClauses(c.clauses, templateVars({ contract: c, deal, lab, owner, signatory: null }));
+    const merged = mergeClauses(c.clauses, templateVars({ contract: c, deal, lab, owner, signatory: null, parent }));
     c.clauses = merged.clauses;
     c.unresolvedVars = merged.unresolved;
   }
 
   // Everything that would make a signed document defective is checked here,
-  // once, rather than discovered by the customer on the signing page.
-  const problems = [];
-  if (!c.clientSignerName) problems.push("the client signer's name");
-  if (!c.clientSignerEmail || !EMAIL_RE.test(c.clientSignerEmail)) problems.push("a valid client signer email");
-  if (!(c.clauses || []).length) problems.push("contract terms (no template is attached to this lab)");
-  if (!c.paymentSchedule) problems.push("a payment schedule");
-  if ((c.unresolvedVars || []).length)
-    problems.push(`values for the unfilled template fields: ${c.unresolvedVars.join(", ")}`);
+  // once, rather than discovered by the counterparty on the signing page.
+  const problems = requirements(c);
   if (problems.length)
-    return resp(400, { error: `Before sending, add ${problems.join("; ")}.` });
+    return resp(400, { error: `Before sending, add ${problems.map(p => p.sentence).join("; ")}.` });
 
   // FR13: the OL countersignature routes to an Admin. Default to the named
   // signatory, otherwise the single Super Admin, so the contract always knows
@@ -146,12 +157,12 @@ export async function sendForSignature(ctx, id, body) {
 
   const url = signUrl(next.signToken);
   const senderName = fullName(ctx.me);
-  const subject = `Please sign: Optimistic Labs services agreement (${c.client})`;
-  const text = `Hi ${c.clientSignerName},\n\n${senderName} at Optimistic Labs has sent you a services agreement to review and sign.\n\n` +
+  const { subject, intro } = requestCopy(c, senderName);
+  const text = `Hi ${c.clientSignerName},\n\n${intro}\n\n` +
     `Review and sign it here: ${url}\n\n` +
     `You'll get a countersigned PDF copy by email once we've signed too.\n\n— Optimistic Labs`;
   const html = `<p>Hi ${esc(c.clientSignerName)},</p>` +
-    `<p>${esc(senderName)} at Optimistic Labs has sent you a services agreement to review and sign.</p>` +
+    `<p>${esc(intro)}</p>` +
     `<p><a href="${url}">Review and sign it here</a>.</p>` +
     `<p>You'll get a countersigned PDF copy by email once we've signed too.</p><p>— Optimistic Labs</p>`;
 
@@ -167,9 +178,26 @@ export async function sendForSignature(ctx, id, body) {
   return resp(200, { id: sk, ...rest, url, emailSent, emailError });
 }
 
-const esc = s => String(s ?? "").replace(/[&<>"']/g, ch =>
-  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
-const signUrl = token => `${process.env.FRONTEND_URL}/contract-sign.html?token=${token}`;
+/* Per-kind wording for the signature request. A Contributor asked to sign an
+   MSA shouldn't receive an email calling it a client services agreement — the
+   subject line is the first thing they read, and getting it wrong makes the
+   whole exchange look like a misdirected email. */
+function requestCopy(c, senderName) {
+  const from = `${senderName} at Optimistic Labs`;
+  if (docKind(c) === "msa") return {
+    subject: "Please sign: Optimistic Labs Master Services Agreement",
+    intro: `${from} has sent you a Master Services Agreement to review and sign.`
+  };
+  if (docKind(c) === "task-order") return {
+    subject: `Please sign: Optimistic Labs Task Order ${c.sk}`,
+    intro: `${from} has sent you Task Order ${c.sk} to review and sign. It's issued under the ` +
+      `Master Services Agreement you've already signed with us, whose terms it doesn't change.`
+  };
+  return {
+    subject: `Please sign: Optimistic Labs services agreement (${c.client})`,
+    intro: `${from} has sent you a services agreement to review and sign.`
+  };
+}
 
 /* ---------- public signing routes (Authorizer NONE) ---------- */
 
@@ -196,6 +224,13 @@ export async function signView(token) {
     contractId: c.sk,
     client: c.client,
     status: c.status,
+    /* What the signing page should call this. It reads from the live record
+       rather than the frozen copy so a document sent before docKind existed
+       still labels itself correctly instead of rendering "undefined". */
+    docKind: docKind(c),
+    docLabel: docMeta(c).label,
+    docTitle: docMeta(c).title,
+    parentId: c.parentId || null,
     document: c.executionCopy,
     documentHash: c.documentHash,
     brand: { lab: lab?.name || null, accent: lab?.color || null, org: "Optimistic Labs" },
@@ -271,7 +306,7 @@ export async function signSubmit(token, body, meta = {}) {
   };
   await put({ ...c, signatures: { ...(c.signatures || {}), client: record }, updated: today() });
   await writeAudit(record.name, "contract.signed-by-client",
-    `${c.sk} (${c.client}) · ${record.signatureType} · ip ${record.ip}`);
+    `${c.sk} ${docMeta(c).label} (${c.client}) · ${record.signatureType} · ip ${record.ip}`);
 
   // FR13 step two: tell the OL signatory it's their turn.
   await notifyCountersigner(c, record);
@@ -283,11 +318,11 @@ async function notifyCountersigner(c, clientSig) {
     const signatory = c.olSignatory ? await get("PERSON", c.olSignatory) : null;
     if (!signatory?.email) return;
     const url = `${process.env.FRONTEND_URL}/contracts.html`;
-    const line = `${clientSig.name} signed the services agreement for ${c.client} (${c.sk}). It needs your countersignature.`;
+    const line = `${clientSig.name} signed the ${docMeta(c).title} for ${c.client} (${c.sk}). It needs your countersignature.`;
     await sendClientEmail({
       sender: { name: "Optimistic Labs", email: null },
+      subject: `[OL Portal] Countersignature needed: ${docMeta(c).label} · ${c.client}`,
       toEmail: signatory.email,
-      subject: `[OL Portal] Countersignature needed: ${c.client}`,
       text: `${line}\n\nCountersign it here: ${url}\n\n— Optimistic Labs Portal`,
       html: `<p>${esc(line)}</p><p><a href="${url}">Countersign it here</a></p><p>— Optimistic Labs Portal</p>`
     });
@@ -352,89 +387,11 @@ export async function countersign(ctx, id, body, meta = {}) {
     console.error(JSON.stringify({ level: "warn", message: "deal roll-up failed", detail: err.message })));
   await deliverCopies(next, pdf).catch(err =>
     console.error(JSON.stringify({ level: "warn", message: "copy delivery failed", detail: err.message })));
+  await inviteOnExecution(next).catch(err =>
+    console.error(JSON.stringify({ level: "warn", message: "contributor invite failed", detail: err.message })));
 
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest, pdfFileId: pdf?.fileId || null });
-}
-
-/* ---------- execution follow-through ---------- */
-
-/* The PDF renderer is a separate Lambda (puppeteer is too heavy to bundle into
-   the API function). Invoking it directly rather than over HTTP keeps this out
-   of the API's own request path and avoids re-authenticating as the caller. */
-async function generateExecutedPdf(c) {
-  if (!process.env.PDF_FUNCTION_NAME) return null;
-  const out = await lambda.send(new InvokeCommand({
-    FunctionName: process.env.PDF_FUNCTION_NAME,
-    Payload: Buffer.from(JSON.stringify({ direct: true, kind: "contracts", id: c.sk, actor: c.olSignatory }))
-  }));
-  const parsed = JSON.parse(Buffer.from(out.Payload).toString("utf8") || "{}");
-  const payload = parsed.body ? JSON.parse(parsed.body) : parsed;
-  if (!payload?.fileId) return null;
-  const fresh = await get("CONTRACT", c.sk);
-  await put({ ...fresh, executedFileId: payload.fileId });
-  return payload;
-}
-
-/* FR18. The pipeline refuses to close a deal without a valid Assignment Notice
-   (fee splits summing to 100%), and that gate predates this flow and still has
-   to hold. So execution closes the deal when the notice is already on file, and
-   otherwise flags it as ready to close so the pipeline can prompt for the
-   notice instead of silently stalling. */
-async function rollUpDeal(c) {
-  if (!c.deal) return;
-  const deal = await get("DEAL", c.deal);
-  if (!deal) return;
-  const hasNotice = !!deal.assignmentNotice;
-  await put({
-    ...deal,
-    contractSigned: true,
-    contractSignedAt: c.executedAt,
-    contract: c.sk,
-    ...(hasNotice
-      ? { stage: "Closed", outcome: "Won" }
-      : { readyToClose: true, stage: deal.stage === "Closed" ? deal.stage : "Negotiating" })
-  });
-}
-
-/* FR15: both parties get the countersigned copy. The customer has no login, so
-   their copy is a short-lived presigned link plus the signing page, which
-   serves the same PDF for as long as the token lives. */
-async function deliverCopies(c, pdf) {
-  const recipients = [];
-  if (c.clientSignerEmail) recipients.push({ email: c.clientSignerEmail, name: c.clientSignerName });
-  const [signatory, owner] = await Promise.all([
-    c.olSignatory ? get("PERSON", c.olSignatory) : null,
-    c.owner ? get("PERSON", c.owner) : null
-  ]);
-  for (const p of [signatory, owner]) if (p?.email) recipients.push({ email: p.email, name: fullName(p) });
-  if (!recipients.length) return;
-
-  let link = signUrl(c.signToken);
-  if (pdf?.fileId) {
-    const file = await get("FILE", pdf.fileId);
-    if (file?.key) {
-      link = await getSignedUrl(s3, new GetObjectCommand({
-        Bucket: FILES_BUCKET, Key: file.key,
-        ResponseContentDisposition: `attachment; filename="${String(file.name).replace(/"/g, "")}"`
-      }), { expiresIn: 7 * 24 * 3600 });
-    }
-  }
-
-  const total = pricingTotal(c.pricing);
-  const summary = `${c.client} · ${c.sk}${total === null ? "" : " · " + formatMoney(total)}`;
-  for (const r of recipients) {
-    await sendClientEmail({
-      sender: { name: "Optimistic Labs", email: null },
-      toEmail: r.email,
-      subject: `Fully executed: Optimistic Labs services agreement (${c.client})`,
-      text: `Hi${r.name ? " " + r.name : ""},\n\nThe services agreement is now fully executed.\n\n${summary}\n\n` +
-        `Download your countersigned copy: ${link}\n\n— Optimistic Labs`,
-      html: `<p>Hi${r.name ? " " + esc(r.name) : ""},</p><p>The services agreement is now fully executed.</p>` +
-        `<p>${esc(summary)}</p><p><a href="${link}">Download your countersigned copy</a></p><p>— Optimistic Labs</p>`
-    }).catch(err =>
-      console.error(JSON.stringify({ level: "warn", message: "copy email failed", to: r.email, detail: err.message })));
-  }
 }
 
 /* Public download of the executed copy — the signing token is the credential,
@@ -453,14 +410,45 @@ export async function signPdf(token) {
   return resp(200, { url });
 }
 
+/* What a document needs before it can be signed, in one place. Two callers
+   read it: sendForSignature refuses on it, and signingReadiness renders it so
+   the Send button can explain itself rather than failing on click. These were
+   two separate literals that had already drifted apart in wording; one list
+   means the UI can never promise a document is ready when the API disagrees.
+
+   The requirements themselves depend on what the document is:
+
+     client      a payment schedule. A customer contract without one is the
+                 most common cause of an invoicing argument later.
+     msa         no payment schedule and no price. An MSA sets the terms of a
+                 relationship; money is agreed per task order, and a schedule
+                 here would commit nobody to anything (PRD 5.1.2).
+     task-order  compensation and a timeline, which are the substance of
+                 authorising one specific piece of work (PRD 5.3.2). */
+function requirements(c) {
+  const kind = docKind(c);
+  const who = kind === "client" ? "client signer" : "contributor signer";
+  const unresolved = c.unresolvedVars || [];
+  const checks = [
+    [!c.clientSignerName, `the ${who}'s name`, "Signer name"],
+    [!c.clientSignerEmail || !EMAIL_RE.test(c.clientSignerEmail), `a valid ${who} email`, "Signer email"],
+    [!(c.clauses || []).length,
+      `${docMeta(c).label} terms (no template is attached to this lab)`, "Terms"]
+  ];
+  if (kind === "client") checks.push([!c.paymentSchedule, "a payment schedule", "Payment schedule"]);
+  if (kind === "task-order") {
+    checks.push([pricingTotal(c.pricing) === null, "the compensation for this task order", "Compensation"]);
+    checks.push([!(c.sections?.timeline || "").trim(), "a timeline", "Timeline"]);
+  }
+  checks.push([unresolved.length > 0,
+    `values for the unfilled template fields: ${unresolved.join(", ")}`,
+    `Template fields: ${unresolved.join(", ")}`]);
+  return checks.filter(([missing]) => missing).map(([, sentence, label]) => ({ sentence, label }));
+}
+
 /* Pre-send readiness, surfaced in the UI so the Send button can explain itself
    rather than failing on click. */
 export function signingReadiness(c) {
-  const missing = [];
-  if (!c.clientSignerName) missing.push("Client signer name");
-  if (!c.clientSignerEmail) missing.push("Client signer email");
-  if (!(c.clauses || []).length) missing.push("Contract terms");
-  if (!c.paymentSchedule) missing.push("Payment schedule");
-  if ((c.unresolvedVars || []).length) missing.push(`Template fields: ${c.unresolvedVars.join(", ")}`);
+  const missing = requirements(c).map(p => p.label);
   return { ready: !missing.length, missing, deviations: deviationsOf(c) };
 }

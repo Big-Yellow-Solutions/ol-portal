@@ -1,27 +1,22 @@
 "use client";
 
-/* Contracts (Base Contract PRD 5.4-5.5).
+/* Contracts (Base Contract PRD 5.4-5.5, Contributor MSA PRD).
 
    The page walks the second half of the flow end to end: approved proposals
    waiting for a contract sit at the top, contracts in flight sit below with
    whatever action is actually next on each one, and the Admin countersignature
-   is offered only to the Admin the contract routes to. */
+   is offered only to the Admin the contract routes to.
+
+   Customer paper and contributor paper are split across two tabs rather than
+   interleaved. They're the same record type and the same signing flow, but
+   they're different businesses — who OL is selling to, and who OL is engaging
+   — and a single list sorted by date reads as neither (PRD 8). */
 
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Table,
   TableBody,
@@ -30,10 +25,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ContractEditor } from "@/components/contract-editor";
 import { CountersignDialog } from "@/components/countersign-dialog";
+import { InviteContributorDialog } from "@/components/invite-contributor-dialog";
 import { NewContractDialog } from "@/components/new-contract-dialog";
-import { CONTRACT_VARIANT, fmtDollars, fullName } from "@/lib/data";
+import { NewTaskOrderDialog } from "@/components/new-task-order-dialog";
+import {
+  CONTRACT_VARIANT, DOC_KIND_LABEL, docKindOf, fmtDollars, fullName, isContributorDoc,
+} from "@/lib/data";
 import { pricingTotal } from "@/lib/pricing";
 import { api, ApiError } from "@/lib/api";
 import { usePortalData } from "@/lib/portal-data";
@@ -47,6 +47,8 @@ export default function ContractsPage() {
   const [inviting, setInviting] = useState<Contract | null>(null);
   const [countersigning, setCountersigning] = useState<Contract | null>(null);
   const [creating, setCreating] = useState(false);
+  const [taskOrderFor, setTaskOrderFor] = useState<Contract | null>(null);
+  const [side, setSide] = useState<"client" | "contributor">("client");
   const [busy, setBusy] = useState<string | null>(null);
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
@@ -67,6 +69,22 @@ export default function ContractsPage() {
 
   const replace = (saved: Contract) =>
     setContracts((prev) => prev.map((c) => (c.id === saved.id ? saved : c)));
+
+  /* Task orders sort directly under the MSA they belong to rather than by date,
+     so a relationship reads as one thing. Everything else keeps the newest-first
+     order the list already had. */
+  const shown = contracts.filter((c) =>
+    side === "contributor" ? isContributorDoc(c) : !isContributorDoc(c)
+  );
+  const ordered =
+    side === "contributor"
+      ? shown
+          .filter((c) => docKindOf(c) === "msa")
+          .flatMap((msa) => [msa, ...shown.filter((c) => c.parentId === msa.id)])
+          // An orphan can exist if an MSA is outside this viewer's labs but a
+          // task order under it isn't; showing it alone beats hiding it.
+          .concat(shown.filter((c) => c.parentId && !shown.some((m) => m.id === c.parentId)))
+      : shown;
 
   const generate = async (proposal: Proposal) => {
     setBusy(proposal.id);
@@ -131,7 +149,13 @@ export default function ContractsPage() {
   /* Exactly one action is "next" on any contract, so the row offers that one
      rather than a menu the Lab Leader has to reason about. */
   const nextAction = (c: Contract) => {
-    if (c.status === "Signed") return null;
+    if (c.status === "Signed") {
+      /* A signed MSA isn't a finished thing — it's what work gets authorised
+         under, so the next action on one is always the next task order (FR6).
+         The MSA itself is never re-signed for it. */
+      if (docKindOf(c) === "msa") return { label: "New task order", run: () => setTaskOrderFor(c) };
+      return null;
+    }
     if (c.status === "Out for Signature") {
       if (!c.signatures?.client) return { label: "Waiting on client", disabled: true };
       if (role === "Admin" && (!c.olSignatory || c.olSignatory === me))
@@ -145,20 +169,34 @@ export default function ContractsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="font-serif text-2xl italic text-ink">Contracts</h1>
+          <h1 className="font-serif text-2xl italic text-ink">
+            {isReadOnly ? "Your agreements" : "Contracts"}
+          </h1>
           <p className="mt-1 text-sm text-ink-mute">
-            Generated from an approved proposal, or written directly. Signed by the client, then
-            countersigned by an Admin.
+            {isReadOnly
+              ? "Everything you've signed with Optimistic Labs, for your reference."
+              : side === "contributor"
+                ? "Master agreements with the people you engage, and the task orders authorised under them."
+                : "Generated from an approved proposal, or written directly. Signed by the client, then countersigned by an Admin."}
           </p>
         </div>
         {!isReadOnly && (
           <Button className="bg-violet-deep hover:bg-violet" onClick={() => setCreating(true)}>
-            New contract
+            {side === "contributor" ? "New MSA" : "New contract"}
           </Button>
         )}
       </div>
 
-      {!isReadOnly && awaitingContract.length > 0 && (
+      {!isReadOnly && (
+        <Tabs value={side} onValueChange={(v) => setSide(v as "client" | "contributor")}>
+          <TabsList>
+            <TabsTrigger value="client">Client contracts</TabsTrigger>
+            <TabsTrigger value="contributor">Contributor agreements</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+
+      {!isReadOnly && side === "client" && awaitingContract.length > 0 && (
         <Card className="border-green/40 bg-green-pale/40">
           <CardHeader>
             <CardTitle className="font-serif text-base">
@@ -199,16 +237,25 @@ export default function ContractsPage() {
             {contracts.map((c) => (
               <Card key={c.id}>
                 <CardHeader>
-                  <CardTitle className="font-serif text-base">{c.client}</CardTitle>
+                  <CardTitle className="font-serif text-base">
+                    {c.docLabel ?? DOC_KIND_LABEL[docKindOf(c)]}
+                  </CardTitle>
+                  <p className="text-xs text-ink-mute">
+                    {c.id}
+                    {c.parentId ? ` · under ${c.parentId}` : ""}
+                  </p>
                 </CardHeader>
                 <CardContent className="flex flex-col gap-2 text-sm">
                   <div className="text-ink-mute">{labName(c.lab)}</div>
                   <Badge variant={CONTRACT_VARIANT[c.status]} className="w-fit">
                     {c.status}
                   </Badge>
-                  <div className="tabular-nums text-ink">
-                    {fmtDollars(pricingTotal(c.pricing) ?? c.amount)}
-                  </div>
+                  {/* An MSA carries no figure of its own; money is per task order. */}
+                  {docKindOf(c) !== "msa" && (
+                    <div className="tabular-nums text-ink">
+                      {fmtDollars(pricingTotal(c.pricing) ?? c.amount)}
+                    </div>
+                  )}
                   {(c.executedFileId || c.pdfFileId) && (
                     <Button variant="outline" size="sm" onClick={() => generatePdf(c)}>
                       Download PDF
@@ -219,14 +266,18 @@ export default function ContractsPage() {
             ))}
           </div>
         )
-      ) : contracts.length === 0 ? (
-        <p className="text-sm text-ink-mute">No contracts yet.</p>
+      ) : ordered.length === 0 ? (
+        <p className="text-sm text-ink-mute">
+          {side === "contributor"
+            ? "No contributor agreements yet. An MSA is the starting point: sign one, then authorise work under it with task orders."
+            : "No contracts yet."}
+        </p>
       ) : (
         <div className="overflow-x-auto rounded-md ring-1 ring-foreground/10">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Client</TableHead>
+                <TableHead>{side === "contributor" ? "Contributor" : "Client"}</TableHead>
                 <TableHead>Lab</TableHead>
                 <TableHead>Owner</TableHead>
                 <TableHead>Value</TableHead>
@@ -236,28 +287,46 @@ export default function ContractsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {contracts.map((c) => {
+              {ordered.map((c) => {
                 const action = nextAction(c);
+                const kind = docKindOf(c);
                 return (
                   <TableRow key={c.id}>
                     <TableCell>
-                      <button
-                        className="text-left font-medium text-ink hover:text-violet-deep"
-                        onClick={() => setEditing(c)}
-                      >
-                        {c.client}
-                      </button>
-                      <div className="text-xs text-ink-mute">{c.id}</div>
-                      {c.hasDeviations && (
-                        <Badge variant="warning" className="mt-1">
-                          Deviates from proposal
-                        </Badge>
-                      )}
+                      {/* Task orders indent under the MSA they were issued
+                          under, so the relationship reads as a group rather
+                          than as unrelated rows that happen to share a name. */}
+                      <div className={c.parentId ? "border-l-2 border-violet-pale pl-3" : undefined}>
+                        <button
+                          className="text-left font-medium text-ink hover:text-violet-deep"
+                          onClick={() => setEditing(c)}
+                        >
+                          {c.client}
+                        </button>
+                        <div className="text-xs text-ink-mute">
+                          {c.id}
+                          {c.parentId ? ` · under ${c.parentId}` : ""}
+                        </div>
+                        {kind !== "client" && (
+                          <Badge variant="secondary" className="mt-1">
+                            {c.docLabel ?? DOC_KIND_LABEL[kind]}
+                          </Badge>
+                        )}
+                        {c.hasDeviations && (
+                          <Badge variant="warning" className="mt-1">
+                            Deviates from proposal
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>{labName(c.lab)}</TableCell>
                     <TableCell>{personName(c.owner)}</TableCell>
                     <TableCell className="tabular-nums">
-                      {fmtDollars(pricingTotal(c.pricing) ?? c.amount)}
+                      {kind === "msa" ? (
+                        <span className="text-xs text-ink-mute">per task order</span>
+                      ) : (
+                        fmtDollars(pricingTotal(c.pricing) ?? c.amount)
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={CONTRACT_VARIANT[c.status]}>{c.status}</Badge>
@@ -281,7 +350,11 @@ export default function ContractsPage() {
                             {busy === c.id ? "Working…" : action.label}
                           </Button>
                         ))}
-                      {c.status === "Signed" && c.contributorEmail && (
+                      {/* Only on client paper. An executed MSA invites its
+                          Contributor by itself (FR4), so offering the button
+                          there would either duplicate an invite already sent or
+                          look broken against someone who is already a member. */}
+                      {kind === "client" && c.status === "Signed" && c.contributorEmail && (
                         <Button size="sm" variant="outline" onClick={() => setInviting(c)}>
                           Invite contributor
                         </Button>
@@ -340,79 +413,40 @@ export default function ContractsPage() {
         <NewContractDialog
           open={creating}
           onOpenChange={setCreating}
+          initialKind={side === "contributor" ? "msa" : "client"}
           onCreated={(created) => {
             setContracts((prev) => [created, ...prev]);
             setCreating(false);
-            // Straight into the editor: a fresh contract still needs terms,
-            // signatories and a payment schedule before it can go anywhere.
+            // The dialog can switch kind after it opens, so follow what was
+            // actually made rather than assuming the tab it was opened from.
+            setSide(isContributorDoc(created) ? "contributor" : "client");
+            // Straight into the editor: a fresh document still needs terms and
+            // signatories before it can go anywhere.
+            setEditing(created);
+          }}
+        />
+      )}
+
+      {taskOrderFor && (
+        <NewTaskOrderDialog
+          msa={taskOrderFor}
+          open={!!taskOrderFor}
+          onOpenChange={(open) => !open && setTaskOrderFor(null)}
+          onCreated={(created) => {
+            setContracts((prev) => [created, ...prev]);
+            setTaskOrderFor(null);
             setEditing(created);
           }}
         />
       )}
 
       {inviting && (
-        <InviteDialog
+        <InviteContributorDialog
           contract={inviting}
           open={!!inviting}
           onOpenChange={(open) => !open && setInviting(null)}
         />
       )}
     </div>
-  );
-}
-
-function InviteDialog({
-  contract,
-  open,
-  onOpenChange,
-}: {
-  contract: Contract;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [sending, setSending] = useState(false);
-  const name = contract.contributorName ?? "";
-  const [first, ...rest] = name.trim().split(/\s+/);
-  const last = rest.join(" ");
-
-  const send = async () => {
-    setSending(true);
-    try {
-      await api("/admin/invites", {
-        method: "POST",
-        body: JSON.stringify({
-          firstName: first || name || "Contributor",
-          lastName: last || "",
-          email: contract.contributorEmail,
-          role: "Contributor",
-          labs: [contract.lab],
-        }),
-      });
-      toast.success(`Invite sent to ${contract.contributorEmail}`);
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not send the invite.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Invite {contract.contributorName}</DialogTitle>
-          <DialogDescription>
-            Sends a portal invite to {contract.contributorEmail} as a Contributor on{" "}
-            {contract.client}.
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button onClick={send} disabled={sending}>
-            {sending ? "Sending…" : "Send invite"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }

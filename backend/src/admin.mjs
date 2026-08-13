@@ -111,26 +111,47 @@ export async function createInvite(ctx, body) {
     if (!known) return resp(400, { error: `unknown lab: ${lab}` });
   }
 
+  const result = await provisionAccount({
+    actor: ctx.me.sk, email, firstName: firstName.trim(), lastName: lastName.trim(),
+    role, labs: labList
+  });
+  if (result.existing)
+    return resp(409, {
+      error: result.existing === "cognito"
+        ? "that email already exists in Cognito"
+        : "that email already has a portal profile"
+    });
+  return resp(201, { invited: result.username });
+}
+
+/* The mechanics of provisioning an account, separated from the route's
+   argument validation so that something other than a person clicking Invite
+   can trigger one. Contract execution does exactly that (Contributor MSA PRD
+   FR4) — see inviteContributor below.
+
+   Returns a plain result rather than an HTTP response, because the two callers
+   want different things from "this email already exists": the route reports it
+   as a conflict, execution treats it as the expected case and moves on. */
+async function provisionAccount({ actor, email, firstName, lastName, role, labs }) {
   // Username = email (lowercased, matching Cognito's case-insensitive Username
   // config) so people sign in with the address they already know.
-  const username = email.trim().toLowerCase();
+  const username = String(email).trim().toLowerCase();
   const existing = (await doc.send(new GetCommand({
     TableName: TABLE, Key: { pk: "PERSON", sk: username }
   }))).Item;
-  if (existing) return resp(409, { error: "that email already has a portal profile" });
+  if (existing) return { username, existing: "person" };
 
   try {
     await idp.send(new AdminCreateUserCommand({
       UserPoolId: POOL, Username: username,
       UserAttributes: [
-        { Name: "email", Value: email.trim() },
+        { Name: "email", Value: String(email).trim() },
         { Name: "email_verified", Value: "true" }
       ],
       DesiredDeliveryMediums: ["EMAIL"]
     }));
   } catch (err) {
-    if (err.name === "UsernameExistsException")
-      return resp(409, { error: "that email already exists in Cognito" });
+    if (err.name === "UsernameExistsException") return { username, existing: "cognito" };
     throw err;
   }
   await idp.send(new AdminAddUserToGroupCommand({
@@ -139,12 +160,47 @@ export async function createInvite(ctx, body) {
   await doc.send(new PutCommand({
     TableName: TABLE,
     Item: {
-      pk: "PERSON", sk: username, firstName: firstName.trim(), lastName: lastName.trim(),
-      role, labs: labList, email: email.trim()
+      pk: "PERSON", sk: username, firstName, lastName,
+      role, labs, email: String(email).trim()
     }
   }));
-  await writeAudit(ctx.me.sk, "invite.created", `${username} (${role})`);
-  return resp(201, { invited: username });
+  await writeAudit(actor, "invite.created", `${username} (${role})`);
+  return { username, invited: true };
+}
+
+/* Contributor MSA PRD FR4: a Contributor who isn't already a Portal member is
+   invited to create a profile off the back of their executed MSA, rather than
+   waiting for someone to remember to invite them.
+
+   "Already a member" has to be checked against both keys. Accounts created
+   before invites existed are keyed by first name (liz, aliza), not by email,
+   so a lookup on the email alone would miss them and try to provision a second
+   account for someone who already has one. FR4's second half — an existing
+   member sees no change — depends on getting this right. */
+export async function inviteContributor({ actor, email, name, labs = [] }) {
+  const addr = String(email || "").trim().toLowerCase();
+  if (!addr) return { skipped: "no email" };
+
+  const people = await doc.send(new QueryCommand({
+    TableName: TABLE, KeyConditionExpression: "pk = :p",
+    ExpressionAttributeValues: { ":p": "PERSON" }
+  }));
+  const member = (people.Items || []).find(p =>
+    p.sk === addr || String(p.email || "").trim().toLowerCase() === addr);
+  if (member) return { skipped: "already a member", username: member.sk };
+
+  /* One free-text name splits into the two fields the profile carries. A
+     single-word name (or a company) leaves the last name empty, which is fine:
+     fullName() joins whatever is there. The route's own validation is stricter
+     because a human typing an invite can be asked for both. */
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  return await provisionAccount({
+    actor, email: addr,
+    firstName: parts[0] || addr,
+    lastName: parts.slice(1).join(" "),
+    role: "Contributor",
+    labs
+  });
 }
 
 export async function resendInvite(ctx, username) {

@@ -45,15 +45,25 @@ import type { ContentTemplate, ContractClause, TemplateKind } from "@/lib/types"
 /* Mirrors TEMPLATE_VAR_KEYS in backend/src/templates.mjs. Shown to authors so
    they don't have to guess what merges. */
 const TEMPLATE_VARS = [
-  "client", "clientSigner", "clientSignerTitle", "lab", "labLeader", "olSignatory",
-  "contractId", "total", "paymentSchedule", "startDate", "endDate", "dealId", "today",
+  "client", "clientSigner", "clientSignerTitle",
+  "contributor", "contributorSigner", "contributorSignerTitle",
+  "lab", "labLeader", "olSignatory", "contractId", "total", "paymentSchedule",
+  "startDate", "endDate", "dealId", "msaId", "msaDate", "today",
 ];
 
 const KIND_LABEL: Record<TemplateKind, string> = {
   contract: "Contract terms",
+  msa: "MSA terms",
+  "task-order": "Task order terms",
   proposal: "Proposal start",
   block: "Content block",
 };
+
+/* The kinds whose body is an ordered clause list. Mirrors CLAUSE_KINDS in
+   backend/src/templates.mjs. */
+const CLAUSE_KINDS: TemplateKind[] = ["contract", "msa", "task-order"];
+
+const KIND_TABS: TemplateKind[] = ["contract", "msa", "task-order", "proposal", "block"];
 
 export default function TemplatesPage() {
   const { role, labs } = usePortalData();
@@ -128,11 +138,13 @@ export default function TemplatesPage() {
       <Tabs defaultValue="contract">
         <TabsList>
           <TabsTrigger value="contract">Contract terms</TabsTrigger>
+          <TabsTrigger value="msa">MSA terms</TabsTrigger>
+          <TabsTrigger value="task-order">Task order terms</TabsTrigger>
           <TabsTrigger value="proposal">Proposal starts</TabsTrigger>
           <TabsTrigger value="block">Content blocks</TabsTrigger>
         </TabsList>
 
-        {(["contract", "proposal", "block"] as TemplateKind[]).map((kind) => (
+        {KIND_TABS.map((kind) => (
           <TabsContent key={kind} value={kind} className="mt-4 flex flex-col gap-4">
             <div>
               <Button
@@ -156,7 +168,7 @@ export default function TemplatesPage() {
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3 text-sm">
                       <p className="text-ink-mute">
-                        {t.kind === "contract" && `${t.clauses?.length ?? 0} clauses`}
+                        {CLAUSE_KINDS.includes(t.kind) && `${t.clauses?.length ?? 0} clauses`}
                         {t.kind === "block" &&
                           `${SECTION_LABELS[t.section ?? ""] ?? t.section} · ${(t.text ?? "").slice(0, 80)}…`}
                         {t.kind === "proposal" &&
@@ -238,7 +250,7 @@ function TemplateDialog({
         // An empty lab means OL-wide, which the API expresses as an absent key.
         lab: lab || null,
         active,
-        ...(kind === "contract" ? { clauses } : {}),
+        ...(CLAUSE_KINDS.includes(kind) ? { clauses } : {}),
         ...(kind === "block" ? { section, text } : {}),
         ...(kind === "proposal" ? { sections } : {}),
       };
@@ -270,9 +282,13 @@ function TemplateDialog({
           <DialogDescription>
             {kind === "contract"
               ? "Merged into every contract generated for this lab. Leave the lab blank to cover all of them."
-              : kind === "proposal"
-                ? "Offered when a Lab Leader starts a new proposal."
-                : "A reusable paragraph a Lab Leader can drop into one section."}
+              : kind === "msa"
+                ? "The standard terms of the relationship with a Contributor: IP, confidentiality, liability, general payment terms. Merged into every MSA for this lab."
+                : kind === "task-order"
+                  ? "Extra terms for one engagement under an MSA. Keep it short: the MSA's terms already govern and are brought in by reference, so nothing here should restate them."
+                  : kind === "proposal"
+                    ? "Offered when a Lab Leader starts a new proposal."
+                    : "A reusable paragraph a Lab Leader can drop into one section."}
           </DialogDescription>
         </DialogHeader>
 
@@ -299,7 +315,7 @@ function TemplateDialog({
             </Select>
           </div>
 
-          {kind === "contract" && (
+          {CLAUSE_KINDS.includes(kind) && (
             <ClauseEditor clauses={clauses} onChange={setClauses} />
           )}
 

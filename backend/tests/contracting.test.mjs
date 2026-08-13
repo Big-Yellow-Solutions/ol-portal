@@ -16,8 +16,9 @@ import assert from "node:assert/strict";
 import {
   cleanPricing, pricingTotal, pricingLines, pricingText, samePricing, pricingDiffSummary
 } from "../src/pricing.mjs";
-import { deviationsOf } from "../src/contracts.mjs";
-import { hashOf } from "../src/signing.mjs";
+import { deviationsOf, contributorVisible } from "../src/contracts.mjs";
+import { hashOf, executionCopy, signingReadiness } from "../src/signing.mjs";
+import { docKind, docMeta, isContributorDoc } from "../src/util.mjs";
 import { decisionForCurrentVersion } from "../src/proposals.mjs";
 import { mergeClauses, templateVars } from "../src/templates.mjs";
 
@@ -243,4 +244,176 @@ test("merging leaves unknown placeholders alone instead of blanking the clause",
   const { clauses, unresolved } = mergeClauses([{ heading: "", text: "See {{nonsense}}." }], {});
   assert.equal(clauses[0].text, "See {{nonsense}}.");
   assert.deepEqual(unresolved, ["nonsense"]);
+});
+
+/* ---------------- document kinds (Contributor MSA PRD) ----------------
+
+   MSAs and task orders are CONTRACT records with a `docKind`, so the risk in
+   this design isn't that a new kind won't work — it's that an old record
+   without the field stops working, or that one kind's rules leak into
+   another's. These pin down both. */
+
+test("a record with no docKind is a client contract, not an error", () => {
+  assert.equal(docKind({ sk: "C-001" }), "client");
+  assert.equal(docMeta({ sk: "C-001" }).title, "Services Agreement");
+  assert.equal(isContributorDoc({ sk: "C-001" }), false);
+});
+
+test("an unrecognized docKind falls back rather than rendering undefined", () => {
+  // A record written by a newer deploy and read by an older one, or a typo in
+  // a hand-edited item. Labelling it as a contract is wrong but survivable;
+  // crashing the whole list is not.
+  assert.equal(docKind({ docKind: "change-order" }), "client");
+  assert.equal(docMeta({ docKind: "" }).label, "Contract");
+});
+
+test("MSAs and task orders are contributor paper, client contracts aren't", () => {
+  assert.equal(isContributorDoc({ docKind: "msa" }), true);
+  assert.equal(isContributorDoc({ docKind: "task-order" }), true);
+  assert.equal(isContributorDoc({ docKind: "client" }), false);
+});
+
+/* ---------------- signing readiness per kind ---------------- */
+
+const READY_MSA = {
+  docKind: "msa", client: "Dana Weiss",
+  clientSignerName: "Dana Weiss", clientSignerEmail: "dana@example.com",
+  clauses: [{ heading: "Confidentiality", text: "..." }]
+};
+
+test("an MSA is ready to send without a payment schedule or a price", () => {
+  // PRD 5.1.2: an MSA sets the terms of a relationship. Money is agreed per
+  // task order, so requiring a figure here would mean inventing one.
+  const { ready, missing } = signingReadiness(READY_MSA);
+  assert.equal(ready, true, missing.join(", "));
+});
+
+test("a client contract still needs its payment schedule", () => {
+  const { ready, missing } = signingReadiness({ ...READY_MSA, docKind: "client" });
+  assert.equal(ready, false);
+  assert.deepEqual(missing, ["Payment schedule"]);
+});
+
+test("a task order can't go out without compensation and a timeline", () => {
+  const { missing } = signingReadiness({ ...READY_MSA, docKind: "task-order" });
+  assert.deepEqual(missing, ["Compensation", "Timeline"]);
+
+  const complete = {
+    ...READY_MSA, docKind: "task-order",
+    pricing: cleanPricing({ kind: "flat", amount: 8000 }).value,
+    sections: { timeline: "Six weeks from kickoff" }
+  };
+  assert.equal(signingReadiness(complete).ready, true);
+});
+
+test("a tiered price with nothing selected doesn't count as compensation", () => {
+  // pricingTotal() is null until a package is chosen, which is exactly the
+  // state a task order must not be signed in.
+  const tiered = cleanPricing({
+    kind: "tiered",
+    tiers: [{ name: "Foundations", amount: 8000 }, { name: "Deep", amount: 20000 }]
+  }).value;
+  const { missing } = signingReadiness({
+    ...READY_MSA, docKind: "task-order", pricing: tiered,
+    sections: { timeline: "Six weeks" }
+  });
+  assert.deepEqual(missing, ["Compensation"]);
+});
+
+test("unresolved template fields block every kind alike", () => {
+  const { ready, missing } = signingReadiness({ ...READY_MSA, unresolvedVars: ["msaDate"] });
+  assert.equal(ready, false);
+  assert.match(missing.join(" "), /msaDate/);
+});
+
+/* ---------------- the frozen copy ---------------- */
+
+test("the execution copy names its kind and its parent", () => {
+  const copy = executionCopy({ sk: "TO-001", docKind: "task-order", parentId: "MSA-002", client: "Dana Weiss" });
+  assert.equal(copy.docKind, "task-order");
+  assert.equal(copy.parentId, "MSA-002");
+});
+
+test("a task order can't be re-pointed at another MSA after signature", () => {
+  // The parent is inside the hash, so changing it invalidates the signature
+  // rather than silently moving the work under different terms.
+  const before = executionCopy({ sk: "TO-001", docKind: "task-order", parentId: "MSA-002", client: "Dana Weiss" });
+  const after = executionCopy({ sk: "TO-001", docKind: "task-order", parentId: "MSA-009", client: "Dana Weiss" });
+  assert.notEqual(hashOf(before), hashOf(after));
+});
+
+test("a client contract's copy carries no parent key at all", () => {
+  // Absent rather than null: the key would otherwise appear in the canonical
+  // JSON of every contract and change nothing but the hash.
+  const copy = executionCopy({ sk: "C-004", client: "Acme Foundation" });
+  assert.equal("parentId" in copy, false);
+  assert.equal(copy.docKind, "client");
+});
+
+/* ---------------- what a Contributor can see (FR10) ---------------- */
+
+const DOCS = [
+  { sk: "MSA-001", docKind: "msa", status: "Signed", clientSignerEmail: "dana@example.com" },
+  { sk: "TO-001", docKind: "task-order", parentId: "MSA-001", status: "Signed", clientSignerEmail: "dana@example.com" },
+  { sk: "TO-002", docKind: "task-order", parentId: "MSA-001", status: "Signed", clientSignerEmail: "" },
+  { sk: "TO-003", docKind: "task-order", parentId: "MSA-001", status: "Draft", clientSignerEmail: "dana@example.com" },
+  { sk: "MSA-002", docKind: "msa", status: "Signed", clientSignerEmail: "sam@example.com" },
+  { sk: "TO-004", docKind: "task-order", parentId: "MSA-002", status: "Signed", clientSignerEmail: "sam@example.com" },
+  { sk: "C-010", status: "Signed", client: "Acme", contributorEmail: "dana@example.com" }
+];
+const idsFor = email => contributorVisible(DOCS, email).map(d => d.sk).sort();
+
+test("a Contributor sees their MSA, its task orders, and contracts naming them", () => {
+  assert.deepEqual(idsFor("dana@example.com"), ["C-010", "MSA-001", "TO-001", "TO-002"]);
+});
+
+test("a task order is visible through its parent even with no email of its own", () => {
+  // TO-002 inherits its signer from the MSA and carries a blank email; it is
+  // still Dana's work and still hers to read.
+  assert.ok(idsFor("dana@example.com").includes("TO-002"));
+});
+
+test("one Contributor never sees another's agreements", () => {
+  assert.deepEqual(idsFor("sam@example.com"), ["MSA-002", "TO-004"]);
+});
+
+test("drafts stay private until they're executed", () => {
+  // Before signature the Contributor's access is the tokenized signing link,
+  // not the portal list.
+  assert.ok(!idsFor("dana@example.com").includes("TO-003"));
+});
+
+test("an address that matches nothing sees nothing, and neither does a blank one", () => {
+  assert.deepEqual(idsFor("nobody@example.com"), []);
+  assert.deepEqual(contributorVisible(DOCS, ""), []);
+  assert.deepEqual(contributorVisible(DOCS, undefined), []);
+});
+
+test("matching is case-insensitive, so a capitalised invite still resolves", () => {
+  assert.deepEqual(idsFor("Dana@Example.com"), ["C-010", "MSA-001", "TO-001", "TO-002"]);
+});
+
+/* ---------------- terms by reference (FR7) ---------------- */
+
+test("a task order names the MSA it's governed by instead of restating it", () => {
+  const parent = { sk: "MSA-001", executedAt: "2026-08-01T10:00:00.000Z" };
+  const vars = templateVars({
+    contract: { sk: "TO-001", client: "Dana Weiss", docKind: "task-order", parentId: "MSA-001" },
+    lab: { name: "Faith Lab" }, parent
+  });
+  const { clauses, unresolved } = mergeClauses([{
+    heading: "Governing Agreement",
+    text: "Issued under the Master Services Agreement {{msaId}} between Optimistic Labs and " +
+      "{{contributor}}, executed {{msaDate}}."
+  }], vars);
+
+  assert.match(clauses[0].text, /MSA-001 between Optimistic Labs and Dana Weiss, executed 2026-08-01\./);
+  assert.deepEqual(unresolved, []);
+});
+
+test("contributor paper and client paper read the same counterparty field", () => {
+  const vars = templateVars({ contract: { sk: "MSA-001", client: "Dana Weiss", clientSignerName: "Dana Weiss" } });
+  assert.equal(vars.contributor, "Dana Weiss");
+  assert.equal(vars.client, "Dana Weiss");
+  assert.equal(vars.contributorSigner, "Dana Weiss");
 });
