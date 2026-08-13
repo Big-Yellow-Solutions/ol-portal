@@ -398,6 +398,108 @@ export interface Contract {
   signedManually?: boolean;
 }
 
+/* ---------- Resource Library and Courses ----------
+   Mirrors backend/src/resources.mjs and backend/src/courses.mjs. `permission`
+   keeps the PRD's field name: it is the audience gate (who the item is aimed
+   at), separate from `lab` (which additionally restricts to one lab) and from
+   `visibility` (whether the item is listed in the library at all). */
+export type ResourceType = "file" | "post" | "video";
+export type ResourcePermission = "lab_leaders" | "contributors" | "both";
+export type ResourceVisibility = "library" | "course-only";
+export type PublishStatus = "Draft" | "Published";
+export type VideoSource = "upload" | "embed";
+export type EmbedProvider = "youtube" | "vimeo" | "loom";
+export type NavigationMode = "free" | "linear";
+
+/** Courses a resource belongs to, filtered server-side to ones the viewer can open. */
+export interface CourseBacklink {
+  id: string;
+  title: string;
+}
+
+export interface ResourceItem {
+  id: string;
+  type: ResourceType;
+  title: string;
+  description?: string;
+  tags?: string[];
+  lab?: string;
+  permission: ResourcePermission;
+  visibility: ResourceVisibility;
+  status: PublishStatus;
+  /** Client-resized data URL, like Person.photo — no separate upload step. */
+  thumbnail?: string;
+  author?: string;
+  created?: string;
+  updated?: string;
+  publishedAt?: string;
+  courses?: CourseBacklink[];
+
+  /** type: "post" — markdown, rendered by lib/markdown.tsx. */
+  body?: string;
+
+  /** type: "file", and "video" with source "upload". The S3 key is never sent. */
+  fileName?: string;
+  size?: number;
+  mime?: string;
+  downloads?: number;
+
+  /** type: "video" */
+  source?: VideoSource;
+  provider?: EmbedProvider;
+  embedId?: string;
+  /** Rebuilt server-side from the parsed id, never the pasted URL. */
+  embedUrl?: string;
+  duration?: number;
+  transcript?: string;
+}
+
+/** Steps are embedded on the course; `id` is stable across reordering. */
+export interface CourseStep {
+  id: string;
+  resource: string;
+  note?: string;
+}
+
+export interface Course {
+  id: string;
+  title: string;
+  description?: string;
+  cover?: string;
+  estimatedMinutes?: number;
+  lab?: string;
+  permission: ResourcePermission;
+  navigation: NavigationMode;
+  status: PublishStatus;
+  steps: CourseStep[];
+  author?: string;
+  created?: string;
+  updated?: string;
+  publishedAt?: string;
+}
+
+/** GET /courses/{id}: the course with its steps' resources resolved. */
+export interface CourseDetail extends Course {
+  resources: ResourceItem[];
+  /** step id to ISO timestamp, for the signed-in learner only. */
+  viewed: Record<string, string>;
+}
+
+/** GET /progress: course id to that course's viewed map. */
+export type ProgressMap = Record<string, Record<string, string>>;
+
+export const PERMISSION_LABELS: Record<ResourcePermission, string> = {
+  both: "Lab Leaders and Contributors",
+  lab_leaders: "Lab Leaders only",
+  contributors: "Contributors only",
+};
+
+export const RESOURCE_TYPE_LABELS: Record<ResourceType, string> = {
+  file: "File",
+  post: "Post",
+  video: "Video",
+};
+
 export interface Recurrence {
   id: string;
   labId: string;

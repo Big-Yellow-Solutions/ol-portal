@@ -17,6 +17,8 @@ import * as assist from "./assist.mjs";
 import * as profile from "./profile.mjs";
 import * as templates from "./templates.mjs";
 import * as signing from "./signing.mjs";
+import * as resources from "./resources.mjs";
+import * as courses from "./courses.mjs";
 import { fullName } from "./util.mjs";
 
 const TABLE = process.env.TABLE_NAME;
@@ -431,6 +433,24 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/templates") return await templates.createTemplate(ctx, body);
   if (method === "PATCH" && seg[0] === "templates" && seg[1]) return await templates.updateTemplate(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "templates" && seg[1]) return await templates.deleteTemplate(ctx, seg[1]);
+  /* Resource Library and Courses. The `/download` and `/progress` sub-routes
+     are matched before the bare `{id}` forms, which the sequential router
+     would otherwise swallow. */
+  if (method === "GET" && path === "/resources") return await resources.listResources(ctx);
+  if (method === "POST" && path === "/resources") return await resources.createResource(ctx, body);
+  if (method === "GET" && seg[0] === "resources" && seg[1] && seg[2] === "download")
+    return await resources.downloadResource(ctx, seg[1], ctx.query);
+  if (method === "GET" && seg[0] === "resources" && seg[1]) return await resources.getResource(ctx, seg[1]);
+  if (method === "PATCH" && seg[0] === "resources" && seg[1]) return await resources.updateResource(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "resources" && seg[1]) return await resources.deleteResource(ctx, seg[1]);
+  if (method === "GET" && path === "/courses") return await courses.listCourses(ctx);
+  if (method === "POST" && path === "/courses") return await courses.createCourse(ctx, body);
+  if (method === "GET" && path === "/progress") return await courses.listProgress(ctx);
+  if (method === "POST" && seg[0] === "courses" && seg[1] && seg[2] === "progress")
+    return await courses.markStepViewed(ctx, seg[1], body);
+  if (method === "GET" && seg[0] === "courses" && seg[1]) return await courses.getCourse(ctx, seg[1]);
+  if (method === "PATCH" && seg[0] === "courses" && seg[1]) return await courses.updateCourse(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "courses" && seg[1]) return await courses.deleteCourse(ctx, seg[1]);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
   if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
@@ -512,15 +532,16 @@ export const handler = async event => {
     // allowlist needed. ctx.realMe/ctx.realRole keep the true caller available so
     // the act-as start/stop routes (and audit logging) always know who's really here.
     const actAsTarget = event.headers?.["x-act-as"];
+    const query = event.queryStringParameters || {};
     let ctx;
     if (actAsTarget) {
       if (role !== "Admin") return resp(403, { error: "Only Admins can act as another user" });
       const target = await get("PERSON", actAsTarget);
       if (!target) return resp(404, { error: "No such user to act as" });
       if (target.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
-      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true, meta };
+      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true, meta, query };
     } else {
-      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false, meta };
+      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false, meta, query };
     }
 
     const method = event.requestContext.http.method;

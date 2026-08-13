@@ -59,6 +59,15 @@ Resources:
           Properties:
             Bucket: !Ref FilesBucket
             Events: s3:ObjectCreated:*
+            # Only the Files page's own uploads. Resource Library files land
+            # under resources/ and have no FILE record to write an analysis
+            # onto, so without this prefix every resource upload would spend a
+            # Lambda invocation to log "no FILE record" and stop.
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: uploads/
 
   PortalTable:
     Type: AWS::DynamoDB::Table

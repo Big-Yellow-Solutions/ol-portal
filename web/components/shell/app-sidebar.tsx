@@ -14,6 +14,8 @@ import {
   ContractsIcon,
   DealFlowIcon,
   TemplatesIcon,
+  LibraryIcon,
+  CoursesIcon,
   AdminIcon,
   SignOutIcon,
 } from "@/components/shell/portal-icons";
@@ -50,6 +52,10 @@ const BASE_NAV: NavItem[] = [
   { href: "/invoices", label: "Invoice Requests", icon: <InvoiceRequestsIcon /> },
   { href: "/files", label: "Files", icon: <FilesIcon /> },
   { href: "/bench", label: "Bench Directory", icon: <BenchDirectoryIcon /> },
+  // Learning content is the one area every role reaches, Contributors
+  // included — for them it's the main reason to sign in.
+  { href: "/library", label: "Resource Library", icon: <LibraryIcon /> },
+  { href: "/courses", label: "Courses", icon: <CoursesIcon /> },
 ];
 
 export function AppSidebar() {

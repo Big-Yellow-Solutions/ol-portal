@@ -143,6 +143,32 @@ export function TemplatesIcon(props: IconProps) {
   );
 }
 
+// Upright books of unequal height on a shelf. Deliberately not another sheet
+// of paper: Files, Proposals, Contracts and Templates already occupy that
+// silhouette, and at 24px a fifth page glyph would be unreadable.
+export function LibraryIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M4.2 6.2a1.4 1.4 0 0 1 1.4-1.4h1.6a1.4 1.4 0 0 1 1.4 1.4v12.2H4.2z" />
+      <path d="M8.6 8.6a1.4 1.4 0 0 1 1.4-1.4h1.6a1.4 1.4 0 0 1 1.4 1.4v9.8H8.6z" />
+      <path d="m13.8 8 2.9-.8a1.4 1.4 0 0 1 1.7 1l2.2 8.2-4.6 1.2z" />
+      <path d="M2.8 18.4h18.4" />
+    </Base>
+  );
+}
+
+// A mortarboard — the one glyph in the set that says "course" without needing
+// the label, and it shares no outline with anything else here.
+export function CoursesIcon(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M12 3.6 2.6 8.2 12 12.8l9.4-4.6z" />
+      <path d="M6.6 10.4v5.2c0 1.8 2.4 3.2 5.4 3.2s5.4-1.4 5.4-3.2v-5.2" />
+      <path d="M21.4 8.2v6" />
+    </Base>
+  );
+}
+
 export function SignOutIcon(props: IconProps) {
   return (
     <Base {...props}>
