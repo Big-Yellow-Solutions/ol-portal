@@ -214,7 +214,7 @@ export function QuestionCard({
             </Pill>
           ))}
           {onSkip && (
-            <Pill tone="dashed" size="sm" onClick={onSkip}>
+            <Pill tone="dashed" size="sm" onClick={onSkip} disabled={sending}>
               Skip for now
             </Pill>
           )}

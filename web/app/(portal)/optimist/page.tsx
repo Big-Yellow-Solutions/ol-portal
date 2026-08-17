@@ -184,8 +184,8 @@ function OptimistView() {
   };
 
   /** Core round trip, shared by in-interview answers and off-script messages. */
-  const sendMessage = async (text: string) => {
-    if (!selected || !text.trim() || sending) return;
+  const sendMessage = async (text: string): Promise<boolean> => {
+    if (!selected || !text.trim() || sending) return false;
     setSending(true);
     const userMsg: ChatMessage = { role: "user", content: text.trim() };
     const nextMessages = [...messages, userMsg];
@@ -235,8 +235,10 @@ function OptimistView() {
       setMessages(withReply);
       saveChat(selected.id, withReply);
       await persistDraft(merged, mergedPricing);
+      return true;
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "The Optimist didn't respond.");
+      return false;
     } finally {
       setSending(false);
     }
@@ -245,6 +247,14 @@ function OptimistView() {
   const answerQuestion = async (text: string) => {
     setAnsweredCount((n) => n + 1);
     await sendMessage(text);
+  };
+
+  /** Off-script is meant to be a brief detour, not a permanent view — once a
+   *  message lands a reply, drop back into the main question flow to show it
+   *  there rather than leaving the user parked in the freeform composer. */
+  const sendOffScript = async (text: string) => {
+    const ok = await sendMessage(text);
+    if (ok) setMode("question");
   };
 
   const onAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -410,7 +420,7 @@ function OptimistView() {
             remainingCount={Math.max(0, 6 - draftedCount)}
             input={input}
             onInputChange={setInput}
-            onSend={() => sendMessage(input)}
+            onSend={() => sendOffScript(input)}
             sending={sending}
             onBack={() => setMode("question")}
           />
