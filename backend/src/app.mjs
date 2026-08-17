@@ -404,6 +404,7 @@ async function qboCallback(event) {
 async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
   if (method === "GET" && path === "/guides") return await guides.listGuides(ctx);
+  if (method === "POST" && path === "/help/assist") return await guides.helpAssist(ctx, body);
   if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL", ctx.can.leadsDeal);
   if (method === "GET" && path === "/proposals") return await proposals.listProposals(ctx);
   if (method === "GET" && path === "/invoices")
