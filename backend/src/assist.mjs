@@ -13,7 +13,10 @@ import { cleanPricing, pricingText } from "./pricing.mjs";
 
 const ssm = new SSMClient({});
 let anthropic;
-async function client() {
+// Exported so other modules that need the same Anthropic client (e.g. the
+// help widget's assistant in guides.mjs) don't each fetch and cache their own
+// copy of the SSM API key.
+export async function client() {
   if (anthropic) return anthropic;
   const p = await ssm.send(new GetParameterCommand({
     Name: process.env.ANTHROPIC_KEY_PARAM, WithDecryption: true
@@ -266,7 +269,12 @@ Structured pricing currently recorded: ${p.pricing ? `\n${pricingText(p.pricing)
       { type: "text", text: stableBlock, cache_control: { type: "ephemeral" } },
       { type: "text", text: proposalBlock }
     ],
-    output_config: { format: { type: "json_schema", schema: CHAT_SCHEMA } },
+    // Effort was left at the (unset) default of "high", which combined with
+    // adaptive thinking's variable depth produced latency anywhere from ~1s
+    // to a full 28s Lambda timeout. This is a conversational interview turn,
+    // not deep agentic work — "medium" bounds thinking spend without giving
+    // up the reasoning adaptive thinking needs for pricing/extraction turns.
+    output_config: { format: { type: "json_schema", schema: CHAT_SCHEMA }, effort: "medium" },
     messages: turns
   });
 
