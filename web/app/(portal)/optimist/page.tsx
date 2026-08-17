@@ -31,7 +31,12 @@ import type { Pricing, Proposal, ProposalStatus } from "@/lib/types";
    commit/final, POST send — only the interaction model around it changed. */
 
 const MAX_CACHED_MESSAGES = 60;
-const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+// Raw-byte ceiling chosen so the base64-encoded upload (~4/3 larger) stays
+// under the backend's own cap (assist.mjs's MAX_ATTACH_B64 = 5,500,000 chars)
+// — a raw file just under a flat 4MB previously passed this check but still
+// got rejected by the backend once encoded, which read as the request
+// silently going nowhere.
+const MAX_ATTACHMENT_BYTES = 4_125_000;
 const WASH_DECAY_MS = 6000;
 const THIN_SECTION_CHARS = 150;
 const OPENING_PROMPT = "Tell The Optimist about the client and the work, and it will start drafting.";
@@ -470,11 +475,12 @@ function OptimistView() {
             attachmentResult={attachmentResult ?? undefined}
             input={input}
             onInputChange={setInput}
-            onAnswer={() => answerQuestion(input)}
+            onAnswer={() => answerQuestion(input.trim() || "Here's the attached file.")}
             onAttachClick={() => attachInputRef.current?.click()}
             attachInputRef={attachInputRef}
             onAttachFile={onAttachFile}
             attachedFileName={attachment?.name}
+            hasAttachment={!!attachment}
             sending={sending}
             onSkip={() => answerQuestion("Skip this question for now and move on to the next one.")}
             transcriptSummary={answeredCount > 0 ? `${answeredCount} question${answeredCount === 1 ? "" : "s"} answered · transcript` : undefined}

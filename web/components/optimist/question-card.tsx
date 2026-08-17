@@ -122,6 +122,7 @@ export function QuestionCard({
   attachInputRef,
   onAttachFile,
   attachedFileName,
+  hasAttachment,
   sending,
   quickReplies,
   onSkip,
@@ -144,6 +145,7 @@ export function QuestionCard({
   attachInputRef: React.RefObject<HTMLInputElement | null>;
   onAttachFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
   attachedFileName?: string | null;
+  hasAttachment?: boolean;
   sending: boolean;
   quickReplies?: { label: string; tone?: "subtle" | "outline" }[];
   onSkip?: () => void;
@@ -198,7 +200,7 @@ export function QuestionCard({
           </Pill>
           <input ref={attachInputRef} type="file" hidden onChange={onAttachFile} disabled={sending} />
           <span className="ml-auto font-sans text-[11.5px] text-ink/40">Enter to answer, Shift+Enter for a new line</span>
-          <Pill tone="primary" size="sm" onClick={onAnswer} disabled={sending || !input.trim()}>
+          <Pill tone="primary" size="sm" onClick={onAnswer} disabled={sending || (!input.trim() && !hasAttachment)}>
             Answer
           </Pill>
         </div>
