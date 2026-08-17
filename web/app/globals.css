@@ -28,6 +28,9 @@
   --color-red-pale: var(--red-pale);
   --color-amber: var(--amber);
   --color-amber-pale: var(--amber-pale);
+  --color-desk: var(--desk);
+  --color-wash: var(--wash);
+  --color-mark-violet: var(--mark-violet);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -83,6 +86,12 @@
   --red-pale: #fbeaea;
   --amber: #8a5c07;
   --amber-pale: #fbf3e2;
+  /* The Optimist redesign (design_handoff_the_optimist): the desk behind the
+     manuscript/document sheet, and the "just written" wash — a hair lighter
+     than --violet-pale so a washed section doesn't read as selected. */
+  --desk: #f2f0ec;
+  --wash: #f4f2ff;
+  --mark-violet: #7F6CFD;
   --font-serif: var(--font-playfair), Georgia, serif;
 
   --background: oklch(1 0 0);

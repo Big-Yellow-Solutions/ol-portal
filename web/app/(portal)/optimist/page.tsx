@@ -3,49 +3,43 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
+import { ArriveScreen } from "@/components/optimist/arrive-screen";
+import { NewProposalDialog } from "@/components/optimist/new-proposal-dialog";
+import { ManuscriptPanel } from "@/components/optimist/manuscript-panel";
+import { QuestionCard } from "@/components/optimist/question-card";
+import type { AttachmentResult } from "@/components/optimist/question-card";
+import { OffScriptView } from "@/components/optimist/off-script-view";
+import type { ChatMessage } from "@/components/optimist/off-script-view";
+import { PricingAnswerCard } from "@/components/optimist/pricing-answer-card";
+import { InterviewComplete } from "@/components/optimist/interview-complete";
+import { DocumentView } from "@/components/optimist/document-view";
+import { SendDialog } from "@/components/optimist/send-dialog";
+import { SentScreen } from "@/components/optimist/sent-screen";
+import { ContributorScreen } from "@/components/optimist/contributor-screen";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { usePortalData } from "@/lib/portal-data";
+import { initials } from "@/lib/data";
 import { SECTION_KEYS, SECTION_LABELS } from "@/lib/types";
 import type { Pricing, Proposal, ProposalStatus } from "@/lib/types";
-import { PricingTable } from "@/components/pricing-table";
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
+/* The Optimist: proposal interview redesign (design_handoff_the_optimist).
+   The interview asks one question at a time; the manuscript assembles beside
+   it. Free-form chat is the escape hatch, not the interface. When drafting is
+   done, the manuscript takes over the whole screen. Backend contract is
+   unchanged from the previous 3-column build — POST /assist, PATCH draft/
+   commit/final, POST send — only the interaction model around it changed. */
 
 const MAX_CACHED_MESSAGES = 60;
 const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;
+const WASH_DECAY_MS = 6000;
+const THIN_SECTION_CHARS = 150;
+const OPENING_PROMPT = "Tell The Optimist about the client and the work, and it will start drafting.";
+
 const LL_STATUSES: ProposalStatus[] = ["Draft", "In Review", "Sent"];
 const ALL_STATUSES: ProposalStatus[] = [
-  "Draft",
-  "In Review",
-  "Internally Approved",
-  "Sent",
-  "Customer Approved",
-  "Customer Rejected",
-  "Revision Requested",
+  "Draft", "In Review", "Internally Approved", "Sent",
+  "Customer Approved", "Customer Rejected", "Revision Requested",
 ];
 
 function chatKey(id: string) {
@@ -63,10 +57,14 @@ function loadChat(id: string): ChatMessage[] {
 }
 
 function saveChat(id: string, messages: ChatMessage[]) {
-  window.localStorage.setItem(
-    chatKey(id),
-    JSON.stringify(messages.slice(-MAX_CACHED_MESSAGES))
-  );
+  window.localStorage.setItem(chatKey(id), JSON.stringify(messages.slice(-MAX_CACHED_MESSAGES)));
+}
+
+function computeFlagged(draftSections: Record<string, string>): string[] {
+  return SECTION_KEYS.filter((k) => {
+    const content = draftSections[k]?.trim() ?? "";
+    return content.length > 0 && content.length < THIN_SECTION_CHARS;
+  });
 }
 
 export default function OptimistPage() {
@@ -80,27 +78,33 @@ export default function OptimistPage() {
 function OptimistView() {
   const router = useRouter();
   const params = useSearchParams();
-  const { loading, error, role, proposals, deals, myLabs, me, setProposals } =
-    usePortalData();
+  const { loading, error, role, proposals, deals, labs, myLabs, me, people, setProposals } = usePortalData();
 
   const selectedId = params.get("p");
   const wantsNew = params.get("new") === "1";
   const [showNew, setShowNew] = useState(false);
+  const [showSend, setShowSend] = useState(false);
+  const [view, setView] = useState<"interview" | "document">("interview");
+  const [mode, setMode] = useState<"question" | "freeform">("question");
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draftSections, setDraftSections] = useState<Record<string, string>>({});
-  // Structured pricing rides alongside the section text (FR3). The Optimist
-  // writes it; null means the proposal isn't priced yet.
   const [draftPricing, setDraftPricing] = useState<Pricing | null>(null);
+  const [answeredCount, setAnsweredCount] = useState(0);
+  const [recentlyWritten, setRecentlyWritten] = useState<Set<string>>(new Set());
+  const [attachmentResult, setAttachmentResult] = useState<AttachmentResult | null>(null);
+  const [pricingJustSet, setPricingJustSet] = useState(false);
+  const [sentInfo, setSentInfo] = useState<{ version: number; clientEmail: string; url: string } | null>(null);
+
   const [input, setInput] = useState("");
-  const [attachment, setAttachment] = useState<{ type: string; data: string; name: string } | null>(
-    null
-  );
+  const [attachment, setAttachment] = useState<{ type: string; data: string; name: string; sizeMB: number } | null>(null);
   const [sending, setSending] = useState(false);
-  const [showSend, setShowSend] = useState(false);
-  const logRef = useRef<HTMLDivElement>(null);
+
+  const washTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const attachInputRef = useRef<HTMLInputElement>(null);
 
   const selected = proposals.find((p) => p.id === selectedId) ?? null;
+  const labNames: Record<string, string> = Object.fromEntries(labs.map((l) => [l.id, l.name]));
 
   useEffect(() => {
     if (wantsNew) setShowNew(true);
@@ -116,30 +120,48 @@ function OptimistView() {
       setDraftSections({});
       setDraftPricing(null);
     }
+    setAnsweredCount(0);
+    setRecentlyWritten(new Set());
+    setAttachmentResult(null);
+    setPricingJustSet(false);
+    setSentInfo(null);
+    setView("interview");
+    setMode("question");
+    Object.values(washTimers.current).forEach(clearTimeout);
+    washTimers.current = {};
   }, [selected?.id]);
 
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
-  }, [messages]);
+    return () => {
+      Object.values(washTimers.current).forEach(clearTimeout);
+    };
+  }, []);
 
   if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;
-
-  if (role === "Contributor") {
-    return (
-      <p className="text-sm text-ink-mute">
-        The Optimist is available to Lab Leaders and Admins.
-      </p>
-    );
-  }
+  if (role === "Contributor") return <ContributorScreen />;
 
   const select = (id: string | null) => {
-    const qs = id ? `?p=${id}` : "";
-    router.replace(`/optimist${qs}`, { scroll: false });
+    router.replace(id ? `/optimist?p=${id}` : "/optimist", { scroll: false });
   };
 
   const updateProposal = (updated: Proposal) => {
     setProposals((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
+  const markWritten = (keys: string[]) => {
+    if (!keys.length) return;
+    setRecentlyWritten((prev) => new Set([...prev, ...keys]));
+    keys.forEach((key) => {
+      clearTimeout(washTimers.current[key]);
+      washTimers.current[key] = setTimeout(() => {
+        setRecentlyWritten((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }, WASH_DECAY_MS);
+    });
   };
 
   const persistDraft = async (sections: Record<string, string>, pricing: Pricing | null) => {
@@ -147,8 +169,6 @@ function OptimistView() {
     try {
       const saved = await api<Proposal>(`/proposals/${selected.id}`, {
         method: "PATCH",
-        // Pricing rides along with the draft save so the structured figures and
-        // the prose that describes them can never be a version out of step.
         body: JSON.stringify({ sections, pricing, draft: true }),
       });
       updateProposal(saved);
@@ -158,7 +178,8 @@ function OptimistView() {
     }
   };
 
-  const send = async (text: string) => {
+  /** Core round trip, shared by in-interview answers and off-script messages. */
+  const sendMessage = async (text: string) => {
     if (!selected || !text.trim() || sending) return;
     setSending(true);
     const userMsg: ChatMessage = { role: "user", content: text.trim() };
@@ -168,34 +189,44 @@ function OptimistView() {
     setInput("");
     const sentAttachment = attachment;
     setAttachment(null);
+    setAttachmentResult(null);
+    setPricingJustSet(false);
 
     try {
-      const result = await api<{
-        reply: string;
-        sections: Record<string, string>;
-        pricing: Pricing | null;
-      }>("/assist", {
+      const result = await api<{ reply: string; sections: Record<string, string>; pricing: Pricing | null }>("/assist", {
         method: "POST",
         body: JSON.stringify({
           proposalId: selected.id,
           messages: nextMessages,
           draft: draftSections,
-          ...(sentAttachment ? { attachment: sentAttachment } : {}),
+          ...(sentAttachment ? { attachment: { type: sentAttachment.type, data: sentAttachment.data, name: sentAttachment.name } } : {}),
         }),
       });
       const merged = { ...draftSections };
+      const writtenKeys: string[] = [];
       for (const key of SECTION_KEYS) {
-        if (result.sections[key]) merged[key] = result.sections[key];
+        if (result.sections[key]) {
+          merged[key] = result.sections[key];
+          writtenKeys.push(key);
+        }
       }
       setDraftSections(merged);
-      // Null means the turn didn't touch pricing, which is the common case —
-      // only overwrite when The Optimist actually produced figures.
+      markWritten(writtenKeys);
       const mergedPricing = result.pricing ?? draftPricing;
       setDraftPricing(mergedPricing);
-      const withReply: ChatMessage[] = [
-        ...nextMessages,
-        { role: "assistant", content: result.reply },
-      ];
+      if (result.pricing) setPricingJustSet(true);
+      if (sentAttachment) {
+        setAttachmentResult({
+          name: sentAttachment.name,
+          meta: `${sentAttachment.sizeMB.toFixed(1)} MB · read in this turn`,
+          landed: writtenKeys.map((k) => ({
+            label: "Updated",
+            sectionLabel: `${String(SECTION_KEYS.indexOf(k) + 1).padStart(2, "0")} ${SECTION_LABELS[k]}`,
+          })),
+          unresolved: [],
+        });
+      }
+      const withReply: ChatMessage[] = [...nextMessages, { role: "assistant", content: result.reply }];
       setMessages(withReply);
       saveChat(selected.id, withReply);
       await persistDraft(merged, mergedPricing);
@@ -206,7 +237,12 @@ function OptimistView() {
     }
   };
 
-  const onAttach = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const answerQuestion = async (text: string) => {
+    setAnsweredCount((n) => n + 1);
+    await sendMessage(text);
+  };
+
+  const onAttachFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_ATTACHMENT_BYTES) {
@@ -219,10 +255,8 @@ function OptimistView() {
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
-    setAttachment({ type: file.type, data, name: file.name });
+    setAttachment({ type: file.type, data, name: file.name, sizeMB: file.size / (1024 * 1024) });
   };
-
-  const autoFill = () => send("Auto-fill the rest of the sections using your best assumptions.");
 
   const saveVersion = async () => {
     if (!selected) return;
@@ -238,13 +272,28 @@ function OptimistView() {
     }
   };
 
-  const setStatus = async (status: ProposalStatus) => {
-    if (!selected) return;
+  const revertToFinal = async () => {
+    if (!selected?.finalVersion) return;
+    const snap = selected.versions?.find((v) => v.v === selected.finalVersion);
+    if (!snap) return;
     try {
       const saved = await api<Proposal>(`/proposals/${selected.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ sections: snap.sections, pricing: snap.pricing ?? null, draft: true }),
       });
+      updateProposal(saved);
+      setDraftSections({ ...snap.sections });
+      setDraftPricing(snap.pricing ?? null);
+      toast.success(`Reverted to v${selected.finalVersion}`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not revert this draft.");
+    }
+  };
+
+  const setStatus = async (status: ProposalStatus) => {
+    if (!selected) return;
+    try {
+      const saved = await api<Proposal>(`/proposals/${selected.id}`, { method: "PATCH", body: JSON.stringify({ status }) });
       updateProposal(saved);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not update the status.");
@@ -254,10 +303,7 @@ function OptimistView() {
   const markFinal = async () => {
     if (!selected) return;
     try {
-      const saved = await api<Proposal>(`/proposals/${selected.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ final: true }),
-      });
+      const saved = await api<Proposal>(`/proposals/${selected.id}`, { method: "PATCH", body: JSON.stringify({ final: true }) });
       updateProposal(saved);
       toast.success("Marked Final");
     } catch (err) {
@@ -268,9 +314,7 @@ function OptimistView() {
   const draftPdf = async () => {
     if (!selected) return;
     try {
-      const { fileId } = await api<{ fileId: string }>(`/proposals/${selected.id}/pdf`, {
-        method: "POST",
-      });
+      const { fileId } = await api<{ fileId: string }>(`/proposals/${selected.id}/pdf`, { method: "POST" });
       const { url } = await api<{ url: string }>(`/files/${fileId}/download`);
       window.open(url, "_blank");
     } catch (err) {
@@ -278,173 +322,174 @@ function OptimistView() {
     }
   };
 
-  const draftAhead = !!(
-    selected?.dirty || (selected?.finalVersion && selected.finalVersion !== selected.version)
-  );
+  if (!selected) {
+    return (
+      <div className="flex h-[calc(100vh-8rem)] flex-col">
+        <ArriveScreen proposals={proposals} labNames={labNames} onSelect={select} onNew={() => setShowNew(true)} />
+        {showNew && (
+          <NewProposalDialog
+            open={showNew}
+            onOpenChange={(open) => {
+              setShowNew(open);
+              if (!open && wantsNew) router.replace("/optimist", { scroll: false });
+            }}
+            deals={deals.filter((d) => can.editDeal(d, role!, myLabs, me)).map((d) => ({ id: d.id, client: d.client, lab: d.lab, amount: d.amount }))}
+            labNames={labNames}
+            onCreated={(created) => {
+              setProposals((prev) => [created, ...prev]);
+              setShowNew(false);
+              select(created.id);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
 
+  const draftedCount = SECTION_KEYS.filter((k) => draftSections[k]?.trim()).length;
+  const activeKey = SECTION_KEYS.find((k) => !draftSections[k]?.trim()) ?? null;
+  const activeIndex = activeKey ? SECTION_KEYS.indexOf(activeKey) : -1;
+  const sectionHint = activeKey ? `— builds section ${String(activeIndex + 1).padStart(2, "0")}` : "";
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  const questionText = lastAssistant ? lastAssistant.content : OPENING_PROMPT;
+  const draftAhead = !!(selected.dirty || (selected.finalVersion && selected.finalVersion !== selected.version));
+  const finalSnap = selected.versions?.find((v) => v.v === selected.finalVersion);
+  const baselineSections = finalSnap?.sections ?? selected.sections ?? {};
+  const changedKeys = SECTION_KEYS.filter((k) => (draftSections[k] ?? "") !== (baselineSections[k] ?? ""));
+  const flagged = computeFlagged(draftSections);
+  const meRecord = me ? people[me] : undefined;
   const statusOptions = role === "Admin" ? ALL_STATUSES : LL_STATUSES;
 
   return (
-    <div className="grid h-[calc(100vh-8rem)] gap-4 md:grid-cols-[220px_1fr_360px]">
-      <div className="flex flex-col gap-2 overflow-y-auto rounded-lg bg-card p-3 ring-1 ring-foreground/10">
-        <Button size="sm" onClick={() => setShowNew(true)}>
-          + New
-        </Button>
-        {proposals.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => select(p.id)}
-            className={cn(
-              "rounded-md px-2 py-2 text-left text-sm",
-              p.id === selectedId
-                ? "bg-violet-pale text-violet-deep"
-                : "text-ink hover:bg-paper"
-            )}
-          >
-            <div className="truncate font-medium">{p.title}</div>
-            <div className="truncate text-xs text-ink-mute">{p.client}</div>
-          </button>
-        ))}
-      </div>
-
-      {!selected ? (
-        <div className="flex items-center justify-center rounded-lg bg-card text-sm text-ink-mute ring-1 ring-foreground/10">
-          Pick a proposal, or start a new one.
+    <div className="flex h-[calc(100vh-8rem)] flex-col">
+      {view === "document" ? (
+        sentInfo ? (
+          <SentScreen
+            clientName={selected.client ?? ""}
+            sentVersion={sentInfo.version}
+            clientEmail={sentInfo.clientEmail}
+            shareUrl={sentInfo.url}
+            onBack={() => setSentInfo(null)}
+          />
+        ) : (
+          <DocumentView
+            proposal={selected}
+            clientName={selected.client}
+            labName={labNames[selected.lab] ?? selected.lab}
+            draftSections={draftSections}
+            draftPricing={draftPricing}
+            draftAhead={draftAhead}
+            changedKeys={changedKeys}
+            flaggedCount={flagged.length}
+            statusOptions={statusOptions}
+            onStatusChange={setStatus}
+            avatarInitials={initials(meRecord)}
+            avatarPhoto={meRecord?.photo}
+            onBack={() => setView("interview")}
+            onSaveVersion={saveVersion}
+            onRevert={revertToFinal}
+            onDraftPdf={draftPdf}
+            onMarkFinal={markFinal}
+            onSendClick={() => setShowSend(true)}
+            onAskToChange={() => {
+              setView("interview");
+              setMode("freeform");
+            }}
+          />
+        )
+      ) : mode === "freeform" ? (
+        <div className="grid h-full min-h-0 grid-cols-[1fr_440px]">
+          <OffScriptView
+            messages={messages}
+            pendingQuestionNumber={answeredCount + 1}
+            remainingCount={Math.max(0, 6 - draftedCount)}
+            input={input}
+            onInputChange={setInput}
+            onSend={() => sendMessage(input)}
+            sending={sending}
+            onBack={() => setMode("question")}
+          />
+          <ManuscriptPanel
+            proposalTitle={selected.title}
+            draftSections={draftSections}
+            draftPricing={draftPricing}
+            activeKey={activeKey}
+            recentlyWritten={recentlyWritten}
+            flaggedKeys={draftedCount === 6 ? new Set(flagged) : undefined}
+          />
+        </div>
+      ) : draftedCount === 6 ? (
+        <div className="grid h-full min-h-0 grid-cols-[1fr_440px]">
+          <InterviewComplete
+            proposalTitle={selected.title}
+            clientName={selected.client}
+            flagged={flagged.map((key) => ({ key, label: SECTION_LABELS[key] }))}
+            questionsAnswered={answeredCount}
+            onFixIt={(key) => answerQuestion(`Let's revisit ${SECTION_LABELS[key]} — I want to add more detail. What am I missing?`)}
+            onReadThrough={() => setView("document")}
+            onSaveVersion={saveVersion}
+            onOffScript={() => setMode("freeform")}
+          />
+          <ManuscriptPanel
+            proposalTitle={selected.title}
+            draftSections={draftSections}
+            draftPricing={draftPricing}
+            recentlyWritten={recentlyWritten}
+            flaggedKeys={new Set(flagged)}
+            versionLabel={`v${selected.version} draft`}
+          />
+        </div>
+      ) : pricingJustSet && draftPricing ? (
+        <div className="grid h-full min-h-0 grid-cols-[1fr_440px]">
+          <PricingAnswerCard
+            proposalTitle={selected.title}
+            clientName={selected.client}
+            preamble={questionText}
+            pricing={draftPricing}
+            quickReplies={["Keep it", "Change a number", "Add a note"]}
+            onQuickReply={(label) => answerQuestion(label)}
+            onContinue={() => setPricingJustSet(false)}
+          />
+          <ManuscriptPanel
+            proposalTitle={selected.title}
+            draftSections={draftSections}
+            draftPricing={draftPricing}
+            activeKey={activeKey}
+            recentlyWritten={recentlyWritten}
+          />
         </div>
       ) : (
-        <>
-          <div className="flex flex-col rounded-lg bg-card ring-1 ring-foreground/10">
-            <div ref={logRef} className="flex-1 overflow-y-auto p-4">
-              {messages.length === 0 && (
-                <p className="text-sm text-ink-mute">
-                  Tell The Optimist about the client and the work, and it will start drafting.
-                </p>
-              )}
-              <div className="flex flex-col gap-3">
-                {messages.map((m, i) => (
-                  <div
-                    key={i}
-                    className={cn(
-                      "max-w-[85%] rounded-lg px-3 py-2 text-sm",
-                      m.role === "user"
-                        ? "self-end bg-violet-deep text-white"
-                        : "self-start bg-paper text-ink"
-                    )}
-                  >
-                    {m.content}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-col gap-2 border-t border-hair p-3">
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={autoFill} disabled={sending}>
-                  Auto-fill the rest
-                </Button>
-                {/*
-                  A real Button driving a hidden input via ref, not a <label>
-                  wrapping it: display:none makes the input unfocusable and a
-                  label isn't focusable either, so the old markup had no
-                  keyboard path at all. Same pattern as files/page.tsx.
-                */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => attachInputRef.current?.click()}
-                  disabled={sending}
-                >
-                  {attachment ? attachment.name : "Attach a file"}
-                </Button>
-                <input
-                  ref={attachInputRef}
-                  type="file"
-                  hidden
-                  onChange={onAttach}
-                  disabled={sending}
-                />
-              </div>
-              <div className="flex gap-2">
-                <Textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send(input);
-                    }
-                  }}
-                  rows={2}
-                  placeholder="Message The Optimist…"
-                  disabled={sending}
-                />
-                <Button
-                  onClick={() => send(input)}
-                  disabled={sending || !input.trim()}
-                >
-                  Send
-                </Button>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 overflow-y-auto rounded-lg bg-card p-4 ring-1 ring-foreground/10">
-            <div className="flex items-center justify-between">
-              <h2 className="font-serif text-lg text-ink">{selected.title}</h2>
-              <Select value={selected.status} onValueChange={(v) => setStatus(v as ProposalStatus)}>
-                <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {statusOptions.map((s) => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {draftAhead && (
-              <div className="rounded-md bg-amber-pale px-3 py-2 text-xs text-amber">
-                The draft has changed since the last saved version
-                {selected.finalVersion ? ` (v${selected.finalVersion} is Final)` : ""}.
-              </div>
-            )}
-
-            {SECTION_KEYS.map((key) => (
-              <div key={key}>
-                <h3 className="text-sm font-medium text-ink">{SECTION_LABELS[key]}</h3>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-ink-soft">
-                  {draftSections[key] || <span className="text-ink-mute">Not yet written.</span>}
-                </p>
-                {/* FR4: the preview shows the same pricing table the customer
-                    will see, right under the prose that introduces it. */}
-                {key === "pricing" && <PricingTable pricing={draftPricing} />}
-                {key === "pricing" && !draftPricing && (
-                  <p className="mt-1 text-xs text-ink-mute">
-                    No figures recorded yet. Tell The Optimist the numbers and it will build the
-                    pricing table.
-                  </p>
-                )}
-              </div>
-            ))}
-
-            <div className="mt-2 flex flex-wrap gap-2 border-t border-hair pt-3">
-              <Button size="sm" variant="outline" onClick={saveVersion}>
-                Save version
-              </Button>
-              <Button size="sm" variant="outline" onClick={markFinal} disabled={!!selected.final}>
-                {selected.final ? "Final ✓" : "Mark Final"}
-              </Button>
-              <Button size="sm" variant="outline" onClick={draftPdf}>
-                Draft PDF
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setShowSend(true)}
-                disabled={!selected.final}
-              >
-                Send to client
-              </Button>
-            </div>
-          </div>
-        </>
+        <div className="grid h-full min-h-0 grid-cols-[1fr_440px]">
+          <QuestionCard
+            proposalTitle={selected.title}
+            clientName={selected.client}
+            questionNumber={answeredCount + 1}
+            sectionHint={sectionHint}
+            questionText={questionText}
+            applySignalWord={!!lastAssistant}
+            attachmentResult={attachmentResult ?? undefined}
+            input={input}
+            onInputChange={setInput}
+            onAnswer={() => answerQuestion(input)}
+            onAttachClick={() => attachInputRef.current?.click()}
+            attachInputRef={attachInputRef}
+            onAttachFile={onAttachFile}
+            attachedFileName={attachment?.name}
+            sending={sending}
+            onSkip={() => answerQuestion("Skip this question for now and move on to the next one.")}
+            transcriptSummary={answeredCount > 0 ? `${answeredCount} question${answeredCount === 1 ? "" : "s"} answered · transcript` : undefined}
+            onOffScript={() => setMode("freeform")}
+            onAutoFill={() => answerQuestion("Auto-fill the rest of the sections using your best assumptions.")}
+          />
+          <ManuscriptPanel
+            proposalTitle={selected.title}
+            draftSections={draftSections}
+            draftPricing={draftPricing}
+            activeKey={activeKey}
+            recentlyWritten={recentlyWritten}
+            justWrittenTag={attachmentResult ? "from the RFP" : "Just written"}
+          />
+        </div>
       )}
 
       {showNew && (
@@ -454,7 +499,8 @@ function OptimistView() {
             setShowNew(open);
             if (!open && wantsNew) router.replace("/optimist", { scroll: false });
           }}
-          deals={deals.filter((d) => can.editDeal(d, role!, myLabs, me))}
+          deals={deals.filter((d) => can.editDeal(d, role!, myLabs, me)).map((d) => ({ id: d.id, client: d.client, lab: d.lab, amount: d.amount }))}
+          labNames={labNames}
           onCreated={(created) => {
             setProposals((prev) => [created, ...prev]);
             setShowNew(false);
@@ -463,166 +509,17 @@ function OptimistView() {
         />
       )}
 
-      {showSend && selected && (
+      {showSend && (
         <SendDialog
           proposal={selected}
           open={showSend}
           onOpenChange={setShowSend}
-          onSent={updateProposal}
+          onSent={(updated, result) => {
+            updateProposal(updated);
+            setSentInfo({ version: updated.sentVersion ?? updated.version, clientEmail: updated.clientEmail ?? "", url: result.url });
+          }}
         />
       )}
     </div>
-  );
-}
-
-function NewProposalDialog({
-  open,
-  onOpenChange,
-  deals,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  deals: { id: string; client: string }[];
-  onCreated: (proposal: Proposal) => void;
-}) {
-  const [dealId, setDealId] = useState(deals[0]?.id ?? "");
-  const [title, setTitle] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  const create = async () => {
-    if (!dealId || !title.trim()) return;
-    setCreating(true);
-    try {
-      const created = await api<Proposal>("/proposals", {
-        method: "POST",
-        body: JSON.stringify({ dealId, title: title.trim() }),
-      });
-      onCreated(created);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not create this proposal.");
-    } finally {
-      setCreating(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>New proposal</DialogTitle>
-          <DialogDescription>
-            Every proposal starts from a deal — its client, lab, and owner come from there.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="opt-deal">Deal</Label>
-            <Select value={dealId} onValueChange={setDealId}>
-              <SelectTrigger id="opt-deal"><SelectValue placeholder="Pick a deal" /></SelectTrigger>
-              <SelectContent>
-                {deals.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>{d.client}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="opt-title">Title</Label>
-            <Input id="opt-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            onClick={create}
-            disabled={creating || !dealId || !title.trim()}
-          >
-            {creating ? "Creating…" : "Create"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function SendDialog({
-  proposal,
-  open,
-  onOpenChange,
-  onSent,
-}: {
-  proposal: Proposal;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSent: (proposal: Proposal) => void;
-}) {
-  const [clientEmail, setClientEmail] = useState(proposal.clientEmail ?? "");
-  const [sending, setSending] = useState(false);
-
-  const sendVia = async (sendEmail: boolean) => {
-    setSending(true);
-    try {
-      const result = await api<{
-        id: string;
-        sentVersion: number;
-        draftAhead: boolean;
-        url: string;
-        text: string;
-        emailSent: boolean;
-        emailError?: string;
-      }>(`/proposals/${proposal.id}/send`, {
-        method: "POST",
-        body: JSON.stringify({ clientEmail, sendEmail }),
-      });
-      onSent({
-        ...proposal,
-        status: "Sent",
-        sentVersion: result.sentVersion,
-        clientEmail,
-      });
-      if (sendEmail) {
-        toast.success(result.emailSent ? "Emailed to client" : result.emailError || "Send failed");
-      } else {
-        await navigator.clipboard.writeText(result.text);
-        toast.success("Copied the client email text to your clipboard");
-      }
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not send this proposal.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Send {proposal.title} to the client</DialogTitle>
-          <DialogDescription>
-            Freezes the Final version behind a one-time link. Choose how to deliver it.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="opt-client-email">Client email</Label>
-          <Input id="opt-client-email"
-            type="email"
-            value={clientEmail}
-            onChange={(e) => setClientEmail(e.target.value)}
-          />
-        </div>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => sendVia(false)} disabled={sending}>
-            Copy email text
-          </Button>
-          <Button
-            onClick={() => sendVia(true)}
-            disabled={sending || !clientEmail}
-          >
-            {sending ? "Sending…" : "Email the client"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
