@@ -15,6 +15,7 @@ import type {
   Contract,
   Deal,
   FileRecord,
+  Guide,
   InvoiceRequest,
   Lab,
   Person,
@@ -46,6 +47,7 @@ interface PortalDataValue {
   files: FileRecord[];
   contracts: Contract[];
   recurrences: Recurrence[];
+  guides: Guide[];
   setDeals: React.Dispatch<React.SetStateAction<Deal[]>>;
   setProposals: React.Dispatch<React.SetStateAction<Proposal[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<InvoiceRequest[]>>;
@@ -80,9 +82,10 @@ export function PortalDataProvider({
   const [files, setFiles] = useState<FileRecord[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
+  const [guides, setGuides] = useState<Guide[]>([]);
 
   const fetchAll = useCallback(async (): Promise<void> => {
-    const [bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes, recurrencesRes] =
+    const [bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes, recurrencesRes, guidesRes] =
       await Promise.all([
         api<Bootstrap>("/bootstrap"),
         api<Deal[]>("/deals"),
@@ -91,6 +94,7 @@ export function PortalDataProvider({
         api<FileRecord[]>("/files"),
         api<Contract[]>("/contracts"),
         api<Recurrence[]>("/recurrences"),
+        api<Guide[]>("/guides"),
       ]);
     setLabs(Object.entries(bootstrap.labs).map(([id, lab]) => ({ id, name: lab.name })));
     setPeople(bootstrap.people);
@@ -103,6 +107,7 @@ export function PortalDataProvider({
     setFiles(filesRes);
     setContracts(contractsRes);
     setRecurrences(recurrencesRes);
+    setGuides(guidesRes);
   }, []);
 
   const load = useCallback(async (): Promise<void> => {
@@ -179,6 +184,7 @@ export function PortalDataProvider({
       files,
       contracts,
       recurrences,
+      guides,
       setDeals,
       setProposals,
       setInvoices,
@@ -206,6 +212,7 @@ export function PortalDataProvider({
       files,
       contracts,
       recurrences,
+      guides,
       refresh,
       refreshFiles,
       refreshProposals,

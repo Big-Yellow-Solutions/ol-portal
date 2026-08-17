@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "seed": "node scripts/seed.mjs",
+    "seed-guides": "node scripts/seed-guides.mjs",
     "migrate-users": "node scripts/migrate-users.mjs",
     "test": "node --test tests/*.test.mjs"
   },

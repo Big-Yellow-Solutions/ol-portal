@@ -20,6 +20,7 @@ import * as templates from "./templates.mjs";
 import * as signing from "./signing.mjs";
 import * as resources from "./resources.mjs";
 import * as courses from "./courses.mjs";
+import * as guides from "./guides.mjs";
 import { fullName } from "./util.mjs";
 
 const TABLE = process.env.TABLE_NAME;
@@ -402,6 +403,7 @@ async function qboCallback(event) {
 /* ---------- router ---------- */
 async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
+  if (method === "GET" && path === "/guides") return await guides.listGuides(ctx);
   if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL", ctx.can.leadsDeal);
   if (method === "GET" && path === "/proposals") return await proposals.listProposals(ctx);
   if (method === "GET" && path === "/invoices")

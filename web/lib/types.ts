@@ -554,6 +554,22 @@ export const SECTION_LABELS: Record<string, string> = {
 
 export const SECTION_KEYS = Object.keys(SECTION_LABELS);
 
+// Mirrors backend/src/guides.mjs: `GET /guides` already strips role-gated
+// sections and the raw pk/sk/roles/order fields server-side, so what reaches
+// the client is exactly what the current viewer is allowed to read.
+export interface GuideSection {
+  heading: string;
+  body: string;
+}
+
+export interface Guide {
+  /** Route segment, e.g. "dashboard" for the root page, "pipeline" for /pipeline. */
+  page: string;
+  title: string;
+  summary: string;
+  sections: GuideSection[];
+}
+
 export const STAGES: Stage[] = [
   "Lead",
   "Discovery",

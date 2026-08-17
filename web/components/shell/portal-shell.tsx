@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { Topbar } from "@/components/shell/topbar";
 import { ActAsBanner } from "@/components/shell/act-as-banner";
+import { HelpWidget } from "@/components/shell/help-widget";
 import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { usePortalData } from "@/lib/portal-data";
@@ -41,6 +42,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         <div className="flex-1 p-4 md:p-8">
           <div className="mx-auto max-w-[1280px]">{children}</div>
         </div>
+        <HelpWidget />
       </SidebarInset>
     </SidebarProvider>
   );
