@@ -18,13 +18,14 @@ import type { Pricing, Proposal, ProposalStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /* 08 · Read it through (design_handoff_the_optimist, 3h). Full-bleed within
-   the sidebar inset — SidebarInset already establishes `position: relative`
-   (components/ui/sidebar.tsx), so an absolutely-positioned overlay here fills
-   exactly the content area to the right of the sidebar, at any sidebar width,
-   without touching portal-shell.tsx or topbar.tsx. It paints over the shared
-   Topbar/ActAsBanner (position:auto content always paints after in-flow
-   siblings in the same stacking context), which is what lets this route swap
-   in its own header. */
+   the shell's content area: portal-shell.tsx marks that wrapper `relative`, so
+   the absolutely-positioned overlay below fills it edge to edge and this route
+   can swap in its own header.
+
+   Under the old sidebar shell the containing block was SidebarInset and the
+   overlay also painted over the shared Topbar. The redesign puts a sticky top
+   nav there instead, and that nav is the constant chrome, so the overlay now
+   starts beneath it rather than covering it. */
 
 export function DocumentView({
   proposal,

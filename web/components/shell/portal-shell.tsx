@@ -2,12 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AppSidebar } from "@/components/shell/app-sidebar";
-import { Topbar } from "@/components/shell/topbar";
+import { TopNav } from "@/components/shell/top-nav";
 import { ActAsBanner } from "@/components/shell/act-as-banner";
 import { HelpWidget } from "@/components/shell/help-widget";
 import { Button } from "@/components/ui/button";
-import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
 
@@ -33,18 +31,25 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     return <PortalLoadError message={error} onRetry={refresh} />;
   }
 
+  /* The design puts the chrome on top rather than down the side, so the shell
+     is a plain column now: banner, sticky nav, then a 1420px measure with the
+     34/32/80 padding every artboard uses. */
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset className="bg-paper">
-        <ActAsBanner />
-        <Topbar />
-        <div className="flex-1 p-4 md:p-8">
-          <div className="mx-auto max-w-[1280px]">{children}</div>
+    <div className="flex min-h-screen flex-col bg-paper">
+      <ActAsBanner />
+      <TopNav />
+      {/* Positioned so a route can paint a full-bleed overlay over the content
+          area (the Optimist's document view does). Under the old sidebar shell
+          that containing block was SidebarInset; the overlay stops below the
+          nav now rather than covering it, because the top nav is the constant
+          chrome in this design. */}
+      <div className="relative flex-1">
+        <div className="mx-auto flex max-w-[1420px] flex-col gap-[22px] px-4 pt-[34px] pb-20 md:px-8">
+          {children}
         </div>
-        <HelpWidget />
-      </SidebarInset>
-    </SidebarProvider>
+      </div>
+      <HelpWidget />
+    </div>
   );
 }
 

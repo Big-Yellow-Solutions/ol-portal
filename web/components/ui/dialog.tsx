@@ -39,7 +39,10 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 isolate z-50 bg-black/10 duration-100 supports-backdrop-filter:backdrop-blur-xs data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+        // The design system dims with ink at 42% and no blur — the brand
+        // avoids glassmorphism, and a blurred scrim washes the violet surfaces
+        // behind it toward gray.
+        "fixed inset-0 isolate z-50 bg-[rgba(17,17,17,0.42)] duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
         className
       )}
       {...props}
