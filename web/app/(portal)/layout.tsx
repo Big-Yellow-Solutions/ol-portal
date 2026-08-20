@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { MessagesProvider } from "@/lib/messages";
 import { PortalDataProvider } from "@/lib/portal-data";
 import { PortalShell } from "@/components/shell/portal-shell";
 
@@ -28,7 +29,9 @@ export default function PortalLayout({
 
   return (
     <PortalDataProvider>
-      <PortalShell>{children}</PortalShell>
+      <MessagesProvider>
+        <PortalShell>{children}</PortalShell>
+      </MessagesProvider>
     </PortalDataProvider>
   );
 }

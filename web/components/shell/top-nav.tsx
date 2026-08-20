@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
 import { fullName, initials } from "@/lib/data";
@@ -166,6 +167,7 @@ function NavPill({ item, active }: { item: NavItem; active: boolean }) {
 export function TopNav() {
   const pathname = usePathname();
   const { role, people, me } = usePortalData();
+  const { openList } = useMessages();
   const { logout } = useAuth();
   const meRecord = me ? people[me] : undefined;
 
@@ -243,17 +245,18 @@ export function TopNav() {
         </nav>
 
         <div className="flex flex-none items-center gap-[18px]">
-          <Link
-            href="/bench"
+          <button
+            type="button"
+            onClick={openList}
             aria-label="Messages"
-            className="relative flex items-center text-ink transition-colors hover:text-violet-deep"
+            className="relative flex cursor-pointer items-center text-ink transition-colors hover:text-violet-deep"
           >
             <MessageIcon />
             <span
               aria-hidden="true"
               className="absolute -top-0.5 -right-[3px] size-[7px] rounded-full bg-violet-deep"
             />
-          </Link>
+          </button>
 
           <span className="relative hidden items-center text-ink sm:flex">
             <BellIcon />

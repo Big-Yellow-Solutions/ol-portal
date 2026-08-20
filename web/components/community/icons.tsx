@@ -126,3 +126,50 @@ export function ArrowRightIcon(props: IconProps) {
     </Stroke>
   );
 }
+
+/* Added by the Directory + Messages handoff, which draws its icons the same
+   way. Kept here so the portal has one inline-icon set rather than a second
+   copy of the same paths under components/messages. */
+
+export function ArrowLeftIcon(props: IconProps) {
+  return (
+    <Stroke {...props} width={2.2}>
+      <path d="M19 12H5M11 18l-6-6 6-6" />
+    </Stroke>
+  );
+}
+
+export function SearchIcon(props: IconProps) {
+  return (
+    <Stroke {...props} round={false}>
+      <circle cx="11" cy="11" r="7" />
+      <path d="M16.5 16.5 21 21" />
+    </Stroke>
+  );
+}
+
+export function BellIcon(props: IconProps) {
+  return (
+    <Stroke {...props}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </Stroke>
+  );
+}
+
+export function PencilIcon(props: IconProps) {
+  return (
+    <Stroke {...props} width={1.9}>
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </Stroke>
+  );
+}
+
+export function CheckIcon({ width = 2.4, ...props }: IconProps & { width?: number }) {
+  return (
+    <Stroke {...props} width={width}>
+      <path d="M4 12.5 9.5 18 20 6.5" />
+    </Stroke>
+  );
+}

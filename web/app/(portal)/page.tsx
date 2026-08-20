@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useMemo } from "react";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { Digest } from "@/components/dashboard/digest";
 import {
@@ -9,16 +9,14 @@ import {
   PresenceCard,
   type StageTotal,
 } from "@/components/dashboard/aside";
-import { MessageDrawer } from "@/components/dashboard/message-drawer";
-import { COMMUNITY_POSTS, type ChatMessage } from "@/lib/community";
+import { COMMUNITY_POSTS } from "@/lib/community";
 import {
   digestStories,
   editionLabel,
-  messageTime,
   presenceLeaders,
   todayLabel,
-  type Leader,
 } from "@/lib/dashboard";
+import { networkId, useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { fmtCompact, fullName, initials } from "@/lib/data";
 import { STAGES, type Deal, type Stage } from "@/lib/types";
@@ -74,18 +72,9 @@ export default function DashboardPage() {
     [meName]
   );
 
-  const [openLeader, setOpenLeader] = useState<Leader | null>(null);
-  const [sent, setSent] = useState<Record<string, ChatMessage[]>>({});
-
-  const sendMessage = (leader: Leader, text: string) =>
-    setSent((s) => ({
-      ...s,
-      [leader.name]: (s[leader.name] ?? []).concat({
-        fromMe: true,
-        text,
-        time: messageTime(new Date()),
-      }),
-    }));
+  /* Messaging lives in the shell now, so a presence row opens the same panel
+     the top nav and the bench open — one conversation, wherever it starts. */
+  const { openWith } = useMessages();
 
   const openDeals = useMemo(
     () => deals.filter((d) => d.stage !== "Closed"),
@@ -182,21 +171,10 @@ export default function DashboardPage() {
           <PresenceCard
             leaders={leaders.slice(0, PRESENCE_ROWS)}
             more={Math.max(0, leaders.length - PRESENCE_ROWS)}
-            onMessage={setOpenLeader}
+            onMessage={(leader) => openWith([networkId(leader.name)])}
           />
         </aside>
       </div>
-
-      <MessageDrawer
-        leader={openLeader}
-        messages={
-          openLeader
-            ? openLeader.thread.messages.concat(sent[openLeader.name] ?? [])
-            : []
-        }
-        onClose={() => setOpenLeader(null)}
-        onSend={sendMessage}
-      />
     </>
   );
 }

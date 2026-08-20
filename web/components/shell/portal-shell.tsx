@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { TopNav } from "@/components/shell/top-nav";
 import { ActAsBanner } from "@/components/shell/act-as-banner";
 import { HelpWidget } from "@/components/shell/help-widget";
+import { MessagesPanel } from "@/components/messages/panel";
 import { Button } from "@/components/ui/button";
 import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
@@ -49,6 +50,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <HelpWidget />
+      <MessagesPanel />
     </div>
   );
 }

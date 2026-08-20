@@ -1,177 +1,180 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { PlusIcon, SearchIcon } from "@/components/community/icons";
+import { FIELD } from "@/components/community/primitives";
+import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
+import { PersonCard, type BenchPerson } from "@/components/bench/person-card";
 import { fullName, initials } from "@/lib/data";
-import { api, ApiError } from "@/lib/api";
-import { readPhoto } from "@/lib/photo";
-import { usePortalData, type PersonWithUsername } from "@/lib/portal-data";
+import { roleLine, useMessages } from "@/lib/messages";
+import { usePortalData } from "@/lib/portal-data";
+import { cn } from "@/lib/utils";
 
-type Filter =
-  | { kind: "all" }
-  | { kind: "lab-leaders" }
-  | { kind: "contributors" }
-  | { kind: "lab"; labId: string }
-  | { kind: "tag"; tag: string };
-
-function filterKey(f: Filter): string {
-  switch (f.kind) {
-    case "all":
-      return "";
-    case "lab-leaders":
-      return "__ll";
-    case "contributors":
-      return "__sc";
-    case "lab":
-      return `__lab:${f.labId}`;
-    case "tag":
-      return f.tag;
-  }
-}
+/* The bench, rebuilt from the Claude Design artboard "Directory".
+ *
+ * One screen, one question: who do I bring in, and how do I reach them. So
+ * the old filter rail — Everyone / Lab Leaders / Contributors / every lab /
+ * every tag, twenty-odd chips above the grid — is gone. Search reads name,
+ * role, lab, the engage line and the tags together, which is what the design's
+ * placeholder promises, and the only chips left are the ones on the cards,
+ * where a specialty is something you noticed on a person rather than a facet
+ * you went looking for.
+ *
+ * Presence dots are the one thing in the artboard that is deliberately not
+ * drawn: nothing in the API says whether a colleague is online, and a violet
+ * dot that means nothing is worse than no dot. When a presence source exists,
+ * it goes on the avatar the way Home already draws it.
+ */
 
 export default function BenchPage() {
-  const { loading, error, labs, people, bench, role, me, refresh } = usePortalData();
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<Filter>({ kind: "all" });
+  const { loading, error, labs, people, bench, role, me, refresh } =
+    usePortalData();
+  const { openWith, openNew } = useMessages();
+
+  const [query, setQuery] = useState("");
+  const [tag, setTag] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
-  const allTags = useMemo(() => {
-    const tags = new Set<string>();
-    for (const p of bench) for (const t of p.bench?.specialties ?? []) tags.add(t);
-    return [...tags].sort();
-  }, [bench]);
-
-  // Every Lab Leader and Contributor is listed — the backend has no
-  // per-person "hide me from the directory" flag, only contact-visibility
-  // toggles (bench.showEmail/showPhone), enforced server-side in bootstrap.
-  const visiblePeople = useMemo(
-    () => bench.filter((p) => p.role === "Lab Leader" || p.role === "Contributor"),
-    [bench]
+  /* Every Lab Leader and Contributor is listed — the backend has no
+     per-person "hide me from the directory" flag, only contact-visibility
+     toggles (bench.showEmail/showPhone), enforced server-side in bootstrap. */
+  const roster = useMemo<BenchPerson[]>(
+    () =>
+      bench
+        .filter((p) => p.role === "Lab Leader" || p.role === "Contributor")
+        .map((p) => ({
+          id: p.username,
+          name: fullName(p),
+          initials: initials(p),
+          role: roleLine(p, labs),
+          engage: p.bench?.blurb,
+          tags: p.bench?.specialties ?? [],
+          contact: p.bench?.email || p.bench?.phone,
+          photo: p.photo,
+        })),
+    [bench, labs]
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return visiblePeople.filter((p) => {
-      if (filter.kind === "lab-leaders" && p.role !== "Lab Leader") return false;
-      if (filter.kind === "contributors" && p.role !== "Contributor") return false;
-      if (filter.kind === "lab" && !(p.labs ?? []).includes(filter.labId)) return false;
-      if (filter.kind === "tag" && !(p.bench?.specialties ?? []).includes(filter.tag))
-        return false;
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return roster.filter((p) => {
+      if (tag && !p.tags.includes(tag)) return false;
       if (!q) return true;
-      const name = fullName(p).toLowerCase();
-      const blurb = (p.bench?.blurb ?? "").toLowerCase();
-      const specialties = p.bench?.specialties ?? [];
-      return (
-        name.includes(q) ||
-        blurb.includes(q) ||
-        specialties.some((t) => t.toLowerCase().includes(q))
-      );
+      return `${p.name} ${p.role} ${p.engage ?? ""} ${p.tags.join(" ")}`
+        .toLowerCase()
+        .includes(q);
     });
-  }, [visiblePeople, filter, search]);
+  }, [roster, query, tag]);
 
-  const chips: { label: string; f: Filter }[] = [
-    { label: "Everyone", f: { kind: "all" } },
-    { label: "Lab Leaders", f: { kind: "lab-leaders" } },
-    { label: "Contributors", f: { kind: "contributors" } },
-    ...labs.map((lab) => ({ label: lab.name, f: { kind: "lab" as const, labId: lab.id } })),
-    ...allTags.map((tag) => ({ label: tag, f: { kind: "tag" as const, tag } })),
-  ];
+  const filtering = query.trim().length > 0 || !!tag;
+  const clearAll = () => {
+    setQuery("");
+    setTag(null);
+  };
 
   const editingPerson = editingKey ? people[editingKey] : null;
 
-  if (loading) {
-    return <p className="text-sm text-ink-mute">Loading…</p>;
-  }
-
-  if (error) {
-    return <p className="text-sm text-red">{error}</p>;
-  }
+  if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
+  if (error) return <p className="text-sm text-red">{error}</p>;
 
   return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="font-serif text-2xl italic text-ink">
-          The <span className="italic">bench</span>
-        </h1>
-        <p className="mt-1 max-w-2xl text-sm text-ink-mute">
-          Every Lab Leader and Contributor across OL: who&apos;s available and what to engage
-          them for. Visible to everyone in the portal, unlike deals, which stay lab-scoped.
-        </p>
+    <>
+      <div className="flex flex-col items-start justify-between gap-[18px] min-[1001px]:flex-row min-[1001px]:items-end">
+        <div className="max-w-[620px]">
+          <h1 className="m-0 mb-2.5 font-serif text-[30px] leading-[1.06] font-normal tracking-[-0.015em] text-ink italic sm:text-[40px]">
+            The bench
+          </h1>
+          <p className="m-0 text-[17px] leading-[1.6] text-ink-soft text-pretty">
+            All Lab Leaders and Contributors across Optimistic Labs
+          </p>
+        </div>
+        <div className="flex flex-none items-center gap-2.5 pb-1">
+          <button
+            type="button"
+            onClick={openNew}
+            className="flex cursor-pointer items-center gap-2 rounded-full bg-violet-deep px-5 py-[11px] text-sm font-semibold whitespace-nowrap text-white transition-colors hover:bg-violet"
+          >
+            <PlusIcon size={15} />
+            Start chat
+          </button>
+          {me && people[me] && (
+            <button
+              type="button"
+              onClick={() => setEditingKey(me)}
+              className="cursor-pointer rounded-full border border-hair-strong bg-white px-[18px] py-[11px] text-sm font-medium whitespace-nowrap text-ink-soft transition-colors hover:bg-violet-pale hover:text-violet-deep"
+            >
+              Edit my profile
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <Input
-          type="search"
-          placeholder="Search by name or what they do…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        {me && people[me] && (
-          <Button
-            className="shrink-0"
-            onClick={() => setEditingKey(me)}
-          >
-            Edit my profile
-          </Button>
+        <span className="relative flex min-w-[260px] flex-1 items-center sm:max-w-[460px]">
+          <SearchIcon
+            size={16}
+            className="pointer-events-none absolute left-3.5 text-warm-gray"
+          />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search by name, lab, or what they do…"
+            aria-label="Search the bench"
+            className={cn(FIELD, "w-full rounded-[12px] py-3 pr-3.5 pl-10 text-sm")}
+          />
+        </span>
+        {filtering && (
+          <span className="flex items-center gap-2.5 text-[13px] text-warm-gray">
+            <span>
+              {shown.length} {shown.length === 1 ? "person" : "people"}
+              {tag ? ` · ${tag}` : ""}
+            </span>
+            <button
+              type="button"
+              onClick={clearAll}
+              className="cursor-pointer rounded-full border border-hair-strong bg-white px-3.5 py-1.5 text-xs font-medium text-violet-deep transition-colors hover:bg-violet-pale"
+            >
+              Clear
+            </button>
+          </span>
         )}
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {chips.map((c) => {
-          const active = filterKey(c.f) === filterKey(filter);
-          return (
-            <button
-              key={filterKey(c.f) || "all"}
-              onClick={() => setFilter(c.f)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                active
-                  ? "border-violet-deep bg-violet-deep text-white"
-                  : "border-hair bg-paper text-ink-mute hover:border-violet-deep hover:text-violet-deep"
-              }`}
-            >
-              {c.label}
-            </button>
-          );
-        })}
-      </div>
-
-      {filtered.length === 0 ? (
-        <p className="text-sm text-ink-mute">No one matches that filter.</p>
+      {shown.length === 0 ? (
+        <div className="rounded-[16px] border border-hair bg-white p-10 text-center text-[15px] text-warm-gray">
+          No one on the bench matches that yet.{" "}
+          <button
+            type="button"
+            onClick={clearAll}
+            className="cursor-pointer text-violet-deep underline-offset-2 hover:underline"
+          >
+            Clear the search
+          </button>
+          .
+        </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((p) => (
+        <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(340px,1fr))] max-[1000px]:grid-cols-1">
+          {shown.map((p) => (
             <PersonCard
-              key={p.username}
+              key={p.id}
               person={p}
-              labs={labs}
-              mine={p.username === me}
-              canEdit={p.username === me || role === "Admin"}
-              onEdit={() => setEditingKey(p.username)}
+              tag={tag}
+              mine={p.id === me}
+              canEdit={p.id === me || role === "Admin"}
+              onTag={(t) => setTag((cur) => (cur === t ? null : t))}
+              onMessage={() => openWith([p.id])}
+              onEdit={() => setEditingKey(p.id)}
             />
           ))}
         </div>
       )}
 
-      <p className="max-w-3xl text-xs text-ink-mute">
-        Everyone edits their own profile; admins can edit any. Contact visibility is per-person:
-        your email shows unless you hide it, your phone stays private until you opt in — and the
-        server enforces it, so hidden details never leave the API.
+      <p className="max-w-[720px] text-xs text-warm-gray text-pretty">
+        Everyone edits their own profile; admins can edit any. Contact
+        visibility is per-person: your email shows unless you hide it, your
+        phone stays private until you opt in — and the server enforces it, so
+        hidden details never leave the API.
       </p>
 
       {editingPerson && editingKey && (
@@ -189,231 +192,6 @@ export default function BenchPage() {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function PersonCard({
-  person,
-  labs,
-  mine,
-  canEdit,
-  onEdit,
-}: {
-  person: PersonWithUsername;
-  labs: { id: string; name: string }[];
-  mine: boolean;
-  canEdit: boolean;
-  onEdit: () => void;
-}) {
-  const labNames = (person.labs ?? [])
-    .map((id) => labs.find((l) => l.id === id)?.name ?? id)
-    .join(", ");
-  const specialties = person.bench?.specialties ?? [];
-
-  return (
-    <div className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10">
-      <div className="flex items-start gap-3">
-        <Avatar size="lg">
-          {person.photo && <AvatarImage src={person.photo} alt="" />}
-          <AvatarFallback>{initials(person)}</AvatarFallback>
-        </Avatar>
-        <div className="flex-1">
-          <h3 className="font-serif text-base text-ink">{fullName(person)}</h3>
-          <div className="text-xs text-ink-mute">
-            {person.role}
-            {labNames ? ` · ${labNames}` : ""}
-          </div>
-        </div>
-        {canEdit && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            title={mine ? "Edit my profile" : "Admin: edit profile"}
-            onClick={onEdit}
-          >
-            ✎
-          </Button>
-        )}
-      </div>
-
-      <p className="text-sm text-ink">
-        {person.bench?.blurb ? (
-          <>
-            <span className="text-ink-mute">Engage for: </span>
-            {person.bench.blurb}
-          </>
-        ) : (
-          <span className="text-ink-mute">
-            No profile yet{mine ? " — add what people should engage you for." : "."}
-          </span>
-        )}
-      </p>
-
-      {specialties.length > 0 && (
-        <div className="flex flex-wrap gap-1.5">
-          {specialties.map((t) => (
-            <Badge key={t} variant="secondary">
-              {t}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      {(person.bench?.email || person.bench?.phone) && (
-        <div className="text-xs text-ink-mute">
-          {person.bench?.email && <div>{person.bench.email}</div>}
-          {person.bench?.phone && <div>{person.bench.phone}</div>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function EditProfileDialog({
-  person,
-  username,
-  mine,
-  open,
-  onOpenChange,
-  onSaved,
-}: {
-  person: import("@/lib/types").Person;
-  username: string;
-  mine: boolean;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: () => Promise<void>;
-}) {
-  const [blurb, setBlurb] = useState(person.bench?.blurb ?? "");
-  const [specialties, setSpecialties] = useState(
-    (person.bench?.specialties ?? []).join(", ")
-  );
-  const [contactEmail, setContactEmail] = useState(person.bench?.email ?? "");
-  const [phone, setPhone] = useState(person.bench?.phone ?? "");
-  const [showEmail, setShowEmail] = useState(person.bench?.showEmail ?? true);
-  const [showPhone, setShowPhone] = useState(person.bench?.showPhone ?? false);
-  const [photo, setPhoto] = useState<string | undefined>(person.photo);
-  const [saving, setSaving] = useState(false);
-
-  const onPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      setPhoto(await readPhoto(file));
-    } catch {
-      toast.error("Couldn't read that image");
-    }
-  };
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      const path = mine ? "/profile" : `/profile/${username}`;
-      await api(path, {
-        method: "PATCH",
-        body: JSON.stringify({
-          blurb,
-          specialties: specialties
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          email: contactEmail,
-          phone,
-          showEmail,
-          showPhone,
-          photo,
-        }),
-      });
-      toast.success("Profile saved");
-      await onSaved();
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save this profile.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{mine ? "My profile" : fullName(person)}</DialogTitle>
-          <DialogDescription>
-            Shown to everyone in the portal on the bench directory.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <Avatar size="lg">
-              {photo && <AvatarImage src={photo} alt="" />}
-              <AvatarFallback>{initials(person)}</AvatarFallback>
-            </Avatar>
-            <Input type="file" accept="image/*" onChange={onPhotoChange} className="max-w-56" />
-            {photo && (
-              <Button type="button" variant="outline" size="sm" onClick={() => setPhoto(undefined)}>
-                Remove
-              </Button>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bench-engage-me-for-blurb">&ldquo;Engage me for&rdquo; blurb</Label>
-            <Textarea id="bench-engage-me-for-blurb"
-              value={blurb}
-              onChange={(e) => setBlurb(e.target.value)}
-              rows={3}
-              maxLength={500}
-              placeholder="When and why should someone bring you in?"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bench-specialties">Specialties (comma-separated tags)</Label>
-            <Input id="bench-specialties"
-              value={specialties}
-              onChange={(e) => setSpecialties(e.target.value)}
-              placeholder="grant writing, faith-based orgs"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bench-contact-email">Contact email (shown on your card unless hidden below)</Label>
-            <Input id="bench-contact-email"
-              type="email"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="bench-phone">Phone (hidden unless you opt in below)</Label>
-            <Input id="bench-phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <Checkbox checked={showEmail} onCheckedChange={(c) => setShowEmail(!!c)} />
-            Show my email on the bench directory
-          </label>
-          <label className="flex items-center gap-2 text-sm text-ink">
-            <Checkbox checked={showPhone} onCheckedChange={(c) => setShowPhone(!!c)} />
-            Show my phone on the bench directory
-          </label>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button
-            onClick={save}
-            disabled={saving}
-          >
-            {saving ? "Saving…" : "Save profile"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    </>
   );
 }
