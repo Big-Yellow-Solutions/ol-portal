@@ -30,6 +30,15 @@ export interface CommunityPost {
   linkTitle?: string;
   photo?: string;
   comments: CommunityComment[];
+  /* The front-page edit of the same story. The dashboard's "Across the
+     Network" digest is not a second feed — it is these posts, rewritten to
+     headline length by whoever posted them. `accent` is the fragment of the
+     headline the design sets in serif italic; it must appear in `headline`
+     verbatim or it is ignored. A post with no `headline` never reaches the
+     digest. */
+  headline?: string;
+  dek?: string;
+  accent?: string;
 }
 
 export interface CommunityEvent {
@@ -73,6 +82,8 @@ export const COMMUNITY_POSTS: CommunityPost[] = [
     kind: "Contract signed",
     likes: 9,
     text: "Signed a 12-month community strategy engagement with Grace Network — 40,000 members across nine congregations.",
+    headline: "Grace Network signs a 12-month strategy engagement",
+    dek: "40,000 members across nine congregations.",
     comments: [
       {
         who: "Priya Raman",
@@ -106,6 +117,8 @@ export const COMMUNITY_POSTS: CommunityPost[] = [
     kind: "Renewal",
     likes: 11,
     text: "The Hollings Foundation renewed for a second year, and asked for the donor-circle model we built in the spring.",
+    headline: "Hollings Foundation renews for a second year",
+    dek: "And asked for the donor-circle model we built in the spring.",
     comments: [
       {
         who: "Jordan Pike",
@@ -129,6 +142,7 @@ export const COMMUNITY_POSTS: CommunityPost[] = [
     linkSource: "govtech.com",
     linkTitle:
       "Twelve states move on AI disclosure requirements for public engagement",
+    headline: "Twelve states move on AI disclosure for public engagement",
     comments: [
       {
         who: "Liz Russell",
@@ -155,6 +169,9 @@ export const COMMUNITY_POSTS: CommunityPost[] = [
     likes: 7,
     photo: "community-quarterly",
     text: "All-lab quarterly, 3 September in Atlanta. Two days on what is working across every lab.",
+    headline: "All-lab quarterly, 3 September in Atlanta",
+    accent: "3 September",
+    dek: "Two days on what is working across every lab. Nine of fourteen leaders are going.",
     comments: [
       {
         who: "Tomas Serrano",
@@ -175,6 +192,8 @@ export const COMMUNITY_POSTS: CommunityPost[] = [
     kind: "New leader",
     likes: 6,
     text: "Joined the Sports Lab after fifteen years building supporter communities in professional soccer.",
+    headline: "Tomas Serrano joins the Sports Lab",
+    dek: "Fifteen years in professional soccer.",
     comments: [
       {
         who: "Marcus Kelley",
@@ -245,4 +264,83 @@ export const INITIAL_RSVPS: Record<string, RsvpChoice | null> = {
   e1: "Going",
   e2: null,
   e3: null,
+};
+
+/* The front page is edited, not sorted: the digest leads on the all-lab
+   quarterly, runs the outside news story beneath it, and stacks the three
+   business items down the right. Ids the feed no longer contains are skipped,
+   and any post with a headline that is missing here falls in behind them, so
+   a new post still reaches the digest without an edit to this list. */
+export const DIGEST_ORDER = ["p4", "p3", "p1", "p2", "p5"];
+
+export interface ChatMessage {
+  fromMe: boolean;
+  text: string;
+  time: string;
+}
+
+export interface LeaderThread {
+  messages: ChatMessage[];
+  /* Per-person suggestions the design offers above the composer. Sending one
+     is the same action as typing it. */
+  quick: string[];
+}
+
+/* Direct messages between leaders, keyed by the name on the post (`who`).
+ *
+ * Same standing as the posts above: there is no messages backend yet, so a
+ * thread is seed content plus whatever the session appends. The Directory
+ * artboard owns messaging properly — when that lands, this becomes the fetch
+ * and the drawer does not change.
+ */
+export const COMMUNITY_THREADS: Record<string, LeaderThread> = {
+  "Priya Raman": {
+    messages: [
+      {
+        fromMe: false,
+        text: "Saw the Hollings renewal note — congrats. Did their board ask for the donor-circle deck?",
+        time: "9:12 AM",
+      },
+      {
+        fromMe: true,
+        text: "They did. I can share the version we used in the spring if it helps.",
+        time: "9:20 AM",
+      },
+      {
+        fromMe: false,
+        text: "That would be great. We have a similar conversation with a family foundation next week.",
+        time: "9:22 AM",
+      },
+    ],
+    quick: ["Sharing the deck now", "Free tomorrow?"],
+  },
+  "Marcus Kelley": {
+    messages: [
+      {
+        fromMe: false,
+        text: "Grace Network kickoff is confirmed for the 14th. Anything you want on the agenda?",
+        time: "8:41 AM",
+      },
+      {
+        fromMe: true,
+        text: "Just the trust-mapping exercise. I will send the schedule today.",
+        time: "8:55 AM",
+      },
+    ],
+    quick: ["Sending the schedule", "Sounds good"],
+  },
+  "Tomas Serrano": {
+    messages: [
+      {
+        fromMe: false,
+        text: "Just joined the Sports Lab — happy to be here. Any resource you would start with?",
+        time: "10:05 AM",
+      },
+    ],
+    quick: ["Welcome aboard", "Start with the onboarding course"],
+  },
+  "Jordan Pike": {
+    messages: [],
+    quick: ["Thanks for the link", "Can we talk this week?"],
+  },
 };

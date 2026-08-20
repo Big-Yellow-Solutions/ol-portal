@@ -1,189 +1,252 @@
 "use client";
 
 import Link from "next/link";
+import { Fragment, useMemo, useState } from "react";
+import { StarGlyph } from "@/components/shell/top-nav";
+import { Digest } from "@/components/dashboard/digest";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+  PipelineCard,
+  PresenceCard,
+  type StageTotal,
+} from "@/components/dashboard/aside";
+import { MessageDrawer } from "@/components/dashboard/message-drawer";
+import { COMMUNITY_POSTS, type ChatMessage } from "@/lib/community";
+import {
+  digestStories,
+  editionLabel,
+  messageTime,
+  presenceLeaders,
+  todayLabel,
+  type Leader,
+} from "@/lib/dashboard";
 import { usePortalData } from "@/lib/portal-data";
-import { STAGES } from "@/lib/types";
-import { STAGE_VARIANT, fmtDollars, fmtK, fullName } from "@/lib/data";
+import { fmtCompact, fullName, initials } from "@/lib/data";
+import { STAGES, type Deal, type Stage } from "@/lib/types";
 
-const DONUT_COLORS = [
-  "var(--color-violet-deep)",
-  "var(--color-violet)",
-  "var(--color-violet-light)",
-  "var(--color-amber)",
-  "var(--color-green)",
-];
+/* Home, rebuilt from the Claude Design artboard "Portal Dashboard".
+ *
+ * The morning read, in the order a leader wants it: what happened across the
+ * network, then their own pipeline, then who is around to talk to. The
+ * charts that used to live here are gone — the pipeline has its own screen
+ * that draws them properly, and a dashboard that re-plots it is a second
+ * place for the same numbers to be wrong.
+ *
+ * Where the numbers come from: the header stats and the pipeline card are the
+ * real API, scoped by role the way the server scopes /deals. The digest and
+ * the presence list are the community seed content (lib/community.ts) —
+ * see lib/dashboard.ts for why they read out of the same records the feed
+ * does, and what changes when a real feed and a presence source exist.
+ */
+
+/* How many presence rows fit the card before it becomes a directory. */
+const PRESENCE_ROWS = 4;
+
+const OPEN_STAGES = STAGES.filter(
+  (s): s is Exclude<Stage, "Closed"> => s !== "Closed"
+);
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/* Whole days from today to a yyyy-mm-dd close date, comparing dates rather
+   than instants so "closes today" does not depend on the time of day. */
+function daysUntil(close: string, now: Date): number {
+  const target = new Date(`${close}T00:00:00`);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((target.getTime() - today.getTime()) / DAY);
+}
 
 export default function DashboardPage() {
-  const { deals, invoices, files, labs, people, me } = usePortalData();
+  const { deals, labs, people, me, role } = usePortalData();
 
   const meRecord = me ? people[me] : undefined;
-  const openDeals = deals.filter((d) => d.stage !== "Closed");
-  const pipelineValue = openDeals.reduce((sum, d) => sum + (d.amount ?? 0), 0);
-  const closedWonValue = deals
-    .filter((d) => d.stage === "Closed" && d.outcome === "Won")
-    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
-  const openInvoices = invoices.filter((i) => i.status !== "Paid");
+  const meName = fullName(meRecord);
+  const meInitials = initials(meRecord);
 
-  const stageBars = STAGES.filter((s) => s !== "Closed").map((stage) => ({
+  /* One clock for the whole render, so the eyebrow's date, the digest's
+     edition line and a sent message's timestamp cannot disagree. Safe to read
+     at render: the shell holds this page behind its loading state until the
+     bootstrap resolves, so it never runs during the static prerender. */
+  const now = useMemo(() => new Date(), []);
+
+  const stories = useMemo(() => digestStories(COMMUNITY_POSTS), []);
+  const leaders = useMemo(
+    () => presenceLeaders(COMMUNITY_POSTS, meName),
+    [meName]
+  );
+
+  const [openLeader, setOpenLeader] = useState<Leader | null>(null);
+  const [sent, setSent] = useState<Record<string, ChatMessage[]>>({});
+
+  const sendMessage = (leader: Leader, text: string) =>
+    setSent((s) => ({
+      ...s,
+      [leader.name]: (s[leader.name] ?? []).concat({
+        fromMe: true,
+        text,
+        time: messageTime(new Date()),
+      }),
+    }));
+
+  const openDeals = useMemo(
+    () => deals.filter((d) => d.stage !== "Closed"),
+    [deals]
+  );
+
+  const openPipeline = openDeals.reduce((sum, d) => sum + (d.amount ?? 0), 0);
+
+  /* Year to date on the expected close date — the only date a deal carries.
+     For a won deal that is when it was marked closed, near enough. */
+  const wonYTD = deals
+    .filter(
+      (d) =>
+        d.stage === "Closed" &&
+        d.outcome === "Won" &&
+        d.close?.startsWith(String(now.getFullYear()))
+    )
+    .reduce((sum, d) => sum + (d.amount ?? 0), 0);
+
+  const leaderCount = Object.values(people).filter(
+    (p) => p.role === "Lab Leader"
+  ).length;
+
+  const stageTotals: StageTotal[] = OPEN_STAGES.map((stage) => ({
     stage,
-    count: deals.filter((d) => d.stage === stage).length,
+    amount: openDeals
+      .filter((d) => d.stage === stage)
+      .reduce((sum, d) => sum + (d.amount ?? 0), 0),
   }));
 
-  const labDonut = labs
-    .map((lab) => ({
-      name: lab.name,
-      value: openDeals
-        .filter((d) => d.lab === lab.id)
-        .reduce((sum, d) => sum + (d.amount ?? 0), 0),
-    }))
-    .filter((d) => d.value > 0);
+  /* The design closes the pipeline card with one nudge: a deal that needs
+     attention today. It reads "quiet for six days", which no record supports —
+     a deal carries no last-touched date — so the nudge is the open deal
+     closing soonest, which the close date does support. */
+  const nextClose = openDeals
+    .filter((d) => d.close)
+    .sort((a, b) => a.close.localeCompare(b.close))[0];
 
-  const recentDeals = [...deals]
-    .sort((a, b) => (b.close > a.close ? 1 : -1))
-    .slice(0, 5);
+  /* Admins see every lab's deals, so the same sums mean something wider for
+     them than for the Lab Leader the design was drawn for. Say which. */
+  const network = role === "Admin";
 
-  const recentFiles = [...files]
-    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
-    .slice(0, 5);
+  const stats: { value: string; label: string }[] = [];
+  if (role !== "Contributor") {
+    stats.push({
+      value: fmtCompact(openPipeline),
+      label: network ? "Network open pipeline" : "Your open pipeline",
+    });
+    stats.push({
+      value: fmtCompact(wonYTD),
+      label: network ? "Network won, YTD" : "Won by your labs, YTD",
+    });
+  }
+  stats.push({
+    value: String(leaderCount),
+    label: `Leaders across ${labs.length} ${labs.length === 1 ? "lab" : "labs"}`,
+  });
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="font-serif text-2xl italic text-ink">
-        Hello, {fullName(meRecord) || "there"}
-      </h1>
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <StatCard label="Open deals" value={String(openDeals.length)} />
-        <StatCard label="Open pipeline" value={fmtK(pipelineValue)} />
-        <StatCard label="Closed won" value={fmtK(closedWonValue)} />
-        <StatCard label="Open invoice requests" value={String(openInvoices.length)} />
+    <>
+      <div className="flex flex-wrap items-end justify-between gap-6">
+        <div className="min-w-0">
+          <span className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
+            <StarGlyph size={13} className="text-violet-deep" />
+            {todayLabel(now)}
+          </span>
+          <h1 className="mt-2.5 mb-0 text-[30px] leading-[1.08] font-bold tracking-[-0.015em] sm:text-[38px]">
+            Welcome back,{" "}
+            <span className="font-serif font-normal text-violet-deep italic">
+              {meRecord?.firstName || "there"}
+            </span>
+          </h1>
+        </div>
+        <StatStrip stats={stats} />
       </div>
 
-      <div className="grid gap-6 md:grid-cols-[2fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-lg">Pipeline by stage</CardTitle>
-          </CardHeader>
-          <CardContent className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stageBars}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                <XAxis dataKey="stage" tick={{ fontSize: 12 }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                <Tooltip />
-                <Bar dataKey="count" fill="var(--color-violet)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
+      <div className="grid items-start gap-7 lg:grid-cols-[minmax(0,1fr)_372px]">
+        <main className="flex min-w-0 flex-col gap-4">
+          <Digest
+            stories={stories}
+            edition={editionLabel(now, stories.length)}
+            meInitials={meInitials}
+          />
+        </main>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-lg">Open pipeline by lab</CardTitle>
-          </CardHeader>
-          <CardContent className="h-64">
-            {labDonut.length === 0 ? (
-              <p className="text-sm text-ink-mute">No open pipeline yet.</p>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={labDonut}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={50}
-                    outerRadius={80}
-                  >
-                    {labDonut.map((entry, i) => (
-                      <Cell key={entry.name} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(v) => fmtDollars(typeof v === "number" ? v : Number(v))} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </CardContent>
-        </Card>
+        <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24">
+          {role !== "Contributor" && (
+            <PipelineCard
+              title={network ? "The pipeline" : "Your pipeline"}
+              stages={stageTotals}
+              nudge={nextClose && <CloseNudge close={nextClose} now={now} />}
+            />
+          )}
+          <PresenceCard
+            leaders={leaders.slice(0, PRESENCE_ROWS)}
+            more={Math.max(0, leaders.length - PRESENCE_ROWS)}
+            onMessage={setOpenLeader}
+          />
+        </aside>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-[2fr_1fr]">
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-lg">Recent deals</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentDeals.length === 0 ? (
-              <p className="text-sm text-ink-mute">No deals yet.</p>
-            ) : (
-              <ul className="flex flex-col divide-y divide-hair">
-                {recentDeals.map((deal) => (
-                  <li key={deal.id} className="flex items-center justify-between py-2">
-                    <Link href="/pipeline" className="text-sm text-ink hover:text-violet-deep">
-                      {deal.client}
-                    </Link>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm tabular-nums text-ink-mute">
-                        {fmtDollars(deal.amount)}
-                      </span>
-                      <Badge variant={STAGE_VARIANT[deal.stage]}>
-                        {deal.stage === "Closed" && deal.outcome
-                          ? `Closed ${deal.outcome}`
-                          : deal.stage}
-                      </Badge>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+      <MessageDrawer
+        leader={openLeader}
+        messages={
+          openLeader
+            ? openLeader.thread.messages.concat(sent[openLeader.name] ?? [])
+            : []
+        }
+        onClose={() => setOpenLeader(null)}
+        onSend={sendMessage}
+      />
+    </>
+  );
+}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="font-serif text-lg">Recent files</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {recentFiles.length === 0 ? (
-              <p className="text-sm text-ink-mute">No files yet.</p>
-            ) : (
-              <ul className="flex flex-col divide-y divide-hair">
-                {recentFiles.map((file) => (
-                  <li key={file.id} className="py-2 text-sm text-ink">
-                    <Link href="/files" className="hover:text-violet-deep">
-                      {file.name}
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+/* Three numbers beside the greeting. Wide: a row split by hairlines. Narrow:
+   a grid without them. Narrowest: one labelled row per stat, because three
+   stacked headline numbers with nothing between them read as a list of
+   unrelated figures. */
+function StatStrip({ stats }: { stats: { value: string; label: string }[] }) {
+  return (
+    <div className="flex w-full flex-col sm:grid sm:w-auto sm:auto-cols-fr sm:grid-flow-col sm:gap-3.5 lg:flex lg:flex-row lg:items-stretch lg:gap-7 lg:pb-1.5">
+      {stats.map((stat, i) => (
+        <Fragment key={stat.label}>
+          {/* Display:none leaves no grid cell, so the rules exist only in the
+              wide row where the design draws them. */}
+          {i > 0 && (
+            <span aria-hidden="true" className="hidden w-px bg-hair lg:block" />
+          )}
+          <div className="flex items-baseline justify-between gap-3 border-t border-hair py-2.5 sm:block sm:border-0 sm:py-0">
+            <div className="text-xl font-bold tracking-[-0.01em] tabular-nums lg:text-2xl">
+              {stat.value}
+            </div>
+            <div className="text-right text-[11px] leading-[1.35] text-warm-gray sm:mt-0.5 sm:text-left lg:text-xs">
+              {stat.label}
+            </div>
+          </div>
+        </Fragment>
+      ))}
     </div>
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function CloseNudge({ close, now }: { close: Deal; now: Date }) {
+  const days = daysUntil(close.close, now);
+  const when =
+    days < 0
+      ? `was expected to close ${-days} ${days === -1 ? "day" : "days"} ago`
+      : days === 0
+        ? "is expected to close today"
+        : days === 1
+          ? "is expected to close tomorrow"
+          : `is expected to close in ${days} days`;
+
   return (
-    <Card>
-      <CardContent className="p-4">
-        <div className="text-xs uppercase tracking-wide text-ink-mute">{label}</div>
-        <div className="mt-1 text-2xl font-semibold tabular-nums text-ink">{value}</div>
-      </CardContent>
-    </Card>
+    <>
+      {close.client} {when}.{" "}
+      <Link href="/pipeline" className="text-violet-deep hover:text-violet">
+        {days < 0 ? "Check in" : "Open the deal"}
+      </Link>
+      .
+    </>
   );
 }

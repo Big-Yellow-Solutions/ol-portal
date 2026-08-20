@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { ColumnsIcon, PinIcon, PlusIcon } from "@/components/community/icons";
 import {
@@ -39,6 +40,16 @@ import { cn } from "@/lib/utils";
 type Tab = "feed" | "events" | "groups";
 
 export default function CommunityPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-ink-mute">Loading…</p>}>
+      <Community />
+    </Suspense>
+  );
+}
+
+function Community() {
+  const router = useRouter();
+  const params = useSearchParams();
   const { people, me, role } = usePortalData();
   const meRecord = me ? people[me] : undefined;
   const meName = fullName(meRecord) || me || "You";
@@ -49,13 +60,25 @@ export default function CommunityPage() {
   const [filter, setFilter] = useState(ALL_LABS);
   const [postTo, setPostTo] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [openId, setOpenId] = useState<string | null>(null);
+  /* Home's digest links straight at a story: /community?post=p1 opens that
+     post's thread on arrival, the way Resources' ?r= does, and survives the
+     static export. */
+  const linkedPost = params.get("post");
+  const [pickedPost, setPickedPost] = useState<string | null>(null);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [rsvps, setRsvps] =
     useState<Record<string, RsvpChoice | null>>(INITIAL_RSVPS);
   const [extra, setExtra] = useState<CommunityPost[]>([]);
   const [threads, setThreads] = useState<Record<string, CommunityComment[]>>({});
+
+  /* A link is the state while it is in the URL, so closing has to clear the
+     query too — otherwise a reload reopens a thread the reader dismissed. */
+  const openId = linkedPost ?? pickedPost;
+  const closePost = () => {
+    setPickedPost(null);
+    if (linkedPost) router.replace("/community");
+  };
 
   const allPosts = useMemo(
     () => extra.concat(COMMUNITY_POSTS),
@@ -309,7 +332,7 @@ export default function CommunityPage() {
                   likes={likesFor(p)}
                   comments={commentsFor(p).length}
                   onLike={() => toggleLike(p.id)}
-                  onOpen={() => setOpenId(p.id)}
+                  onOpen={() => setPickedPost(p.id)}
                 />
               ))}
             </>
@@ -462,7 +485,7 @@ export default function CommunityPage() {
 
       <CommunityDialog
         open={!!openPost}
-        onOpenChange={(o) => !o && setOpenId(null)}
+        onOpenChange={(o) => !o && closePost()}
         kicker={openPost?.kind ?? ""}
         title={openPost ? `Post by ${openPost.who}` : "Post"}
         width={660}

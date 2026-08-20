@@ -94,6 +94,20 @@ export function fmtK(n: number | undefined | null): string {
   return fmtDollars(n);
 }
 
+/* Headline money, the way the design writes it: "$60k", "$64.5k", "$1.2M".
+   Unlike fmtK it rolls over into millions and drops a trailing ".0", because
+   a dashboard stat that reads "$1200.0k" is a number nobody says out loud. */
+export function fmtCompact(n: number | undefined | null): string {
+  if (n == null) return "$0";
+  const abs = Math.abs(n);
+  const scale = abs >= 1_000_000 ? [1_000_000, "M"] as const
+    : abs >= 1_000 ? [1_000, "k"] as const
+    : null;
+  if (!scale) return fmtDollars(n);
+  const [unit, suffix] = scale;
+  return `$${Number((n / unit).toFixed(1))}${suffix}`;
+}
+
 export function fullName(person: Person | undefined | null): string {
   if (!person) return "";
   return [person.firstName, person.lastName].filter(Boolean).join(" ");
