@@ -4,7 +4,7 @@
    sidebar's route segments — "dashboard" for the root page). Content is
    maintained by editing backend/scripts/seed-guides.mjs and re-running it,
    the same way sample data was originally loaded — there's no in-app editor
-   for this, unlike the Knowledge Base (assist.mjs's /kb routes) which Liz/Seth
+   for this, unlike the Knowledge Base (kb.mjs’s /kb routes) which Liz/Seth
    curate directly; guide copy describes the software itself, not sales
    playbooks, so only a dev needs to touch it.
 
@@ -21,7 +21,7 @@
    consumed two ways. */
 
 import { resp, listType } from "./util.mjs";
-import { client } from "./assist.mjs";
+import { client } from "./optimist.mjs";
 
 async function visibleGuidesFor(role) {
   const items = await listType("GUIDE");

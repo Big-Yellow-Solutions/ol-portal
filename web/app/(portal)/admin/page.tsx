@@ -44,7 +44,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
-/* ---------- shapes returned by the real backend (admin.mjs / assist.mjs) ---------- */
+/* ---------- shapes returned by the real backend (admin.mjs / kb.mjs) ---------- */
 
 interface AdminUser {
   username: string;

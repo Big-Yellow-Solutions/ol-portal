@@ -80,11 +80,11 @@ const GUIDES = [
     page: "proposals",
     order: 2,
     title: "Proposals",
-    summary: "Track every proposal's status. Drafting itself happens over on The Optimist.",
+    summary: "Track every proposal's status and read what each one says.",
     sections: [
       {
         heading: "What this page shows",
-        body: "A table of every proposal you can see: title, client, lab, status, which Contributor (if any) it's been shared with, and when it last updated. Click a title to open it in The Optimist."
+        body: "A table of every proposal you can see: title, client, lab, status, which Contributor (if any) it's been shared with, and when it last updated. Click a title to read its six sections."
       },
       {
         heading: "Sharing with a Contributor",
@@ -95,9 +95,8 @@ const GUIDES = [
         body: "Every proposal is built from the same six parts: client and problem summary, scope, deliverables, timeline, pricing, and terms."
       },
       {
-        heading: "For Lab Leaders",
-        roles: ["Lab Leader"],
-        body: "You can set a proposal's status to Draft, In Review, or Sent. Moving it to Internally Approved, or recording a customer's decision, is an Admin step. You can write proposals for deals you lead or own."
+        heading: "Writing and sending",
+        body: "There is currently no way to create, edit or send a proposal from inside the Portal. The drafting tool that used to do this was retired when The Optimist became a general assistant, and a replacement has not been built yet. The Optimist can draft the wording for you and you can copy it out, but recording it against a proposal, marking it Final and sending it to a client are not available right now. Say so plainly rather than describing steps that no longer exist."
       },
       {
         heading: "For Contributors",
@@ -111,19 +110,31 @@ const GUIDES = [
     order: 3,
     roles: ["Admin", "Lab Leader"],
     title: "The Optimist",
-    summary: "An AI drafting assistant that interviews you and writes the proposal as you go.",
+    summary: "The assistant for the whole Portal. Ask it anything about your labs and it answers from OL's own records.",
     sections: [
       {
         heading: "How it works",
-        body: "Pick an existing proposal or start a new one, then answer one question at a time. The Optimist writes each section into a live manuscript panel beside the conversation as you go. If a question doesn't fit, use \"Say something else instead\" to go off script, or ask it to auto fill the rest from what you've already told it."
+        body: "Type a question and it answers, the same way any chat assistant does. What makes it different is that it reads the Portal before answering: the pipeline, proposals, the bench, contracts, invoices, the knowledge base and the Resource Library. So \"where does every open deal stand\" or \"who should write a faith-based grant narrative\" get answers grounded in real records, with real names and numbers, rather than generic advice."
       },
       {
-        heading: "Reviewing and sending",
-        body: "Once all six sections are drafted, you land on a full document view where you can save a version, mark the proposal Final, or revert to the last Final version. Sending a proposal always ships whatever the Final version says, even if the live draft has moved on since, so mark Final again after any change you want the client to see."
+        heading: "Getting started",
+        body: "The opening screen has five quick starts: draft a funder update, summarize the pipeline, find someone on the bench, prep a kickoff agenda, turn notes into a proposal. Clicking one asks that question immediately. Otherwise just type. Enter sends, Shift and Enter adds a line."
       },
       {
-        heading: "Attachments",
-        body: "You can attach a file (PDF, text, or image) to a message and The Optimist will read it and fold relevant details into the draft."
+        heading: "Scope",
+        body: "The dashed pill in the composer sets which labs it reads. It starts at All labs, meaning everything you personally have access to, and you can narrow it to a single lab so answers ignore the rest. It can only ever narrow what you can already see, never widen it."
+      },
+      {
+        heading: "What it can and cannot do",
+        body: "It reads, it does not write. It cannot create a deal, edit a proposal, send anything, or change a record. When something needs doing it will tell you which page to do it on. It only sees what your own role lets you see, so a question about a lab you are not on comes back empty rather than answered."
+      },
+      {
+        heading: "Attachments, copy, retry and new chat",
+        body: "Attach a PDF, text file or image with the paperclip and ask about it. Under each answer, Copy puts it on your clipboard, Retry asks the same question again, and Share opens messages so you can pass it to a colleague. New chat in the composer clears the conversation and starts fresh."
+      },
+      {
+        heading: "Check its work",
+        body: "It can be wrong, and it says so at the bottom of every conversation. Check anything before it leaves the Portal."
       }
     ]
   },

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +40,6 @@ export default function ProposalsPage() {
   if (error) return <p className="text-sm text-red">{error}</p>;
 
   const isReadOnly = role === "Contributor";
-  const canWrite = role === "Admin" || role === "Lab Leader";
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,14 +47,9 @@ export default function ProposalsPage() {
         <div>
           <h1 className="font-serif text-2xl italic text-ink">Proposals</h1>
           <p className="mt-1 text-sm text-ink-mute">
-            Writing happens in The Optimist — this is the tracking view.
+            Track status, read what each one says, and share it with a contributor.
           </p>
         </div>
-        {canWrite && (
-          <Button asChild>
-            <Link href="/optimist?new=1">✦ Write with The Optimist</Link>
-          </Button>
-        )}
       </div>
 
       {isReadOnly ? (
@@ -101,9 +94,12 @@ export default function ProposalsPage() {
               {proposals.map((p) => (
                 <TableRow key={p.id}>
                   <TableCell className="font-medium">
-                    <Link href={`/optimist?p=${p.id}`} className="hover:text-violet-deep">
+                    <button
+                      className="text-left hover:text-violet-deep"
+                      onClick={() => setPreviewing(p)}
+                    >
                       {p.title}
-                    </Link>
+                    </button>
                   </TableCell>
                   <TableCell>{p.client}</TableCell>
                   <TableCell>{labName(p.lab)}</TableCell>

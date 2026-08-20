@@ -267,6 +267,54 @@ Resources:
             Path: /proposals/{id}/pdf
             Method: POST
 
+  # The Optimist's chat. Its own function purely because it streams: API
+  # Gateway buffers an integration response and caps it at 29s, so an
+  # assistant that should paint words as it writes them cannot live on the
+  # HTTP API at all. A Function URL is the only Lambda surface that streams.
+  #
+  # A Function URL has no JWT authorizer available to it, so AuthType is NONE
+  # and the handler verifies the Cognito ID token itself (aws-jwt-verify,
+  # against the pool and client below) before it touches any data. That check
+  # is the whole gate: treat optimist-stream.mjs's validate() as security
+  # code, not plumbing.
+  OptimistFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-optimist
+      CodeUri: src/
+      Handler: optimist-stream.handler
+      Architectures: [arm64]
+      # No 29s ceiling here. A question that fans out across several retrieval
+      # tools and then writes a long answer legitimately runs past a minute,
+      # and the person is watching it arrive the whole time.
+      Timeout: 300
+      # Lambda CPU scales with memory: more here is a faster first token, and
+      # the function is billed for a fraction of a second of compute either way.
+      MemorySize: 1024
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+          ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
+          USER_POOL_ID: !Ref UserPool
+          USER_POOL_CLIENT_ID: !Ref UserPoolClient
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/anthropic-api-key
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: RESPONSE_STREAM
+        Cors:
+          AllowOrigins:
+            - https://portal.optimisticlabs.com
+            - https://main.d2rvkunvze2ixv.amplifyapp.com
+            - http://localhost:8761
+            - http://localhost:3000
+          AllowMethods: [POST]
+          AllowHeaders: [authorization, content-type, x-act-as]
+          MaxAge: 3600
+
   ApiFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -405,6 +453,9 @@ Resources:
               Authorizer: NONE
 
 Outputs:
+  OptimistUrl:
+    Description: Streaming chat endpoint. Set as NEXT_PUBLIC_OPTIMIST_URL on the Amplify app.
+    Value: !GetAtt OptimistFunctionUrl.FunctionUrl
   ApiUrl:
     Value: !Sub https://${PortalApi}.execute-api.${AWS::Region}.amazonaws.com
   UserPoolId:

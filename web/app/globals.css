@@ -23,6 +23,7 @@
   --color-warm-gray: var(--warm-gray);
   --color-hair: var(--hair);
   --color-hair-strong: var(--hair-strong);
+  --color-hair-interactive: var(--hair-interactive);
   --color-hair-soft: var(--hair-soft);
   --color-presence-away: var(--presence-away);
   --color-green: var(--green);
@@ -106,6 +107,10 @@
   /* The lighter rule the design uses *inside* a card — footers, dividers —
      so an internal split reads as quieter than the card's own edge. */
   --hair-soft: rgba(124, 109, 245, 0.16);
+  /* The design system names a third weight between --hair and --hair-strong
+     for anything you can act on: the composer card, an answer's action pills.
+     It reads as an edge without reading as an input. */
+  --hair-interactive: rgba(124, 109, 245, 0.24);
   /* The away/offline presence dot. The online state is --violet-deep. */
   --presence-away: #c9c2b8;
   --green: #0f7350;
@@ -175,4 +180,51 @@
   html {
     @apply font-sans;
   }
+}
+/* ---------- The Optimist's motion (design_handoff_the_optimist) ----------
+   Two animations carry the whole screen: `om-rise` for anything arriving
+   (the hero, the composer, every turn) and `om-pulse` for the two places
+   something is still happening (the streaming caret, the thinking dots). */
+
+@keyframes om-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes om-pulse {
+  0%, 100% { opacity: 0.28; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-3px); }
+}
+
+/* The reduced-motion stand-in: the dots and the caret still have to read as
+   "working", so they fade in place instead of travelling. */
+@keyframes om-fade {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+.om-rise { animation: om-rise 0.5s var(--ease-signal) both; }
+.om-rise-turn { animation: om-rise 0.35s var(--ease-signal) both; }
+.om-pulse { animation: om-pulse 1.1s infinite; }
+.om-caret { animation: om-pulse 0.9s infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .om-rise,
+  .om-rise-turn {
+    animation: none;
+  }
+  .om-pulse,
+  .om-caret {
+    animation: om-fade 1.8s infinite;
+  }
+}
+
+/* The thread's own scrollbar. The 3px border is what insets the thumb from
+   the edge and lets the paper show through around it. */
+.om-thread::-webkit-scrollbar { width: 10px; }
+.om-thread::-webkit-scrollbar-track { background: transparent; }
+.om-thread::-webkit-scrollbar-thumb {
+  background: var(--hair-interactive);
+  border-radius: 999px;
+  border: 3px solid var(--paper);
 }

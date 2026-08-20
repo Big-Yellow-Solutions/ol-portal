@@ -14,7 +14,7 @@ import * as proposals from "./proposals.mjs";
 import * as contracts from "./contracts.mjs";
 import * as contractsCreate from "./contracts-create.mjs";
 import * as recurring from "./recurring.mjs";
-import * as assist from "./assist.mjs";
+import * as kb from "./kb.mjs";
 import * as profile from "./profile.mjs";
 import * as templates from "./templates.mjs";
 import * as signing from "./signing.mjs";
@@ -22,6 +22,7 @@ import * as resources from "./resources.mjs";
 import * as courses from "./courses.mjs";
 import * as guides from "./guides.mjs";
 import { fullName } from "./util.mjs";
+import { identityFromClaims, buildContext } from "./identity.mjs";
 
 const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -31,7 +32,6 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
 
-const ROLE_OF_GROUP = { Admin: "Admin", LabLeader: "Lab Leader", Contributor: "Contributor" };
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
 const SOURCES = ["Referral", "Inbound", "Outbound"];
 const INVOICE_STATUSES = ["Admin review", "Sent to client", "Paid", "Overdue"];
@@ -66,32 +66,10 @@ async function nextId(pk, prefix) {
   return prefix + String(max + 1).padStart(3, "0");
 }
 
-/* ---------- identity + permissions (mirrors store.js) ---------- */
-function identity(event) {
-  const claims = event.requestContext?.authorizer?.jwt?.claims || {};
-  const username = (claims["cognito:username"] || claims.username || "").toLowerCase();
-  const rawGroups = claims["cognito:groups"] || "";
-  const groups = Array.isArray(rawGroups) ? rawGroups
-    : String(rawGroups).replace(/[\[\]]/g, "").split(/[,\s]+/).filter(Boolean);
-  const role = ROLE_OF_GROUP[groups.find(g => ROLE_OF_GROUP[g])];
-  return { username, role };
-}
-
-const perms = (role, myLabs, myKey) => ({
-  inMyLabs: lab => myLabs.includes(lab),
-  seesLab: lab => role === "Admin" || (role === "Lab Leader" && myLabs.includes(lab)),
-  // PRD 3.3: a Lab Leader also sees/edits a deal (and can request its invoices)
-  // outside their own lab(s) when they're the Lab Leader named on that deal —
-  // "projects in other labs that they are leading."
-  leadsDeal: d => role === "Lab Leader" && d.owner === myKey,
-  addDeal: () => role === "Admin" || (role === "Lab Leader" && myLabs.length > 0),
-  editDeal: d => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(d.lab) || d.owner === myKey)),
-  deleteDeal: () => role === "Admin",
-  changeLab: () => role === "Admin",
-  reviewInvoices: () => role === "Admin",
-  editProposal: p => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(p.lab) || p.owner === myKey)),
-  approveProposal: () => role === "Admin"
-});
+/* Identity and the permission matrix moved to identity.mjs when The Optimist
+   became a second Lambda: both functions have to resolve the same person to
+   the same permissions, and two copies is how that stops being true. */
+const identity = event => identityFromClaims(event.requestContext?.authorizer?.jwt?.claims || {});
 
 /* ---------- route handlers ---------- */
 async function bootstrap(ctx) {
@@ -459,11 +437,10 @@ async function route(ctx, method, path, seg, body) {
   if (method === "DELETE" && seg[0] === "courses" && seg[1]) return await courses.deleteCourse(ctx, seg[1]);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
-  if (method === "GET" && path === "/kb") return await assist.listKb(ctx);
-  if (method === "POST" && path === "/kb") return await assist.createKb(ctx, body);
-  if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await assist.updateKb(ctx, seg[1], body);
-  if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await assist.deleteKb(ctx, seg[1]);
-  if (method === "POST" && path === "/assist") return await assist.assist(ctx, body);
+  if (method === "GET" && path === "/kb") return await kb.listKb(ctx);
+  if (method === "POST" && path === "/kb") return await kb.createKb(ctx, body);
+  if (method === "PATCH" && seg[0] === "kb" && seg[1]) return await kb.updateKb(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "kb" && seg[1]) return await kb.deleteKb(ctx, seg[1]);
   if (method === "PATCH" && path === "/profile") return await profile.updateProfile(ctx, null, body);
   if (method === "PATCH" && seg[0] === "profile" && seg[1]) return await profile.updateProfile(ctx, seg[1], body);
   if (method === "GET" && path === "/admin/users") return await admin.listPortalUsers(ctx);
@@ -526,29 +503,13 @@ export const handler = async event => {
     }
 
     const { username, role } = identity(event);
-    if (!username || !role) return resp(403, { error: "No portal role on this account" });
-    const me = await get("PERSON", username);
-    if (!me) return resp(403, { error: "No portal profile for this user" });
-
-    // Admin "act as" (god-mode view/edit as another user): the caller's own JWT
-    // never changes — this only substitutes who ctx.me/ctx.role/ctx.can resolve
-    // to for this request. Every downstream permission check (perms(), isAdmin())
-    // runs against the *substituted* identity, so acting as a non-Admin naturally
-    // locks the caller out of admin-only routes for the duration — no separate
-    // allowlist needed. ctx.realMe/ctx.realRole keep the true caller available so
-    // the act-as start/stop routes (and audit logging) always know who's really here.
-    const actAsTarget = event.headers?.["x-act-as"];
-    const query = event.queryStringParameters || {};
-    let ctx;
-    if (actAsTarget) {
-      if (role !== "Admin") return resp(403, { error: "Only Admins can act as another user" });
-      const target = await get("PERSON", actAsTarget);
-      if (!target) return resp(404, { error: "No such user to act as" });
-      if (target.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
-      ctx = { me: target, role: target.role, can: perms(target.role, target.labs || [], target.sk), realMe: me, realRole: role, actingAs: true, meta, query };
-    } else {
-      ctx = { me, role, can: perms(role, me.labs || [], me.sk), realMe: me, realRole: role, actingAs: false, meta, query };
-    }
+    const { ctx, error: ctxError } = await buildContext({
+      username, role,
+      actAsTarget: event.headers?.["x-act-as"],
+      meta,
+      query: event.queryStringParameters || {}
+    });
+    if (ctxError) return resp(ctxError.status, { error: ctxError.message });
 
     const method = event.requestContext.http.method;
     const path = event.rawPath.replace(/\/+$/, "");
