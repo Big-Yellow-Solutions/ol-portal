@@ -131,7 +131,10 @@ export interface SignatureRecord {
   name: string;
   title?: string | null;
   at: string;
-  signatureType: "typed" | "drawn";
+  /** "docusign" is set by the Connect webhook when the external signer signed
+   *  through DocuSign rather than the Portal's own capture — OL's side is
+   *  always "typed" or "drawn", DocuSign or not. */
+  signatureType: "typed" | "drawn" | "docusign";
   signatureImage?: string | null;
   /** Set only for the OL side, which signs from an authenticated session. */
   verifiedAccount?: string | null;
@@ -415,6 +418,68 @@ export interface Contract {
   executedFileId?: string;
   /** True when an Admin recorded a wet-ink signature instead of e-signing. */
   signedManually?: boolean;
+
+  /* ---- DocuSign (default signing method when connected; scoped to the
+     external signer only — OL's own countersignature above is unchanged) ---- */
+  /** Absent on contracts sent before DocuSign existed, or while it's
+   *  disconnected — those keep working as "native" forever, per contract. */
+  signMethod?: "native" | "docusign";
+  envelopeId?: string;
+}
+
+/* ---------- DocuSign ----------
+   Mirrors backend/src/docusign.mjs and docusign-webhook.mjs. Envelope status
+   values are DocuSign's own vocabulary; "expired" isn't a real DocuSign
+   status (it surfaces as "voided" with an expiration reason) but is
+   synthesized client-side from `voidReason` so the badge can still say the
+   more useful thing. */
+export type EnvelopeStatus =
+  | "sent"
+  | "delivered"
+  | "completed"
+  | "declined"
+  | "voided";
+
+export interface EnvelopeRecipient {
+  name: string;
+  email: string;
+  role?: string;
+  routingOrder?: number;
+  status?: string;
+  signedAt?: string;
+}
+
+export interface EnvelopeHistoryEntry {
+  event: string;
+  at: string;
+}
+
+export interface Envelope {
+  id: string;
+  source: "contract" | "file" | "template";
+  contractId?: string;
+  fileId?: string;
+  templateId?: string;
+  docKind?: DocKind;
+  status: EnvelopeStatus;
+  voidReason?: string;
+  subject?: string;
+  sentBy?: string;
+  sentAt?: string;
+  lastStatusAt?: string;
+  recipients: EnvelopeRecipient[];
+  history: EnvelopeHistoryEntry[];
+}
+
+export interface DocuSignStatus {
+  configured: boolean;
+  connected: boolean;
+  accountId: string | null;
+  env: "demo" | "production";
+  impersonatedUserEmail: string | null;
+  connectedAt: string | null;
+  connectedBy: string | null;
+  lastError: string | null;
 }
 
 /* ---------- Resource Library and Courses ----------

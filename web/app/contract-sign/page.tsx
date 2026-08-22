@@ -26,6 +26,7 @@ import {
 import { publicApi } from "@/lib/public-api";
 import { SECTION_LABELS } from "@/lib/types";
 import type { ContractClause, ContractSignatures, Pricing } from "@/lib/types";
+import { EmbeddedSigningFrame } from "@/components/docusign/embedded-signing-frame";
 
 interface SigningDocument {
   contractId: string;
@@ -59,6 +60,11 @@ interface SignView {
   awaiting: "client" | "ol" | null;
   executedAt: string | null;
   pdfReady: boolean;
+  /** Whether the client's signature is collected via DocuSign (embedded here)
+   *  or the Portal's own native signature capture. OL's countersignature is
+   *  always native, either way. */
+  signMethod: "native" | "docusign";
+  envelopeId: string | null;
 }
 
 export default function ContractSignPage() {
@@ -228,6 +234,11 @@ function ContractSignView() {
                       will get the fully executed copy by email, and this link will serve it too.
                     </p>
                   </div>
+                ) : view.signMethod === "docusign" ? (
+                  <>
+                    <h2 className="mb-4 font-serif text-lg text-ink">Sign this agreement</h2>
+                    <EmbeddedSigningFrame viewUrlPath={`/sign/${token}/docusign-view`} onPoll={load} />
+                  </>
                 ) : (
                   <>
                     <h2 className="mb-4 font-serif text-lg text-ink">Sign this agreement</h2>

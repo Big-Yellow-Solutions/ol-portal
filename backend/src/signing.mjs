@@ -32,13 +32,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { resp, today, get, put, listType, fullName, esc, signUrl, docKind, docMeta } from "./util.mjs";
+import { resp, today, get, put, listType, fullName, esc, signUrl, docKind, docMeta, byToken } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { deviationsOf } from "./contracts.mjs";
 import { mergeClauses, templateVars } from "./templates.mjs";
 import { generateExecutedPdf, rollUpDeal, deliverCopies, inviteOnExecution } from "./execution.mjs";
 import { pricingTotal } from "./pricing.mjs";
+import * as docusign from "./docusign.mjs";
 
 const s3 = new S3Client({});
 const FILES_BUCKET = process.env.FILES_BUCKET;
@@ -149,13 +150,38 @@ export async function sendForSignature(ctx, id, body) {
     sentForSignatureAt: new Date().toISOString(),
     sentForSignatureBy: ctx.me.sk,
     signatures: {},
+    signMethod: "native",
     updated: today()
   };
   await put(next);
-  await writeAudit(ctx.me.sk, "contract.sent-for-signature",
-    `${id} (${c.client}) → ${c.clientSignerEmail} · countersigner ${signatory.sk} · sha256 ${next.documentHash.slice(0, 12)}`);
 
-  const url = signUrl(next.signToken);
+  /* DocuSign is the default signing method when connected — scoped to the
+     external signer only, so nothing past this point (the OL countersign
+     dialog, execution.mjs) has to know or care which method was used.
+     Sending invokes the PDF renderer, which reads this record back from
+     DynamoDB, which is why it has to be persisted (frozen, Out for Signature)
+     before this runs. If creating the envelope itself fails, the contract
+     reverts to exactly its pre-send state rather than being left half-sent —
+     deliberately NOT a silent fall-back to native, since that would leave
+     DocuSign's own dashboard showing nothing for a contract the Portal thinks
+     went out. */
+  let sent = next;
+  if (await docusign.isConnected()) {
+    try {
+      const envelopeId = await docusign.sendContractEnvelope(ctx, next);
+      sent = { ...next, envelopeId, signMethod: "docusign" };
+      await put(sent);
+    } catch (err) {
+      await put({ ...c, updated: today() });
+      console.error(JSON.stringify({ level: "error", message: "DocuSign envelope creation failed, contract not sent", detail: err.message }));
+      return resp(502, { error: `Could not send via DocuSign: ${err.message}. The contract was not sent — try again, or disconnect DocuSign to send natively.` });
+    }
+  }
+
+  await writeAudit(ctx.me.sk, "contract.sent-for-signature",
+    `${id} (${c.client}) → ${c.clientSignerEmail} · countersigner ${signatory.sk} · sha256 ${sent.documentHash.slice(0, 12)} · via ${sent.signMethod}`);
+
+  const url = signUrl(sent.signToken);
   const senderName = fullName(ctx.me);
   const { subject, intro } = requestCopy(c, senderName);
   const text = `Hi ${c.clientSignerName},\n\n${intro}\n\n` +
@@ -174,7 +200,7 @@ export async function sendForSignature(ctx, id, body) {
     emailError = err.message;
   }
 
-  const { pk, sk, ...rest } = next;
+  const { pk, sk, ...rest } = sent;
   return resp(200, { id: sk, ...rest, url, emailSent, emailError });
 }
 
@@ -200,11 +226,6 @@ function requestCopy(c, senderName) {
 }
 
 /* ---------- public signing routes (Authorizer NONE) ---------- */
-
-async function byToken(token) {
-  if (!/^[0-9a-f]{32}$/.test(token || "")) return null;
-  return (await listType("CONTRACT")).find(c => c.signToken === token) || null;
-}
 
 /* Signature metadata minus anything the counterparty shouldn't see. The IP is
    kept on the record for the audit trail but never returned to the browser. */
@@ -241,7 +262,11 @@ export async function signView(token) {
     // Whose turn it is, so the page never offers a signature that would 409.
     awaiting: sigs.client ? (sigs.ol ? null : "ol") : "client",
     executedAt: c.executedAt || null,
-    pdfReady: !!c.executedFileId
+    pdfReady: !!c.executedFileId,
+    // Tells the sign page whether to render the native signature capture or
+    // embed the DocuSign signing ceremony (GET /sign/{token}/docusign-view).
+    signMethod: c.signMethod === "docusign" ? "docusign" : "native",
+    envelopeId: c.envelopeId || null
   });
 }
 
@@ -287,6 +312,10 @@ export async function signSubmit(token, body, meta = {}) {
   if (c.status === "Signed") return resp(409, { error: "This agreement is already fully executed" });
   if (c.status !== "Out for Signature") return resp(409, { error: "This agreement is not open for signature" });
   if ((c.signatures || {}).client) return resp(409, { error: "This agreement has already been signed" });
+  // A DocuSign-routed agreement's client signature can only ever be recorded
+  // by the Connect webhook — never by this native endpoint, or the two
+  // sources of truth could disagree about who signed what.
+  if (c.envelopeId) return resp(409, { error: "Sign this agreement in the DocuSign window above." });
 
   // Tamper check: the document must still hash to what was frozen at send.
   if (hashOf(c.executionCopy) !== c.documentHash)

@@ -1,6 +1,7 @@
 import type {
   ContractStatus,
   DocKind,
+  EnvelopeStatus,
   FileStatus,
   InvoiceStatus,
   Person,
@@ -82,6 +83,30 @@ export const QBO_STATUS_VARIANT: Record<string, BadgeVariant> = {
   Paid: "success",
   Open: "warning",
 };
+
+export const ENVELOPE_VARIANT: Record<EnvelopeStatus, BadgeVariant> = {
+  sent: "warning",
+  delivered: "warning",
+  completed: "success",
+  declined: "destructive",
+  voided: "destructive",
+};
+
+export const ENVELOPE_STATUS_LABEL: Record<EnvelopeStatus, string> = {
+  sent: "Sent",
+  delivered: "Viewed",
+  completed: "Completed",
+  declined: "Declined",
+  voided: "Voided",
+};
+
+/** DocuSign has no separate "expired" status — it's a voided envelope with an
+ *  expiration reason. Surfacing it as its own label is more useful to a
+ *  reader than "Voided" for something nobody actually voided. */
+export function envelopeStatusLabel(status: EnvelopeStatus, voidReason?: string): string {
+  if (status === "voided" && /expir/i.test(voidReason ?? "")) return "Expired";
+  return ENVELOPE_STATUS_LABEL[status];
+}
 
 export function fmtDollars(n: number | undefined | null): string {
   if (n == null) return "$0";

@@ -12,7 +12,8 @@
    they're different businesses — who OL is selling to, and who OL is engaging
    — and a single list sorted by date reads as neither (PRD 8). */
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import { CountersignDialog } from "@/components/countersign-dialog";
 import { InviteContributorDialog } from "@/components/invite-contributor-dialog";
 import { NewContractDialog } from "@/components/new-contract-dialog";
 import { NewTaskOrderDialog } from "@/components/new-task-order-dialog";
+import { DocuSignConnectCard } from "@/components/docusign/connect-card";
 import {
   CONTRACT_VARIANT, DOC_KIND_LABEL, docKindOf, fmtDollars, fullName, isContributorDoc,
 } from "@/lib/data";
@@ -40,6 +42,16 @@ import { usePortalData } from "@/lib/portal-data";
 import type { Contract, Proposal } from "@/lib/types";
 
 export default function ContractsPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-ink-mute">Loading…</p>}>
+      <ContractsPageContent />
+    </Suspense>
+  );
+}
+
+function ContractsPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     loading, error, contracts, proposals, labs, people, role, me, setContracts, setProposals,
   } = usePortalData();
@@ -54,6 +66,16 @@ export default function ContractsPage() {
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
   const personName = (username?: string) =>
     username ? fullName(people[username]) || username : "—";
+
+  // One-time flash after the DocuSign consent round trip (?docusign=connected|error).
+  useEffect(() => {
+    const flash = searchParams.get("docusign");
+    if (!flash) return;
+    if (flash === "connected") toast.success("Connected to DocuSign.");
+    else if (flash === "error")
+      toast.error("Connection to DocuSign failed. Check the integration credentials and try again.");
+    router.replace("/contracts", { scroll: false });
+  }, [searchParams, router]);
 
   if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;
@@ -131,6 +153,33 @@ export default function ContractsPage() {
     }
   };
 
+  const resendEnvelope = async (contract: Contract) => {
+    setBusy(contract.id);
+    try {
+      await api(`/contracts/${contract.id}/docusign/resend`, { method: "POST" });
+      toast.success(`Resent the DocuSign reminder to ${contract.clientSignerEmail}.`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not resend the DocuSign envelope.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const voidEnvelope = async (contract: Contract) => {
+    setBusy(contract.id);
+    try {
+      const saved = await api<Contract>(`/contracts/${contract.id}/docusign/void`, {
+        method: "POST",
+      });
+      replace(saved);
+      toast.success(`${contract.id} voided in DocuSign and reopened for editing.`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not void the DocuSign envelope.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const generatePdf = async (contract: Contract) => {
     setBusy(contract.id);
     try {
@@ -186,6 +235,8 @@ export default function ContractsPage() {
           </Button>
         )}
       </div>
+
+      {role === "Admin" && <DocuSignConnectCard />}
 
       {!isReadOnly && (
         <Tabs value={side} onValueChange={(v) => setSide(v as "client" | "contributor")}>
@@ -330,6 +381,9 @@ export default function ContractsPage() {
                     </TableCell>
                     <TableCell>
                       <Badge variant={CONTRACT_VARIANT[c.status]}>{c.status}</Badge>
+                      {c.envelopeId && (
+                        <div className="mt-1 text-xs text-ink-mute">via DocuSign</div>
+                      )}
                       {c.status === "Signed" && c.executedAt && (
                         <div className="mt-1 text-xs text-ink-mute">
                           {new Date(c.executedAt).toLocaleDateString("en-US")}
@@ -350,6 +404,29 @@ export default function ContractsPage() {
                             {busy === c.id ? "Working…" : action.label}
                           </Button>
                         ))}
+                      {/* A DocuSign-routed contract waiting on the client isn't a
+                          dead end — the sender can nudge or pull it back for
+                          editing rather than only being able to wait. */}
+                      {c.status === "Out for Signature" && c.envelopeId && !c.signatures?.client && (
+                        <div className="mt-1 flex gap-1">
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={busy === c.id}
+                            onClick={() => resendEnvelope(c)}
+                          >
+                            Resend
+                          </Button>
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            disabled={busy === c.id}
+                            onClick={() => voidEnvelope(c)}
+                          >
+                            Void
+                          </Button>
+                        </div>
+                      )}
                       {/* Only on client paper. An executed MSA invites its
                           Contributor by itself (FR4), so offering the button
                           there would either duplicate an invite already sent or

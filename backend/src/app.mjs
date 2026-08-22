@@ -9,6 +9,8 @@ import {
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import * as qbo from "./qbo.mjs";
+import * as docusign from "./docusign.mjs";
+import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
 import * as admin from "./admin.mjs";
 import * as proposals from "./proposals.mjs";
 import * as contracts from "./contracts.mjs";
@@ -412,6 +414,10 @@ async function route(ctx, method, path, seg, body) {
     return await signing.sendForSignature(ctx, seg[1], body);
   if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "countersign")
     return await signing.countersign(ctx, seg[1], body, ctx.meta);
+  if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "docusign" && seg[3] === "resend")
+    return await docusign.resendContractEnvelope(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "contracts" && seg[1] && seg[2] === "docusign" && seg[3] === "void")
+    return await docusign.voidContractEnvelope(ctx, seg[1], body);
   if (method === "PATCH" && seg[0] === "contracts" && seg[1]) return await contracts.updateContract(ctx, seg[1], body);
   if (method === "GET" && path === "/templates") return await templates.listTemplates(ctx);
   if (method === "POST" && path === "/templates") return await templates.createTemplate(ctx, body);
@@ -460,6 +466,10 @@ async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/qbo/connect") return await qboConnect(ctx);
   if (method === "POST" && path === "/qbo/disconnect") return await qboDisconnect(ctx);
   if (method === "GET" && path === "/qbo/invoices") return await qboInvoices(ctx);
+  if (method === "GET" && path === "/docusign/status") return await docusign.status(ctx);
+  if (method === "GET" && path === "/docusign/connect") return await docusign.connect(ctx);
+  if (method === "POST" && path === "/docusign/disconnect") return await docusign.disconnectConnection(ctx);
+  if (method === "GET" && path === "/docusign/templates") return await docusign.listDocuSignTemplates(ctx);
 
   return resp(404, { error: "no such route" });
 }
@@ -472,6 +482,8 @@ export const handler = async event => {
     const rawMethod = event.requestContext.http.method;
     const rawPath = event.rawPath.replace(/\/+$/, "");
     if (rawMethod === "GET" && rawPath === "/qbo/callback") return await qboCallback(event);
+    if (rawMethod === "GET" && rawPath === "/docusign/callback") return await docusign.callback(event);
+    if (rawMethod === "POST" && rawPath === "/docusign/webhook") return await docusignWebhook(event);
 
     /* Public customer routes (Authorizer NONE) — the token is the credential.
        `meta` carries the caller's source IP and user-agent, which the customer
@@ -494,10 +506,11 @@ export const handler = async event => {
 
     // Contract signing: view the frozen document, sign it, download the
     // countersigned copy afterwards.
-    const signMatch = rawPath.match(/^\/sign\/([0-9a-f]+)(\/pdf)?$/);
+    const signMatch = rawPath.match(/^\/sign\/([0-9a-f]+)(\/pdf|\/docusign-view)?$/);
     if (signMatch) {
-      if (rawMethod === "GET" && signMatch[2]) return await signing.signPdf(signMatch[1]);
-      if (rawMethod === "GET") return await signing.signView(signMatch[1]);
+      if (rawMethod === "GET" && signMatch[2] === "/pdf") return await signing.signPdf(signMatch[1]);
+      if (rawMethod === "GET" && signMatch[2] === "/docusign-view") return await docusign.contractEmbeddedView(signMatch[1]);
+      if (rawMethod === "GET" && !signMatch[2]) return await signing.signView(signMatch[1]);
       if (rawMethod === "POST" && !signMatch[2]) return await signing.signSubmit(signMatch[1], publicBody, meta);
       return resp(404, { error: "no such route" });
     }

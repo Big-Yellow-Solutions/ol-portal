@@ -336,6 +336,14 @@ Resources:
           # be circular, since the HttpApi routes already reference this function.
           # Must exactly match a redirect URI registered in the Intuit dashboard.
           QBO_REDIRECT_URI: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/qbo/callback
+          # Same reasoning as QBO_REDIRECT_URI above: hardcoded because !Sub
+          # ${PortalApi} here would be circular. Must exactly match the
+          # redirect URI registered on the DocuSign Integration Key, and the
+          # Connect webhook's "Send to" URL configured in registerConnectWebhook().
+          DOCUSIGN_CREDS_PARAM: /ol-portal/docusign-credentials
+          DOCUSIGN_ENV: demo
+          DOCUSIGN_REDIRECT_URI: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/docusign/callback
+          DOCUSIGN_WEBHOOK_URL: https://0y24y7945l.execute-api.us-east-1.amazonaws.com/docusign/webhook
           USER_POOL_ID: !Ref UserPool
           # Base Contract PRD FR15: on full execution, signing.mjs invokes the
           # PDF renderer directly to produce the countersigned copy. Not
@@ -349,6 +357,8 @@ Resources:
             BucketName: !Sub ol-portal-files-${AWS::AccountId}
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/qbo-credentials
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/docusign-credentials
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/anthropic-api-key
         # Base Contract PRD FR15: render the countersigned PDF at execution time.

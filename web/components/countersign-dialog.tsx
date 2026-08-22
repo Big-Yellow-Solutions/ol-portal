@@ -87,6 +87,9 @@ export function CountersignDialog({
             Signed by {clientSig.name}
             {clientSig.title && `, ${clientSig.title}`} on{" "}
             {new Date(clientSig.at).toLocaleString("en-US")}
+            {clientSig.signatureType === "docusign" && (
+              <span className="text-ink-mute"> (via DocuSign)</span>
+            )}
             {clientSig.signatureType === "drawn" && clientSig.signatureImage && (
               /* eslint-disable-next-line @next/next/no-img-element -- a data:
                  URL signature, not an optimizable asset */

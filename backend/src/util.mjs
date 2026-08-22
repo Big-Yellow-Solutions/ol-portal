@@ -102,6 +102,17 @@ export const DOC_META = {
 export const docKind = c => (DOC_META[c?.docKind] ? c.docKind : "client");
 export const docMeta = c => DOC_META[docKind(c)];
 
+/* The counterparty's public entry point into a document they have no login
+   for — the 32-hex signToken is the credential. Shared by signing.mjs (native
+   flow) and docusign.mjs (embedded-signing view, webhook → contract sync) so
+   the two don't import each other just for this lookup. No GSI on this table,
+   so this is a linear scan of the CONTRACT partition, same as every other
+   "list" here. */
+export async function byToken(token) {
+  if (!/^[0-9a-f]{32}$/.test(token || "")) return null;
+  return (await listType("CONTRACT")).find(c => c.signToken === token) || null;
+}
+
 /* The contributor-side papers share counterparty wording, template resolution
    and Contributor visibility, so most branches want this rather than an
    equality check against a specific kind. */
