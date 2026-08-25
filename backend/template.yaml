@@ -461,6 +461,27 @@ Resources:
             Method: POST
             Auth:
               Authorizer: NONE
+        # DocuSign's consent redirect and Connect webhook both arrive without a
+        # Cognito JWT — the browser is coming back from account-d.docusign.com,
+        # and the webhook is a server-to-server POST. The callback is protected
+        # by the fact that a code alone grants nothing (JWT Grant never exchanges
+        # it), and the webhook by its HMAC signature check.
+        DocuSignCallbackRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /docusign/callback
+            Method: GET
+            Auth:
+              Authorizer: NONE
+        DocuSignWebhookRoute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref PortalApi
+            Path: /docusign/webhook
+            Method: POST
+            Auth:
+              Authorizer: NONE
 
 Outputs:
   OptimistUrl:

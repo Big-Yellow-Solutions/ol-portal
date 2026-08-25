@@ -21,6 +21,7 @@
   --color-ink-soft: var(--ink-soft);
   --color-ink-mute: var(--ink-mute);
   --color-warm-gray: var(--warm-gray);
+  --color-warm-panel: var(--warm-panel);
   --color-hair: var(--hair);
   --color-hair-strong: var(--hair-strong);
   --color-hair-interactive: var(--hair-interactive);
@@ -100,6 +101,11 @@
   --ink-soft: rgba(17, 17, 17, 0.82);
   --ink-mute: rgba(17, 17, 17, 0.62);
   --warm-gray: #9e9589;
+  /* Pipeline v2 (design_handoff_pipeline_v2): the drawer's sub-panel
+     background — a hair warmer than --paper so a nested panel (billing
+     entity, proposal, recurring) reads as a step down from the drawer's
+     white, not a second card. */
+  --warm-panel: #fcfbf9;
   --hair: rgba(124, 109, 245, 0.2);
   /* A hairline at full strength, for the borders the design draws at .30 —
      chips, inputs, and the date blocks that need to read as an edge. */

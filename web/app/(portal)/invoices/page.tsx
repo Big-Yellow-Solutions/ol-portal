@@ -343,6 +343,15 @@ function InvoicesPageContent() {
     router.replace("/invoices", { scroll: false });
   }, [searchParams, router]);
 
+  // A Lab Leader's only action here — requesting an invoice — now lives in
+  // the Pipeline's Deal View, and this page is no longer linked in their nav.
+  // Admin keeps this page (admin review queue + QuickBooks are cross-deal);
+  // Contributor's view is unchanged (always empty — the backend never scopes
+  // any invoice to them).
+  useEffect(() => {
+    if (role === "Lab Leader") router.replace("/pipeline");
+  }, [role, router]);
+
   const labName = useCallback(
     (id: string) => labs.find((l) => l.id === id)?.name ?? id,
     [labs]
@@ -461,6 +470,8 @@ function InvoicesPageContent() {
       </TableHead>
     );
   };
+
+  if (role === "Lab Leader") return null;
 
   return (
     <div className="flex flex-col gap-6">

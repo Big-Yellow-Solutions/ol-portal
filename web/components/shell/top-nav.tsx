@@ -36,7 +36,11 @@ interface NavItem {
 const PRIMARY: NavItem[] = [
   { href: "/", label: "Home" },
   { href: "/pipeline", label: "Pipeline" },
-  { href: "/proposals", label: "Proposals" },
+  // Admin/Lab Leader now manage a proposal from inside the Deal View
+  // (Pipeline → a deal → Proposal tab). A Contributor has no Pipeline
+  // visibility at all (PRD 3.3), so this stays their only way to reach a
+  // proposal they've been named on — unchanged for them.
+  { href: "/proposals", label: "Proposals", roles: ["Contributor"] },
   { href: "/resources", label: "Resources" },
   { href: "/bench", label: "Directory" },
   { href: "/community", label: "Community" },
@@ -47,8 +51,14 @@ const PRIMARY: NavItem[] = [
 // old sidebar. Courses is absent deliberately — the Resources artboard merged
 // it into /resources.
 const OVERFLOW: NavItem[] = [
+  // Contracts stays for everyone: Contributor MSAs/Task Orders aren't deal-
+  // scoped (a Contributor agreement isn't tied to one client deal), so they
+  // can't move into the Deal View and this page is still how they're managed.
   { href: "/contracts", label: "Contracts" },
-  { href: "/invoices", label: "Invoice Requests" },
+  // A Lab Leader's only action here (requesting an invoice) now lives in the
+  // Deal View's Invoice tab. Kept for Admin, whose admin-review queue and
+  // QuickBooks reconciliation are cross-deal by nature.
+  { href: "/invoices", label: "Invoice Requests", roles: ["Admin"] },
   { href: "/files", label: "Files" },
   { href: "/deal-flow", label: "Deal Flow", roles: ["Admin"] },
   { href: "/templates", label: "Templates", roles: ["Admin"] },

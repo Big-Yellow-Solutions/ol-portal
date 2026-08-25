@@ -1,20 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -22,110 +12,109 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { Calendar, GripVertical, Repeat } from "lucide-react";
-import { fmtDollars, fullName, initials } from "@/lib/data";
+import { AlertCircle, Calendar, GripVertical, Repeat } from "lucide-react";
+import { fmtDollars, fullName } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { usePortalData } from "@/lib/portal-data";
-import { STAGES, SOURCES } from "@/lib/types";
-import type {
-  AssignmentNotice,
-  AssignmentNoticeLabLeader,
-  Deal,
-  Outcome,
-  Person,
-  Source,
-  Stage,
-} from "@/lib/types";
+import { billingOf, billingRequiredAt, cadenceOf, proposalRequiredAt } from "@/lib/pipeline";
+import { STAGES } from "@/lib/types";
+import type { Deal, Stage } from "@/lib/types";
+import { DealDrawer } from "@/components/pipeline/deal-drawer";
+import { RecordDrawer } from "@/components/pipeline/record-drawer";
+import { ContactsTable } from "@/components/pipeline/contacts-table";
+import { ProposalsGrid } from "@/components/pipeline/proposals-grid";
 
-const OL_SIGNER_KEY = "ol";
+type ViewKey = "board" | "companies" | "people" | "proposals";
+const VIEWS: { key: ViewKey; label: string }[] = [
+  { key: "board", label: "Board" },
+  { key: "companies", label: "Companies" },
+  { key: "people", label: "People" },
+  { key: "proposals", label: "Proposals" },
+];
 
-const OPEN_STAGES = STAGES.filter((s) => s !== "Closed");
-
-const BOARD_STAGES: Stage[] = [...OPEN_STAGES, "Closed"];
-
-// deal.close is a plain "YYYY-MM-DD" string. Parsing it with `new Date(iso)`
-// would read it as UTC midnight and render the previous day in western
-// timezones, so build the date from its parts instead.
 function fmtClose(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return iso;
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-  });
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 export default function PipelinePage() {
-  const { loading, error, deals, labs, people, role, me, myLabs, setDeals } =
+  return (
+    <Suspense fallback={<p className="text-sm text-ink-mute">Loading…</p>}>
+      <PipelineBoard />
+    </Suspense>
+  );
+}
+
+function PipelineBoard() {
+  const { loading, error, deals, labs, people, companies, contacts, proposals, role, me, myLabs, setDeals } =
     usePortalData();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const viewParam = searchParams.get("view");
+  const view: ViewKey = VIEWS.some((v) => v.key === viewParam) ? (viewParam as ViewKey) : "board";
   const [search, setSearch] = useState("");
-  const [labFilter, setLabFilter] = useState<string>("all");
-  const [ownerFilter, setOwnerFilter] = useState<string>("all");
-  const [openDeal, setOpenDeal] = useState<Deal | "new" | null>(null);
+  const [labFilter, setLabFilter] = useState("all");
+  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [onlyUnlinked, setOnlyUnlinked] = useState(false);
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
-  // Under "Reduce motion" the cards still cross-fade so a restage is visible,
-  // but they don't slide or scale.
-  const reduceMotion = useReducedMotion();
-  const cardMotion = reduceMotion
-    ? {
-        initial: { opacity: 0 },
-        animate: { opacity: 1 },
-        exit: { opacity: 0 },
-        transition: { duration: 0 },
-      }
-    : {
-        initial: { opacity: 0, y: 8 },
-        animate: { opacity: 1, y: 0 },
-        exit: { opacity: 0, scale: 0.96 },
-        transition: { duration: 0.15 },
-      };
 
-  // Drag-to-restage. Closing a deal is deliberately NOT done by dragging:
-  // the server rejects a move to "Closed" without an Assignment Notice, and
-  // closing also needs a Won/Lost outcome, so a drop on Closed hands off to
-  // DealDialog which already runs that flow.
-  const moveDeal = async (deal: Deal, stage: Stage) => {
-    if (deal.stage === stage) return;
-    if (!can.editDeal(deal, role!, myLabs, me)) {
-      toast.error("You don't have permission to move this deal.");
-      return;
-    }
-    if (stage === "Closed") {
-      toast.info("Closing a deal needs an outcome and an Assignment Notice.");
-      setOpenDeal(deal);
-      return;
-    }
+  const [dealDrawer, setDealDrawer] = useState<{ deal: Deal | "new"; pendingStage?: Stage } | null>(null);
+  const [recordDrawer, setRecordDrawer] = useState<{ type: "company" | "contact"; id: string; returnDealId: string | null } | null>(null);
 
-    const previous = deal.stage;
-    setDeals((prev) =>
-      prev.map((d) => (d.id === deal.id ? { ...d, stage } : d))
-    );
-    try {
-      const saved = await api<Deal>(`/deals/${deal.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ stage }),
-      });
-      setDeals((prev) => prev.map((d) => (d.id === saved.id ? saved : d)));
-    } catch (err) {
-      setDeals((prev) =>
-        prev.map((d) => (d.id === deal.id ? { ...d, stage: previous } : d))
-      );
-      toast.error(
-        err instanceof ApiError ? err.message : "Could not move this deal."
-      );
+  const viewingId = searchParams.get("deal");
+  const viewingDeal = useMemo(() => (viewingId ? (deals.find((d) => d.id === viewingId) ?? null) : null), [viewingId, deals]);
+  const activeDrawer = dealDrawer ?? (viewingDeal ? { deal: viewingDeal } : null);
+
+  function setView(v: ViewKey) {
+    const qp = new URLSearchParams(searchParams.toString());
+    if (v === "board") qp.delete("view");
+    else qp.set("view", v);
+    const qs = qp.toString();
+    router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
+  function openDeal(deal: Deal | "new", pendingStage?: Stage) {
+    setDealDrawer({ deal, pendingStage });
+    // Only sync the URL for a plain open (a real deal, not mid drag-gate
+    // correction) — a pendingStage override is transient and shouldn't be
+    // shareable as a stale link.
+    if (deal !== "new" && !pendingStage) {
+      const qp = new URLSearchParams(searchParams.toString());
+      qp.set("deal", deal.id);
+      router.push(`${pathname}?${qp.toString()}`, { scroll: false });
     }
-  };
+  }
+  function closeDealDrawer() {
+    setDealDrawer(null);
+    if (searchParams.get("deal")) {
+      const qp = new URLSearchParams(searchParams.toString());
+      qp.delete("deal");
+      const qs = qp.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    }
+  }
+
+  const companyMap = useMemo(() => Object.fromEntries(companies.map((c) => [c.id, c])), [companies]);
+  const contactMap = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
+  const latestProposalFor = useMemo(() => {
+    const map = new Map<string, (typeof proposals)[number]>();
+    for (const p of proposals) {
+      if (!p.deal) continue;
+      const cur = map.get(p.deal);
+      if (!cur || (p.updated ?? "") > (cur.updated ?? "")) map.set(p.deal, p);
+    }
+    return map;
+  }, [proposals]);
 
   const leaders = useMemo(
-    () =>
-      Object.entries(people)
-        .filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader")
-        .map(([username, p]) => ({ username, name: fullName(p) || username })),
+    () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
   );
 
@@ -134,161 +123,278 @@ export default function PipelinePage() {
     return deals.filter((d) => {
       if (labFilter !== "all" && d.lab !== labFilter) return false;
       if (ownerFilter !== "all" && d.owner !== ownerFilter) return false;
-      if (q && !d.client.toLowerCase().includes(q)) return false;
-      return true;
+      if (onlyUnlinked && (d.companyId || d.contactId || !billingRequiredAt(d.stage))) return false;
+      if (!q) return true;
+      const bill = billingOf(d, companyMap, contactMap);
+      return `${d.client} ${bill.name} ${d.owner}`.toLowerCase().includes(q);
     });
-  }, [deals, labFilter, ownerFilter, search]);
+  }, [deals, labFilter, ownerFilter, onlyUnlinked, search, companyMap, contactMap]);
+
+  const nUnlinked = useMemo(
+    () => deals.filter((d) => !d.companyId && !d.contactId && billingRequiredAt(d.stage)).length,
+    [deals]
+  );
+  const proposalDealCount = useMemo(() => new Set(proposals.map((p) => p.deal).filter(Boolean)).size, [proposals]);
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
-  const personName = (username?: string) =>
-    username ? fullName(people[username]) || username : "—";
+  const reduceMotion = useReducedMotion();
+  const cardMotion = reduceMotion
+    ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
+    : { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, scale: 0.96 }, transition: { duration: 0.15 } };
 
-  const closedDeals = filtered.filter((d) => d.stage === "Closed");
+  async function handleDrop(deal: Deal, targetStage: Stage) {
+    if (deal.stage === targetStage) return;
+    if (!can.editDeal(deal, role!, myLabs, me)) {
+      toast.error("You don't have permission to move this deal.");
+      return;
+    }
+    if (billingRequiredAt(targetStage) && !deal.companyId && !deal.contactId) {
+      toast.info(`${targetStage} needs a billing entity — opening ${deal.client}`);
+      openDeal(deal, targetStage);
+      return;
+    }
+    if (proposalRequiredAt(targetStage)) {
+      const proposal = latestProposalFor.get(deal.id);
+      if (!proposal?.sentAt) {
+        toast.info(proposal ? `${targetStage} needs the proposal marked final and sent` : `${targetStage} needs a sent proposal — start one first`);
+        openDeal(deal, targetStage);
+        return;
+      }
+    }
+    if (targetStage === "Closed") {
+      toast.info("Closing a deal needs an outcome, a signed contract, and an Assignment Notice.");
+      openDeal(deal, "Closed");
+      return;
+    }
+
+    const previous = deal.stage;
+    setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage: targetStage } : d)));
+    try {
+      const saved = await api<Deal>(`/deals/${deal.id}`, { method: "PATCH", body: JSON.stringify({ stage: targetStage }) });
+      setDeals((prev) => prev.map((d) => (d.id === saved.id ? saved : d)));
+      toast.success(`${deal.client} moved to ${targetStage}`);
+    } catch (err) {
+      setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage: previous } : d)));
+      toast.error(err instanceof ApiError ? err.message : "Could not move this deal.");
+    }
+  }
 
   if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;
 
+  const blurb =
+    view === "companies"
+      ? "Organizations that can be invoiced, with what each is worth across the pipeline. Open one to see its deals and primary contact."
+      : view === "people"
+        ? "Individuals across the pipeline — some belong to a company, some are billed directly. Open one to see their deals."
+        : view === "proposals"
+          ? "Every proposal in flight, drafted or sent. Open one to send the current version or start a revision."
+          : "Deals by stage, across labs. Drag a card to move it forward; a deal needs a billing entity before it reaches Proposal Sent.";
+
+  const searchPlaceholder =
+    view === "companies" ? "Search companies…" : view === "people" ? "Search people…" : view === "proposals" ? "Search proposals…" : "Search deals, companies, or people…";
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="font-serif text-2xl italic text-ink">Pipeline</h1>
-          <p className="mt-1 text-sm text-ink-mute">Deals by stage, across labs.</p>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="max-w-[640px]">
+          <h1 className="font-serif text-[32px] leading-[1.06] font-normal tracking-[-0.015em] text-ink italic md:text-[40px]">
+            Pipeline
+          </h1>
+          <p className="mt-2.5 text-[17px] leading-[1.6] text-ink-soft">{blurb}</p>
         </div>
         {can.addDeal(role!, myLabs) && (
-          <Button onClick={() => setOpenDeal("new")}>
+          <Button className="rounded-full" onClick={() => setDealDrawer({ deal: "new" })}>
             + New deal
           </Button>
         )}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <Input
-          type="search"
-          placeholder="Search by client…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="max-w-xs"
-        />
-        <Select value={labFilter} onValueChange={setLabFilter}>
-          <SelectTrigger className="w-44"><SelectValue placeholder="All labs" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All labs</SelectItem>
-            {labs.map((l) => (
-              <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={ownerFilter} onValueChange={setOwnerFilter}>
-          <SelectTrigger className="w-48"><SelectValue placeholder="All owners" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All owners</SelectItem>
-            {leaders.map((p) => (
-              <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-hair pb-0">
+        <div className="flex items-end gap-0.5 overflow-x-auto">
+          {VIEWS.map((v) => {
+            const count =
+              v.key === "board" ? deals.length : v.key === "companies" ? companies.length : v.key === "people" ? contacts.length : proposalDealCount;
+            const active = view === v.key;
+            return (
+              <button
+                key={v.key}
+                onClick={() => setView(v.key)}
+                className={cn(
+                  "-mb-px flex items-center gap-1.5 rounded-t-[10px] px-4 pt-[11px] pb-3 text-[15px] whitespace-nowrap transition-colors",
+                  active
+                    ? "border-b-2 border-violet-deep bg-violet-pale font-semibold text-violet-deep"
+                    : "font-medium text-ink-soft hover:bg-[#F1EEFE] hover:text-violet-deep"
+                )}
+              >
+                {v.label}
+                <span className={cn("rounded-full px-1.5 py-px text-[11px] font-semibold", active ? "bg-white text-violet-deep" : "bg-violet-deep/10 text-violet")}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-      <div className="grid gap-4 md:grid-cols-5">
-        {BOARD_STAGES.map((stage) => {
-          const stageDeals =
-            stage === "Closed"
-              ? closedDeals
-              : filtered.filter((d) => d.stage === stage);
-          const isDropTarget =
-            !!draggingDeal &&
-            dragOverStage === stage &&
-            draggingDeal.stage !== stage;
-
-          return (
-            <div
-              key={stage}
-              onDragOver={(e) => {
-                if (!draggingDeal) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                if (dragOverStage !== stage) setDragOverStage(stage);
-              }}
-              onDragLeave={(e) => {
-                // ignore bubbling from children still inside this column
-                if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-                setDragOverStage((s) => (s === stage ? null : s));
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOverStage(null);
-                const id = e.dataTransfer.getData("text/plain");
-                const dropped = deals.find((d) => d.id === id) ?? draggingDeal;
-                setDraggingDeal(null);
-                if (dropped) void moveDeal(dropped, stage);
-              }}
+        <div className="flex flex-wrap items-center gap-2 pb-2.5">
+          <Input
+            type="search"
+            placeholder={searchPlaceholder}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-[240px]"
+          />
+          {view !== "companies" && view !== "people" && (
+            <Select value={labFilter} onValueChange={setLabFilter}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All labs" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All labs</SelectItem>
+                {labs.map((l) => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {view === "board" && (
+            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+              <SelectTrigger className="w-44"><SelectValue placeholder="All owners" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All owners</SelectItem>
+                {leaders.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {view === "board" && nUnlinked > 0 && (
+            <button
+              onClick={() => setOnlyUnlinked((v) => !v)}
               className={cn(
-                "flex flex-col gap-3 rounded-2xl p-1 transition-colors",
-                isDropTarget && "bg-violet-pale ring-2 ring-violet-deep/40"
+                "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[13px] font-medium whitespace-nowrap",
+                onlyUnlinked ? "border-red bg-red text-white" : "border-red/30 bg-white text-red"
               )}
             >
-              <div className="flex items-center gap-2 px-1">
-                <h3 className="text-sm font-semibold text-ink">{stage}</h3>
-                <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">
-                  {stageDeals.length}
-                </span>
-              </div>
-
-              <div className="flex min-h-[96px] flex-col gap-3">
-                <AnimatePresence initial={false}>
-                  {stageDeals.map((deal) => (
-                    <motion.div
-                      key={deal.id}
-                      layout={!reduceMotion}
-                      {...cardMotion}
-                    >
-                      <DealCard
-                        deal={deal}
-                        labName={labName(deal.lab)}
-                        ownerName={personName(deal.owner)}
-                        owner={people[deal.owner]}
-                        canDrag={can.editDeal(deal, role!, myLabs, me)}
-                        isDragging={draggingDeal?.id === deal.id}
-                        onDragStart={() => setDraggingDeal(deal)}
-                        onDragEnd={() => {
-                          setDraggingDeal(null);
-                          setDragOverStage(null);
-                        }}
-                        onClick={() => setOpenDeal(deal)}
-                      />
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-
-                {stageDeals.length === 0 && (
-                  <div className="flex h-24 items-center justify-center rounded-2xl border-2 border-dashed border-foreground/15 text-xs text-ink-mute">
-                    {draggingDeal ? "Drop here" : "No deals"}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+              <AlertCircle size={14} />
+              Needs billing entity <span className="font-bold">{nUnlinked}</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {openDeal && (
-        <DealDialog
-          deal={openDeal === "new" ? null : openDeal}
-          open={!!openDeal}
-          onOpenChange={(open) => {
-            if (!open) setOpenDeal(null);
-          }}
+      {view === "board" && (
+        <div className="flex items-start gap-2 overflow-x-auto pb-3">
+          {STAGES.map((stage) => {
+            const stageDeals = filtered.filter((d) => d.stage === stage);
+            const total = stageDeals.reduce((sum, d) => sum + (d.amount || 0), 0);
+            const isDropTarget = !!draggingDeal && dragOverStage === stage && draggingDeal.stage !== stage;
+            return (
+              <div
+                key={stage}
+                onDragOver={(e) => {
+                  if (!draggingDeal) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverStage !== stage) setDragOverStage(stage);
+                }}
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+                  setDragOverStage((s) => (s === stage ? null : s));
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverStage(null);
+                  const id = e.dataTransfer.getData("text/plain");
+                  const dropped = deals.find((d) => d.id === id) ?? draggingDeal;
+                  setDraggingDeal(null);
+                  if (dropped) void handleDrop(dropped, stage);
+                }}
+                className={cn("min-w-[240px] flex-1 rounded-2xl p-1.5 transition-colors", isDropTarget && "bg-violet-pale ring-2 ring-violet-light/60")}
+              >
+                <div className="flex items-center gap-2 px-1 pb-3">
+                  <h3 className="text-[15px] font-bold tracking-[-0.01em] text-ink">{stage}</h3>
+                  <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">{stageDeals.length}</span>
+                  <span className="flex-1" />
+                  {stageDeals.length > 0 && <span className="truncate text-xs text-warm-gray">{fmtDollars(total)}</span>}
+                </div>
+
+                <div className="flex min-h-[96px] flex-col gap-3">
+                  <AnimatePresence initial={false}>
+                    {stageDeals.map((deal) => (
+                      <motion.div key={deal.id} layout={!reduceMotion} {...cardMotion}>
+                        <DealCard
+                          deal={deal}
+                          labName={labName(deal.lab)}
+                          ownerName={fullName(people[deal.owner]) || deal.owner}
+                          billing={billingOf(deal, companyMap, contactMap)}
+                          canDrag={can.editDeal(deal, role!, myLabs, me)}
+                          isDragging={draggingDeal?.id === deal.id}
+                          onDragStart={() => setDraggingDeal(deal)}
+                          onDragEnd={() => {
+                            setDraggingDeal(null);
+                            setDragOverStage(null);
+                          }}
+                          onClick={() => openDeal(deal)}
+                        />
+                      </motion.div>
+                    ))}
+                  </AnimatePresence>
+                  {stageDeals.length === 0 && (
+                    <div className="flex h-[88px] items-center justify-center rounded-2xl border border-dashed border-hair-strong text-xs text-warm-gray">
+                      {draggingDeal ? "Drop here" : "Nothing here"}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {(view === "companies" || view === "people") && (
+        <ContactsTable view={view} search={search} onOpenRecord={(type, id) => setRecordDrawer({ type, id, returnDealId: null })} />
+      )}
+
+      {view === "proposals" && (
+        <ProposalsGrid search={search} lab={labFilter} onOpenDeal={(dealId) => {
+          const d = deals.find((x) => x.id === dealId);
+          if (d) openDeal(d);
+        }} />
+      )}
+
+      {activeDrawer && (
+        <DealDrawer
+          deal={activeDrawer.deal}
+          pendingStage={activeDrawer.pendingStage}
+          open
+          onClose={closeDealDrawer}
           onSaved={(saved) => {
-            setDeals((prev) => {
-              const exists = prev.some((d) => d.id === saved.id);
-              return exists ? prev.map((d) => (d.id === saved.id ? saved : d)) : [saved, ...prev];
-            });
-            setOpenDeal(null);
+            setDeals((prev) => (prev.some((d) => d.id === saved.id) ? prev.map((d) => (d.id === saved.id ? saved : d)) : [saved, ...prev]));
+            closeDealDrawer();
           }}
           onDeleted={(id) => {
             setDeals((prev) => prev.filter((d) => d.id !== id));
-            setOpenDeal(null);
+            closeDealDrawer();
+          }}
+          onOpenRecord={(type, id) => {
+            const returnDealId = activeDrawer.deal !== "new" ? activeDrawer.deal.id : null;
+            setDealDrawer(null);
+            setRecordDrawer({ type, id, returnDealId });
+          }}
+        />
+      )}
+
+      {recordDrawer && (
+        <RecordDrawer
+          type={recordDrawer.type}
+          id={recordDrawer.id}
+          open
+          returnDealId={recordDrawer.returnDealId}
+          onClose={() => setRecordDrawer(null)}
+          onBackToDeal={(dealId) => {
+            setRecordDrawer(null);
+            const d = deals.find((x) => x.id === dealId);
+            if (d) openDeal(d);
+          }}
+          onOpenDeal={(dealId) => {
+            setRecordDrawer(null);
+            const d = deals.find((x) => x.id === dealId);
+            if (d) openDeal(d);
           }}
         />
       )}
@@ -300,7 +406,7 @@ function DealCard({
   deal,
   labName,
   ownerName,
-  owner,
+  billing,
   canDrag,
   isDragging,
   onDragStart,
@@ -310,13 +416,14 @@ function DealCard({
   deal: Deal;
   labName: string;
   ownerName: string;
-  owner: Person | undefined;
+  billing: ReturnType<typeof billingOf>;
   canDrag: boolean;
   isDragging: boolean;
   onDragStart: () => void;
   onDragEnd: () => void;
   onClick: () => void;
 }) {
+  const cadence = cadenceOf(deal);
   return (
     <button
       onClick={onClick}
@@ -328,599 +435,60 @@ function DealCard({
       }}
       onDragEnd={onDragEnd}
       className={cn(
-        "group relative flex w-full flex-col gap-4 rounded-2xl border border-foreground/10 bg-card p-4 text-left shadow-sm transition hover:border-violet-deep hover:shadow-md",
+        "group relative flex w-full flex-col gap-0 rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
+        billing.due ? "border-red/45" : "border-hair",
         canDrag && "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-40"
+        isDragging && "opacity-45"
       )}
     >
       {canDrag && (
-        <span
-          aria-hidden
-          className="absolute left-0.5 top-1/2 -translate-y-1/2 text-ink-mute opacity-0 transition-opacity group-hover:opacity-100"
-        >
+        <span aria-hidden className="absolute top-1/2 left-0.5 -translate-y-1/2 text-ink-mute opacity-0 transition-opacity group-hover:opacity-100">
           <GripVertical size={14} />
         </span>
       )}
 
-      <div className="flex items-start justify-between gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-md bg-violet-pale px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-violet-deep">
-          <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-violet-deep" />
+      <div className="mb-2.5 flex items-center gap-1.5">
+        <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-violet-pale px-2.5 py-1 text-[10px] font-bold tracking-[0.09em] text-violet-deep uppercase">
+          <span aria-hidden className="size-1.5 rounded-full bg-violet" />
           {labName}
         </span>
-        {deal.stage === "Closed" && deal.outcome && (
-          <Badge variant={deal.outcome === "Won" ? "success" : "destructive"}>
-            {deal.outcome}
-          </Badge>
+        <span className="flex-1" />
+        {deal.stage === "Closed" && deal.outcome === "Won" && (
+          <span className="rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
         )}
+        {deal.recurring && <Repeat size={14} className="shrink-0 text-violet" aria-label="Recurring deal" />}
       </div>
 
-      <div className="flex flex-col gap-1">
-        <h4 className="text-[15px] font-semibold leading-snug text-ink">
-          {deal.client}
-        </h4>
-        <p className="text-xs text-ink-mute">{ownerName}</p>
-      </div>
+      <h4 className="text-[15px] leading-[1.3] font-bold tracking-[-0.015em] text-ink">{deal.client}</h4>
+      {cadence && <p className="mt-1 truncate text-[11px] font-medium text-violet">{cadence}</p>}
 
-      <div className="flex items-center justify-between gap-2 border-t border-foreground/10 pt-3">
-        <div className="flex min-w-0 items-center gap-2.5 text-xs text-ink-mute">
-          {deal.close && (
-            <span className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-              <Calendar size={14} aria-hidden />
-              {fmtClose(deal.close)}
-            </span>
+      <div className="mt-2.5 flex items-center gap-2">
+        <span
+          className={cn(
+            "flex size-6.5 shrink-0 items-center justify-center text-[11px] font-semibold",
+            billing.kind === "company" ? "rounded-[9px]" : "rounded-full",
+            billing.ok ? "bg-violet-pale text-violet-deep" : billing.due ? `border border-dashed border-red/55 text-red` : "border border-dashed border-hair-strong text-violet-deep"
           )}
-          {deal.recurring && (
-            <span className="flex shrink-0 items-center" title="Recurring deal">
-              <Repeat size={14} aria-hidden />
-              <span className="sr-only">Recurring deal</span>
-            </span>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="tabular-nums text-sm font-semibold text-ink">
-            {fmtDollars(deal.amount)}
-          </span>
-          <Avatar size="sm">
-            {owner?.photo && <AvatarImage src={owner.photo} alt="" />}
-            <AvatarFallback>{owner ? initials(owner) : "—"}</AvatarFallback>
-          </Avatar>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-function DealDialog({
-  deal,
-  open,
-  onOpenChange,
-  onSaved,
-  onDeleted,
-}: {
-  deal: Deal | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: (deal: Deal) => void;
-  onDeleted: (id: string) => void;
-}) {
-  const { labs, people, role, me, myLabs } = usePortalData();
-  const isNew = !deal;
-  const editable = deal
-    ? can.editDeal(deal, role!, myLabs, me)
-    : can.addDeal(role!, myLabs);
-
-  const leaders = useMemo(
-    () =>
-      Object.entries(people)
-        .filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader")
-        .map(([username, p]) => ({ username, name: fullName(p) || username })),
-    [people]
-  );
-  // Assignment Notice fee-share lines can only name real Lab Leaders — an
-  // Admin can sign the separate "ol" (Optimistic Labs) line, but can't be
-  // listed as a fee-share Lab Leader themselves (matches app.mjs).
-  const labLeaderOptions = useMemo(
-    () =>
-      Object.entries(people)
-        .filter(([, p]) => p.role === "Lab Leader")
-        .map(([username, p]) => ({ username, name: fullName(p) || username })),
-    [people]
-  );
-
-  const [client, setClient] = useState(deal?.client ?? "");
-  const [lab, setLab] = useState(deal?.lab ?? myLabs[0] ?? labs[0]?.id ?? "");
-  const [owner, setOwner] = useState(deal?.owner ?? me ?? "");
-  const [dealOwner, setDealOwner] = useState(deal?.dealOwner ?? deal?.owner ?? me ?? "");
-  const [stage, setStage] = useState<Stage>(deal?.stage ?? "Lead");
-  const [amount, setAmount] = useState(String(deal?.amount ?? ""));
-  const [close, setClose] = useState(deal?.close ?? "");
-  const [source, setSource] = useState<Source>(deal?.source ?? "Referral");
-  const [recurring, setRecurring] = useState(deal?.recurring ?? false);
-  const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  const [showAssignment, setShowAssignment] = useState(false);
-  const existingNotice = deal?.assignmentNotice;
-  const noticeLocked = !!existingNotice && Object.keys(existingNotice.signatures || {}).length > 0;
-  const [noticeLabLeaders, setNoticeLabLeaders] = useState<
-    { key: string; feeSharePct: string }[]
-  >(
-    existingNotice?.labLeaders.length
-      ? existingNotice.labLeaders.map((l) => ({ key: l.key, feeSharePct: String(l.feeSharePct) }))
-      : [{ key: dealOwner || owner || "", feeSharePct: "100" }]
-  );
-  const [noticeSubcontractorCosts, setNoticeSubcontractorCosts] = useState(
-    String(existingNotice?.subcontractorCosts ?? 0)
-  );
-  const [noticeHardCosts, setNoticeHardCosts] = useState(String(existingNotice?.hardCosts ?? 0));
-  const [pendingOutcome, setPendingOutcome] = useState<Outcome>(deal?.outcome ?? "Won");
-  const [signing, setSigning] = useState<string | null>(null);
-  const [signatureText, setSignatureText] = useState("");
-
-  const buildNotice = (): AssignmentNotice | null => {
-    const labLeaders: AssignmentNoticeLabLeader[] = [];
-    for (const row of noticeLabLeaders) {
-      const pct = Number(row.feeSharePct);
-      if (!row.key || !Number.isFinite(pct) || pct < 0) return null;
-      labLeaders.push({ key: row.key, feeSharePct: pct });
-    }
-    if (!labLeaders.length) return null;
-    const pctSum = labLeaders.reduce((sum, l) => sum + l.feeSharePct, 0);
-    if (Math.abs(pctSum - 100) > 0.01) return null;
-    const subcontractorCosts = Number(noticeSubcontractorCosts);
-    const hardCosts = Number(noticeHardCosts);
-    if (!Number.isFinite(subcontractorCosts) || subcontractorCosts < 0) return null;
-    if (!Number.isFinite(hardCosts) || hardCosts < 0) return null;
-    return { labLeaders, subcontractorCosts, hardCosts, signatures: existingNotice?.signatures ?? {} };
-  };
-
-  const buildBody = (assignmentNotice?: AssignmentNotice) => ({
-    client,
-    lab,
-    owner,
-    dealOwner,
-    stage,
-    amount: Number(amount) || 0,
-    close,
-    source,
-    recurring,
-    ...(stage === "Closed" ? { outcome: pendingOutcome } : {}),
-    ...(assignmentNotice ? { assignmentNotice } : {}),
-  });
-
-  const submit = async (assignmentNotice?: AssignmentNotice) => {
-    setSaving(true);
-    try {
-      const body = buildBody(assignmentNotice);
-      const saved = isNew
-        ? await api<Deal>("/deals", { method: "POST", body: JSON.stringify(body) })
-        : await api<Deal>(`/deals/${deal!.id}`, { method: "PATCH", body: JSON.stringify(body) });
-      toast.success(isNew ? "Deal created" : "Deal saved");
-      onSaved(saved);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save this deal.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const save = async () => {
-    const closing = stage === "Closed" && deal?.stage !== "Closed";
-    if (closing && !deal?.assignmentNotice) {
-      setShowAssignment(true);
-      return;
-    }
-    // Already-Closed deals carry their (possibly just-edited) notice along
-    // with every other save, unless it's locked behind a signature.
-    const notice = stage === "Closed" && !noticeLocked ? buildNotice() : existingNotice;
-    if (stage === "Closed" && !noticeLocked && !notice) {
-      toast.error("Assignment Notice fee shares must add up to 100%.");
-      return;
-    }
-    await submit(notice ?? undefined);
-  };
-
-  const confirmAssignmentAndSave = async () => {
-    const notice = buildNotice();
-    if (!notice) {
-      toast.error("Add at least one Lab Leader with fee shares summing to 100%.");
-      return;
-    }
-    await submit(notice);
-    setShowAssignment(false);
-  };
-
-  const sign = async (signerKey: string) => {
-    if (!deal || !signatureText.trim()) return;
-    setSigning(signerKey);
-    try {
-      const saved = await api<Deal>(`/deals/${deal.id}/assignment-notice/sign`, {
-        method: "POST",
-        body: JSON.stringify({ signerKey, signatureText: signatureText.trim() }),
-      });
-      toast.success("Signed");
-      onSaved(saved);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not record this signature.");
-    } finally {
-      setSigning(null);
-      setSignatureText("");
-    }
-  };
-
-  const del = async () => {
-    if (!deal) return;
-    if (!window.confirm(`Delete the deal for ${deal.client}? This cannot be undone.`)) return;
-    setDeleting(true);
-    try {
-      await api(`/deals/${deal.id}`, { method: "DELETE" });
-      toast.success("Deal deleted");
-      onDeleted(deal.id);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not delete this deal.");
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const requestInvoice = async () => {
-    if (!deal) return;
-    try {
-      await api("/invoices", {
-        method: "POST",
-        body: JSON.stringify({ dealId: deal.id, recurring: deal.recurring }),
-      });
-      toast.success("Invoice requested");
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not request an invoice.");
-    }
-  };
-
-  if (showAssignment) {
-    return (
-      <Dialog open={open} onOpenChange={() => {}}>
-        <DialogContent showCloseButton={false} onInteractOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle>Assignment notice required</DialogTitle>
-            <DialogDescription>
-              Closing this deal requires naming which Lab Leader(s) are delivering the work and
-              their fee split, plus any subcontractor and hard costs.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="deal-outcome">Outcome</Label>
-              <Select value={pendingOutcome} onValueChange={(v) => setPendingOutcome(v as Outcome)}>
-                <SelectTrigger id="deal-outcome"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Won">Won</SelectItem>
-                  <SelectItem value="Lost">Lost</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <LabLeaderFeeSplitEditor
-              rows={noticeLabLeaders}
-              setRows={setNoticeLabLeaders}
-              options={labLeaderOptions}
-            />
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="deal-subcontractor-costs">Subcontractor costs</Label>
-                <Input id="deal-subcontractor-costs"
-                  type="number"
-                  min={0}
-                  value={noticeSubcontractorCosts}
-                  onChange={(e) => setNoticeSubcontractorCosts(e.target.value)}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="deal-hard-costs">Hard costs</Label>
-                <Input id="deal-hard-costs"
-                  type="number"
-                  min={0}
-                  value={noticeHardCosts}
-                  onChange={(e) => setNoticeHardCosts(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAssignment(false)} disabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              disabled={saving}
-              onClick={confirmAssignmentAndSave}
-            >
-              {saving ? "Saving…" : "Confirm & close deal"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{isNew ? "New deal" : deal!.client}</DialogTitle>
-        </DialogHeader>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="flex flex-col gap-1.5 sm:col-span-2">
-            <Label htmlFor="deal-client">Client</Label>
-            <Input id="deal-client" value={client} onChange={(e) => setClient(e.target.value)} disabled={!editable} />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-lab">Lab</Label>
-            <Select value={lab} onValueChange={setLab} disabled={!editable}>
-              <SelectTrigger id="deal-lab"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {labs.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-stage">Stage</Label>
-            <Select value={stage} onValueChange={(v) => setStage(v as Stage)} disabled={!editable}>
-              <SelectTrigger id="deal-stage"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {STAGES.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-owner-lab-leader">Owner (Lab Leader)</Label>
-            <Select value={owner} onValueChange={setOwner} disabled={!editable}>
-              <SelectTrigger id="deal-owner-lab-leader"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {leaders.map((p) => (
-                  <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-deal-owner">Deal owner</Label>
-            <Select value={dealOwner} onValueChange={setDealOwner} disabled={!editable}>
-              <SelectTrigger id="deal-deal-owner"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {leaders.map((p) => (
-                  <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-amount">Amount</Label>
-            <Input id="deal-amount"
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              disabled={!editable}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-expected-close">Expected close</Label>
-            <Input id="deal-expected-close" type="date" value={close} onChange={(e) => setClose(e.target.value)} disabled={!editable} />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="deal-source">Source</Label>
-            <Select value={source} onValueChange={(v) => setSource(v as Source)} disabled={!editable}>
-              <SelectTrigger id="deal-source"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SOURCES.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-ink sm:col-span-2">
-            <Checkbox checked={recurring} onCheckedChange={(c) => setRecurring(!!c)} disabled={!editable} />
-            Recurring engagement
-          </label>
-        </div>
-
-        {!isNew && deal!.stage === "Closed" && existingNotice && (
-          <div className="flex flex-col gap-4 border-t border-hair pt-4">
-            <h3 className="text-sm font-medium text-ink">Assignment Notice</h3>
-
-            <LabLeaderFeeSplitEditor
-              rows={noticeLabLeaders}
-              setRows={setNoticeLabLeaders}
-              options={labLeaderOptions}
-              disabled={!editable || noticeLocked}
-            />
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="deal-subcontractor-costs-2">Subcontractor costs</Label>
-                <Input id="deal-subcontractor-costs-2"
-                  type="number"
-                  min={0}
-                  value={noticeSubcontractorCosts}
-                  onChange={(e) => setNoticeSubcontractorCosts(e.target.value)}
-                  disabled={!editable || noticeLocked}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="deal-hard-costs-2">Hard costs</Label>
-                <Input id="deal-hard-costs-2"
-                  type="number"
-                  min={0}
-                  value={noticeHardCosts}
-                  onChange={(e) => setNoticeHardCosts(e.target.value)}
-                  disabled={!editable || noticeLocked}
-                />
-              </div>
-            </div>
-
-            {/* A caption over a list of rows, not a label for one control, so
-                it names a group rather than pointing htmlFor at anything. */}
-            <div
-              className="flex flex-col gap-2"
-              role="group"
-              aria-labelledby="deal-signatures-label"
-            >
-              <Label id="deal-signatures-label">Signatures</Label>
-              {[...existingNotice.labLeaders.map((l) => l.key), OL_SIGNER_KEY].map((key) => {
-                const sig = existingNotice.signatures[key];
-                const label = key === OL_SIGNER_KEY ? "Optimistic Labs" : fullName(people[key]) || key;
-                const canSign =
-                  !sig &&
-                  (role === "Admin" || (key !== OL_SIGNER_KEY && me === key));
-                return (
-                  <div key={key} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="text-ink">{label}</span>
-                    {sig ? (
-                      <span className="text-xs text-ink-mute">
-                        Signed &ldquo;{sig.name}&rdquo; by {sig.verifiedName || sig.by}
-                      </span>
-                    ) : canSign ? (
-                      signing === key ? (
-                        <div className="flex items-center gap-2">
-                          <Input
-                            autoFocus
-                            placeholder="Type your name"
-                            value={signatureText}
-                            onChange={(e) => setSignatureText(e.target.value)}
-                            className="h-8 w-40"
-                          />
-                          <Button size="sm" onClick={() => sign(key)} disabled={!signatureText.trim()}>
-                            Sign
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => setSigning(key)}>
-                          Sign
-                        </Button>
-                      )
-                    ) : (
-                      <span className="text-xs text-ink-mute">Not signed</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="flex-wrap gap-2 sm:justify-between">
-          <div className="flex gap-2">
-            {!isNew && can.deleteDeal(role!) && (
-              <Button variant="outline" className="text-red" onClick={del} disabled={deleting}>
-                {deleting ? "Deleting…" : "Delete"}
-              </Button>
-            )}
-            {!isNew && deal!.amount > 0 && (
-              <Button variant="outline" onClick={requestInvoice}>
-                Request invoice
-              </Button>
-            )}
-          </div>
-          {editable && (
-            <Button onClick={save} disabled={saving}>
-              {saving ? "Saving…" : isNew ? "Create deal" : "Save"}
-            </Button>
-          )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function LabLeaderFeeSplitEditor({
-  rows,
-  setRows,
-  options,
-  disabled,
-}: {
-  rows: { key: string; feeSharePct: string }[];
-  setRows: (rows: { key: string; feeSharePct: string }[]) => void;
-  options: { username: string; name: string }[];
-  disabled?: boolean;
-}) {
-  const total = rows.reduce((sum, r) => sum + (Number(r.feeSharePct) || 0), 0);
-
-  return (
-    <div
-      className="flex flex-col gap-2"
-      role="group"
-      aria-labelledby="deal-fee-split-label"
-    >
-      <Label id="deal-fee-split-label">Lab Leader fee split</Label>
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <Select
-            value={row.key}
-            onValueChange={(v) =>
-              setRows(rows.map((r, idx) => (idx === i ? { ...r, key: v } : r)))
-            }
-            disabled={disabled}
-          >
-            <SelectTrigger className="flex-1" aria-label={`Lab Leader for fee-share row ${i + 1}`}>
-              <SelectValue placeholder="Lab Leader" />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((p) => (
-                <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={row.feeSharePct}
-            onChange={(e) =>
-              setRows(rows.map((r, idx) => (idx === i ? { ...r, feeSharePct: e.target.value } : r)))
-            }
-            disabled={disabled}
-            className="w-20"
-            aria-label={`Fee share percent for row ${i + 1}`}
-          />
-          <span className="text-xs text-ink-mute">%</span>
-          {!disabled && rows.length > 1 && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setRows(rows.filter((_, idx) => idx !== i))}
-            >
-              ✕
-            </Button>
-          )}
-        </div>
-      ))}
-      {!disabled && (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="self-start"
-          onClick={() => setRows([...rows, { key: "", feeSharePct: "" }])}
         >
-          + Add Lab Leader
-        </Button>
-      )}
-      <span className={cn("text-xs", Math.abs(total - 100) > 0.01 ? "text-red" : "text-ink-mute")}>
-        Total: {total}% (must equal 100%)
-      </span>
-    </div>
+          {billing.initials}
+        </span>
+        <span className="min-w-0">
+          <span className={cn("block truncate text-[13px] font-semibold", billing.ok ? "text-ink" : billing.due ? "text-red" : "text-ink-mute")}>{billing.name}</span>
+          <span className="block truncate text-xs text-ink-mute">{billing.sub}</span>
+        </span>
+      </div>
+
+      <div className="mt-[11px] mb-2.5 h-px bg-hair-soft" />
+
+      <div className="flex items-center gap-2">
+        <span className="flex min-w-0 shrink items-center gap-1.5 text-xs whitespace-nowrap text-ink-mute">
+          <Calendar size={13} aria-hidden />
+          {fmtClose(deal.close)}
+        </span>
+        <span className="flex-1" />
+        <span className="shrink-0 text-[15px] font-bold tracking-[-0.01em] text-ink tabular-nums">{fmtDollars(deal.amount)}</span>
+      </div>
+      <div className="mt-2 truncate text-[11px] text-ink-mute">{ownerName}</div>
+    </button>
   );
 }

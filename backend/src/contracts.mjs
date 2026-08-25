@@ -154,10 +154,34 @@ export async function updateContract(ctx, id, body) {
 
   // Content edits stop the moment the document is in front of a signer.
   const contentKeys = ["sections", "pricing", "clauses", "paymentSchedule",
-    "startDate", "endDate", "clientSignerName", "clientSignerTitle", "clientSignerEmail", "olSignatory"];
+    "startDate", "endDate", "clientSignerName", "clientSignerTitle", "clientSignerEmail", "olSignatory",
+    "deal"];
   const touchesContent = contentKeys.some(k => k in b);
   if (touchesContent && !EDITABLE_STATUSES.includes(c.status))
     return resp(409, { error: `This contract is ${c.status.toLowerCase()} and can no longer be edited` });
+
+  /* Links a standalone client contract to a deal after the fact (Deal View
+     migration: createStandalone lets a client contract skip dealId, and
+     those never show up on any Deal View — see
+     scripts/report-orphan-client-contracts.mjs). An MSA/task order is never
+     deal-scoped (contracts-create.mjs), so this refuses those outright
+     rather than quietly no-opping. Validated up here, before anything below
+     has a side effect (the deviation-audit write, the clause re-merge that
+     reads next.deal) — so a rejected link never leaves a half-applied trace. */
+  if ("deal" in b) {
+    if (!isAdmin) return resp(403, { error: "Linking a contract to a deal is admin-only" });
+    if (docKind(next) !== "client") return resp(400, { error: "Only a client contract can be linked to a deal" });
+    if (b.deal) {
+      const d = await get("DEAL", b.deal);
+      if (!d) return resp(400, { error: "unknown deal" });
+      const already = (await listType("CONTRACT"))
+        .find(x => x.sk !== id && x.deal === d.sk && docKind(x) === "client");
+      if (already) return resp(409, { error: `${d.sk} already has a client contract (${already.sk})` });
+      next.deal = d.sk;
+    } else {
+      delete next.deal;
+    }
+  }
 
   /* --- inherited fields: editable, but the deviation has to be declared --- */
   if ("sections" in b) {

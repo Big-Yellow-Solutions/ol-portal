@@ -24,4 +24,7 @@ export const can = {
     (role === "Lab Leader" &&
       (myLabs.includes(proposal.lab) || proposal.owner === myKey)),
   approveProposal: (role: Role) => role === "Admin",
+  // Companies/Contacts aren't lab-scoped — see backend/src/identity.mjs's
+  // manageContacts, which this mirrors exactly.
+  manageContacts: (role: Role) => role === "Admin" || role === "Lab Leader",
 };

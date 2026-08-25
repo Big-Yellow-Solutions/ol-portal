@@ -12,6 +12,8 @@ import { api, actingAsTarget, clearActingAs } from "@/lib/api";
 import type {
   ActingAs,
   Bootstrap,
+  Company,
+  Contact,
   Contract,
   Deal,
   FileRecord,
@@ -48,12 +50,16 @@ interface PortalDataValue {
   contracts: Contract[];
   recurrences: Recurrence[];
   guides: Guide[];
+  companies: Company[];
+  contacts: Contact[];
   setDeals: React.Dispatch<React.SetStateAction<Deal[]>>;
   setProposals: React.Dispatch<React.SetStateAction<Proposal[]>>;
   setInvoices: React.Dispatch<React.SetStateAction<InvoiceRequest[]>>;
   setFiles: React.Dispatch<React.SetStateAction<FileRecord[]>>;
   setContracts: React.Dispatch<React.SetStateAction<Contract[]>>;
   setRecurrences: React.Dispatch<React.SetStateAction<Recurrence[]>>;
+  setCompanies: React.Dispatch<React.SetStateAction<Company[]>>;
+  setContacts: React.Dispatch<React.SetStateAction<Contact[]>>;
   refresh: () => Promise<void>;
   refreshFiles: () => Promise<void>;
   refreshProposals: () => Promise<void>;
@@ -83,9 +89,14 @@ export function PortalDataProvider({
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [guides, setGuides] = useState<Guide[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
 
   const fetchAll = useCallback(async (): Promise<void> => {
-    const [bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes, recurrencesRes, guidesRes] =
+    const [
+      bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes,
+      recurrencesRes, guidesRes, companiesRes, contactsRes,
+    ] =
       await Promise.all([
         api<Bootstrap>("/bootstrap"),
         api<Deal[]>("/deals"),
@@ -95,6 +106,16 @@ export function PortalDataProvider({
         api<Contract[]>("/contracts"),
         api<Recurrence[]>("/recurrences"),
         api<Guide[]>("/guides"),
+        // Pipeline v2's billing-entity endpoints. Every other request here is
+        // load-bearing — one rejection fails the whole Promise.all and every
+        // page renders the error state — but these two are new, so a frontend
+        // build can reach a Lambda that predates them (a static export ships
+        // on push; the backend deploys separately). An empty list degrades
+        // Pipeline's billing panel to "add a new company" and leaves the rest
+        // of the portal working, which is the right failure for a partial
+        // deploy or an independent backend rollback.
+        api<Company[]>("/companies").catch(() => [] as Company[]),
+        api<Contact[]>("/contacts").catch(() => [] as Contact[]),
       ]);
     setLabs(Object.entries(bootstrap.labs).map(([id, lab]) => ({ id, name: lab.name })));
     setPeople(bootstrap.people);
@@ -108,6 +129,8 @@ export function PortalDataProvider({
     setContracts(contractsRes);
     setRecurrences(recurrencesRes);
     setGuides(guidesRes);
+    setCompanies(companiesRes);
+    setContacts(contactsRes);
   }, []);
 
   const load = useCallback(async (): Promise<void> => {
@@ -185,12 +208,16 @@ export function PortalDataProvider({
       contracts,
       recurrences,
       guides,
+      companies,
+      contacts,
       setDeals,
       setProposals,
       setInvoices,
       setFiles,
       setContracts,
       setRecurrences,
+      setCompanies,
+      setContacts,
       refresh,
       refreshFiles,
       refreshProposals,
@@ -213,6 +240,8 @@ export function PortalDataProvider({
       contracts,
       recurrences,
       guides,
+      companies,
+      contacts,
       refresh,
       refreshFiles,
       refreshProposals,

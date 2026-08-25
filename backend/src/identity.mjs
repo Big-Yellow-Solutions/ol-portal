@@ -39,7 +39,11 @@ export const perms = (role, myLabs, myKey) => ({
   changeLab: () => role === "Admin",
   reviewInvoices: () => role === "Admin",
   editProposal: p => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(p.lab) || p.owner === myKey)),
-  approveProposal: () => role === "Admin"
+  approveProposal: () => role === "Admin",
+  // Companies/Contacts (Pipeline v2 billing entities) aren't lab-scoped — any
+  // deal, in any lab, can bill to any of them — so this is a flat role check
+  // rather than a per-record one, same shape as addDeal.
+  manageContacts: () => role === "Admin" || role === "Lab Leader"
 });
 
 /* Admin "act as" (god-mode view/edit as another user): the caller's own JWT

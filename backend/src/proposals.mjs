@@ -265,7 +265,11 @@ export async function sendProposal(ctx, id, body) {
     }
   }
 
-  return resp(200, { id, sentVersion, draftAhead, resend, url, clientEmail, subject, text, emailSent, emailError });
+  const { pk, sk, ...rest } = next;
+  return resp(200, {
+    ...rest, id: sk,
+    sentVersion, draftAhead, resend, url, clientEmail, subject, text, emailSent, emailError
+  });
 }
 
 /* ---------- public customer routes (Authorizer NONE) ----------

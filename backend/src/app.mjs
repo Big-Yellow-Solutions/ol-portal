@@ -13,6 +13,7 @@ import * as docusign from "./docusign.mjs";
 import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
 import * as admin from "./admin.mjs";
 import * as proposals from "./proposals.mjs";
+import * as contacts from "./contacts.mjs";
 import * as contracts from "./contracts.mjs";
 import * as contractsCreate from "./contracts-create.mjs";
 import * as recurring from "./recurring.mjs";
@@ -35,8 +36,15 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 });
 
 const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
-const SOURCES = ["Referral", "Inbound", "Outbound"];
+// "Network" and "Event" added for Pipeline v2 (design handoff) — additive, so
+// deals sourced before this change keep reading the same three values.
+const SOURCES = ["Referral", "Inbound", "Network", "Event", "Outbound"];
 const INVOICE_STATUSES = ["Admin review", "Sent to client", "Paid", "Overdue"];
+// Pipeline v2: a deal needs a billing entity (company and/or contact) once it
+// reaches this stage. Only enforced on the transition itself — see
+// billingGateError below — so it never retroactively blocks a deal that
+// reached this stage before companies/contacts existed.
+const BILLING_GATE_STAGE = "Proposal Sent";
 
 const resp = (status, body) => ({
   statusCode: status,
@@ -146,6 +154,16 @@ async function createDeal(ctx, body) {
   if (!(await get("PERSON", ownerKey))) return resp(400, { error: "unknown owner" });
   const dealOwnerKey = dealOwner || ownerKey;
   if (!(await isValidDealOwner(dealOwnerKey))) return resp(400, { error: "unknown deal owner" });
+  // Pipeline v2 billing entity: optional at any stage, but a deal can't be
+  // *created* at or past the gate stage without one — a proposal/contract
+  // can't exist yet either (the deal itself doesn't exist until this call
+  // returns), so those two gates only apply on later transitions (updateDeal).
+  const companyId = body.companyId || null;
+  const contactId = body.contactId || null;
+  if (companyId && !(await get("COMPANY", companyId))) return resp(400, { error: "unknown company" });
+  if (contactId && !(await get("CONTACT", contactId))) return resp(400, { error: "unknown contact" });
+  if (STAGES.indexOf(stage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !companyId && !contactId)
+    return resp(400, { error: `A deal at ${stage} needs a billing entity — link a company or a contact` });
   let assignmentNotice = null;
   if (stage === "Closed") {
     assignmentNotice = sanitizeAssignmentNotice(body.assignmentNotice, {});
@@ -154,9 +172,11 @@ async function createDeal(ctx, body) {
   }
 
   const id = await nextId("DEAL", "D-");
+  const stamp = today();
   const deal = {
     pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
-    stage, amount, close, source, recurring: !!recurring,
+    stage, amount, close, source, recurring: !!recurring, companyId, contactId,
+    created: stamp, updated: stamp,
     ...(stage === "Closed" && ["Won", "Lost"].includes(body.outcome) ? { outcome: body.outcome } : {}),
     ...(stage === "Closed" ? { assignmentNotice } : {})
   };
@@ -171,7 +191,8 @@ async function updateDeal(ctx, id, body) {
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   const patch = {};
   const editable = ["client", "owner", "dealOwner", "stage", "amount", "close", "source", "recurring",
-    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd", "assignmentNotice"];
+    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd", "assignmentNotice",
+    "companyId", "contactId"];
   for (const k of editable) if (body && k in body) patch[k] = body[k];
   if ("recurPaused" in patch) patch.recurPaused = !!patch.recurPaused;
   if ("autoInvoice" in patch) patch.autoInvoice = !!patch.autoInvoice;
@@ -186,6 +207,10 @@ async function updateDeal(ctx, id, body) {
   if ("outcome" in patch && !["Won", "Lost"].includes(patch.outcome)) return resp(400, { error: "invalid outcome" });
   if ("owner" in patch && !(await get("PERSON", patch.owner))) return resp(400, { error: "unknown owner" });
   if ("dealOwner" in patch && !(await isValidDealOwner(patch.dealOwner))) return resp(400, { error: "unknown deal owner" });
+  if ("companyId" in patch && patch.companyId && !(await get("COMPANY", patch.companyId)))
+    return resp(400, { error: "unknown company" });
+  if ("contactId" in patch && patch.contactId && !(await get("CONTACT", patch.contactId)))
+    return resp(400, { error: "unknown contact" });
 
   let mergedNotice = deal.assignmentNotice;
   if ("assignmentNotice" in patch) {
@@ -199,10 +224,36 @@ async function updateDeal(ctx, id, body) {
     if (!noticeValid) return resp(400, { error: "invalid assignment notice" });
     patch.assignmentNotice = mergedNotice;
   }
-  if (patch.stage === "Closed" && deal.stage !== "Closed" && !noticeValid)
+  const closingNow = patch.stage === "Closed" && deal.stage !== "Closed";
+  if (closingNow && !noticeValid)
     return resp(400, { error: "Assignment Notice is required when closing a deal" });
+  // Pipeline v2: a signed client contract on file, in addition to the
+  // Assignment Notice above — rollUpDeal (execution.mjs) already closes a deal
+  // automatically once both exist, so the only way to hit this is closing one
+  // by hand ahead of that. `contractSigned` isn't in `editable`, so it always
+  // reflects what rollUpDeal itself set, never a client-supplied value.
+  if (closingNow && !deal.contractSigned)
+    return resp(400, { error: "A signed contract is required to close a deal" });
 
-  const next = { ...deal, ...patch };
+  // Billing-entity and sent-proposal gates only fire on the transition that
+  // actually crosses the gate (or when the billing link itself is being
+  // touched) — never a blanket re-check on every save — so a deal that
+  // reached a gated stage before this existed can still be edited freely
+  // until someone changes its stage or its billing entity.
+  if ("stage" in patch || "companyId" in patch || "contactId" in patch) {
+    const nextStage = patch.stage ?? deal.stage;
+    const nextCompany = "companyId" in patch ? patch.companyId : deal.companyId;
+    const nextContact = "contactId" in patch ? patch.contactId : deal.contactId;
+    if (STAGES.indexOf(nextStage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !nextCompany && !nextContact)
+      return resp(400, { error: `A deal at ${nextStage} needs a billing entity — link a company or a contact` });
+  }
+  if ("stage" in patch && STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
+      STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
+    const sent = (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
+    if (!sent) return resp(400, { error: `${patch.stage} needs a proposal that's been sent to the client` });
+  }
+
+  const next = { ...deal, ...patch, updated: today() };
   if (next.stage !== "Closed") delete next.outcome;
   await put(next);
   const { pk, sk, ...rest } = next;
@@ -380,13 +431,41 @@ async function qboCallback(event) {
   }
 }
 
+/* First-party event log for the Deal View (tab switches, key actions) — see
+   web/lib/analytics.ts. Deliberately its own pk, not admin.mjs's AUDIT
+   record: that table backs the /admin security audit trail (invites,
+   2FA resets, act-as), and routine navigation events would drown it out
+   within hours of real usage. A shorter TTL reflects that this is
+   low-value telemetry, not a compliance record. */
+const EVENT_TTL_DAYS = 30;
+
+async function createEvent(ctx, body) {
+  const name = typeof body?.name === "string" ? body.name.slice(0, 100) : "";
+  if (!name) return resp(400, { error: "name is required" });
+  const props = body?.props && typeof body.props === "object" ? body.props : {};
+  const now = new Date();
+  await put({
+    pk: "EVENT", sk: now.toISOString() + "#" + Math.random().toString(36).slice(2, 6),
+    actor: ctx.me.sk, name, detail: JSON.stringify(props).slice(0, 500),
+    ttl: Math.floor(now.getTime() / 1000) + EVENT_TTL_DAYS * 86400
+  });
+  return resp(202, { recorded: true });
+}
+
 /* ---------- router ---------- */
 async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/bootstrap") return await bootstrap(ctx);
   if (method === "GET" && path === "/guides") return await guides.listGuides(ctx);
   if (method === "POST" && path === "/help/assist") return await guides.helpAssist(ctx, body);
   if (method === "GET" && path === "/deals") return await listScoped(ctx, "DEAL", ctx.can.leadsDeal);
+  if (method === "POST" && path === "/events") return await createEvent(ctx, body);
   if (method === "GET" && path === "/proposals") return await proposals.listProposals(ctx);
+  if (method === "GET" && path === "/companies") return await contacts.listCompanies(ctx);
+  if (method === "POST" && path === "/companies") return await contacts.createCompany(ctx, body);
+  if (method === "PATCH" && seg[0] === "companies" && seg[1]) return await contacts.updateCompany(ctx, seg[1], body);
+  if (method === "GET" && path === "/contacts") return await contacts.listContacts(ctx);
+  if (method === "POST" && path === "/contacts") return await contacts.createContact(ctx, body);
+  if (method === "PATCH" && seg[0] === "contacts" && seg[1]) return await contacts.updateContact(ctx, seg[1], body);
   if (method === "GET" && path === "/invoices")
     return await listScoped(ctx, "INVOICE", i => ctx.role === "Lab Leader" && i.requestedBy === ctx.me.sk);
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);

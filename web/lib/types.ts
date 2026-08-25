@@ -5,7 +5,8 @@ export type Role = "Admin" | "Lab Leader" | "Contributor";
 // two stages.
 export type Stage = "Lead" | "Discovery" | "Proposal Sent" | "Negotiating" | "Closed";
 export type Outcome = "Won" | "Lost";
-export type Source = "Referral" | "Inbound" | "Outbound";
+// "Network" and "Event" added for Pipeline v2 (backend/src/app.mjs's SOURCES).
+export type Source = "Referral" | "Inbound" | "Network" | "Event" | "Outbound";
 
 // Mirrors backend/src/proposals.mjs's PROPOSAL_STATUSES exactly — Lab Leaders
 // are restricted server-side to a subset (Draft/In Review/Sent) but the type
@@ -216,6 +217,33 @@ export interface AssignmentNotice {
   signatures: Record<string, AssignmentNoticeSignature>;
 }
 
+// Pipeline v2 (design handoff): the deal's billing entity. Deliberately named
+// `Company`/`Contact` rather than reusing `Person` — that name is already
+// OL's own staff directory (bootstrap's `people`), and these are external
+// contacts a deal bills to. Field names match backend/src/contacts.mjs.
+export interface Company {
+  id: string;
+  name: string;
+  kind?: string;
+  phone?: string;
+  email?: string;
+  /** A Contact this company's primary contact — one company, one primary. */
+  contactId?: string | null;
+  created?: string;
+  updated?: string;
+}
+
+export interface Contact {
+  id: string;
+  name: string;
+  title?: string;
+  companyId?: string | null;
+  phone?: string;
+  email?: string;
+  created?: string;
+  updated?: string;
+}
+
 // Field names match backend/src/app.mjs's raw DEAL record shape.
 export interface Deal {
   id: string;
@@ -233,6 +261,11 @@ export interface Deal {
   recurPaused?: boolean;
   autoInvoice?: boolean;
   recurEnd?: string;
+  /** Pipeline v2 billing entity — a deal can carry a company, a contact, both
+   *  (contact as the named person at that company), or neither below the gate
+   *  stage. `null`/absent both mean "unlinked". */
+  companyId?: string | null;
+  contactId?: string | null;
   /* Set when a contract is fully executed (FR18). The pipeline still refuses
      to close a deal without an Assignment Notice, so a signed contract without
      one lands here as `readyToClose` rather than silently closing. */
@@ -240,6 +273,10 @@ export interface Deal {
   contractSigned?: boolean;
   contractSignedAt?: string;
   readyToClose?: boolean;
+  /** Added for the Deal View's Overview tab. Absent on deals created before
+   *  this field existed — those show "—" rather than a fabricated date. */
+  created?: string;
+  updated?: string;
 }
 
 // Field names match backend/src/proposals.mjs's raw record shape (`lab`,
@@ -643,4 +680,4 @@ export const STAGES: Stage[] = [
   "Closed",
 ];
 
-export const SOURCES: Source[] = ["Referral", "Inbound", "Outbound"];
+export const SOURCES: Source[] = ["Referral", "Inbound", "Network", "Event", "Outbound"];
