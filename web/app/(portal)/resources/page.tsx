@@ -16,8 +16,14 @@
    Authoring still runs through the existing ResourceEditor / CourseEditor
    dialogs. The artboard draws three further screens for it (new / builder /
    publish); those dialogs already implement what those screens sketch — file
-   upload, embed parsing, markdown bodies, drag-reorder steps — so they are
-   reached from the design's admin affordances rather than rebuilt. */
+   upload, embed parsing, drag-reorder steps — so they are reached from the
+   design's admin affordances rather than rebuilt.
+
+   Intake is uploads only. The "Write a post" option that used to sit beside
+   them opened a markdown composer for a document written in the portal; that
+   flow is withdrawn, so what reaches the library is a file from someone's
+   device (or a video). Posts published before the change are untouched — they
+   still list, filter, open, and delete. */
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -31,12 +37,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { ResourceEditor } from "@/components/resource-editor";
 import { CourseEditor } from "@/components/course-editor";
@@ -65,12 +65,15 @@ import { RESOURCE_TYPE_LABELS } from "@/lib/types";
 import type {
   Course,
   CourseDetail,
+  CreatableResourceType,
   ProgressMap,
   ResourceItem,
   ResourceType,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
+/* Filters over what the library HOLDS, not what it accepts. "post" stays so
+   documents published before intake became upload-only are still findable. */
 const TYPE_KEYS: (ResourceType | "all")[] = ["all", "file", "post", "video"];
 
 export default function ResourcesPage() {
@@ -102,7 +105,7 @@ function Resources() {
   const [query, setQuery] = useState("");
 
   const [editingResource, setEditingResource] = useState<ResourceItem | null>(null);
-  const [creatingResource, setCreatingResource] = useState<ResourceType | null>(null);
+  const [creatingResource, setCreatingResource] = useState<CreatableResourceType | null>(null);
   const [editingCourse, setEditingCourse] = useState<Course | null>(null);
   const [creatingCourse, setCreatingCourse] = useState(false);
   const [pendingDelete, setPendingDelete] =
@@ -203,24 +206,12 @@ function Resources() {
   if (loading) return <p className="text-sm text-ink-mute">Loading Resources…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;
 
+  /* Two intake options left, so they sit out in the open rather than behind a
+     menu — upload first, and named for what it does. */
   const authorCtas = isAdmin && (
     <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <PillButton>New resource</PillButton>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setCreatingResource("file")}>
-            Upload a file
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setCreatingResource("post")}>
-            Write a post
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setCreatingResource("video")}>
-            Add a video
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <PillButton onClick={() => setCreatingResource("file")}>Upload a file</PillButton>
+      <PillButton onClick={() => setCreatingResource("video")}>Add a video</PillButton>
       <PillButton tone="solid" onClick={() => setCreatingCourse(true)}>
         New course
       </PillButton>
@@ -535,7 +526,7 @@ function Resources() {
             <EmptyState onClear={() => { setType("all"); setTag(""); setQuery(""); }}>
               {resources.length === 0
                 ? isAdmin
-                  ? "Nothing published yet. Add the first resource."
+                  ? "Nothing in the library yet. Upload the first file."
                   : "Nothing has been shared with you yet."
                 : "Nothing matches these filters yet."}
             </EmptyState>

@@ -525,6 +525,12 @@ export interface DocuSignStatus {
    at), separate from `lab` (which additionally restricts to one lab) and from
    `visibility` (whether the item is listed in the library at all). */
 export type ResourceType = "file" | "post" | "video";
+/* What a resource can still be created as. "post" — markdown composed in the
+   portal — is authoring that no longer exists, so it is absent here while
+   staying in ResourceType: stored posts are real records that must keep
+   listing, rendering, and deleting. Mirrors CREATABLE_RESOURCE_TYPES in
+   backend/src/resources.mjs. */
+export type CreatableResourceType = Exclude<ResourceType, "post">;
 export type ResourcePermission = "lab_leaders" | "contributors" | "both";
 export type ResourceVisibility = "library" | "course-only";
 export type PublishStatus = "Draft" | "Published";

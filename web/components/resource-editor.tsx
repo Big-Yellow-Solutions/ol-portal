@@ -1,8 +1,15 @@
 "use client";
 
-/* Admin authoring for a single Resource Item (PRD 4.1). One dialog covers all
-   three types because they share every field that matters — audience, lab,
+/* Admin authoring for a single Resource Item (PRD 4.1). One dialog covers
+   every type because they share every field that matters — audience, lab,
    tags, visibility — and differ only in their payload.
+
+   The library takes uploads, not documents written here: a resource arrives as
+   a file from someone's device, or as a video (uploaded or linked). The post
+   composer that used to live in this dialog is gone, and with it the only way
+   to author a document body in the portal. Posts saved before that still open
+   here so their metadata stays editable, but their body is read-only — the
+   backend ignores an incoming `body` too (backend/src/resources.mjs).
 
    Uploads are two steps by design: the API mints the record and hands back a
    presigned PUT, and the browser sends the bytes straight to S3. That keeps
@@ -31,16 +38,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { readPhoto } from "@/lib/photo";
-import { Markdown } from "@/lib/markdown";
 import { usePortalData } from "@/lib/portal-data";
 import { PERMISSION_LABELS } from "@/lib/types";
 import type {
+  CreatableResourceType,
   ResourceItem,
   ResourcePermission,
-  ResourceType,
   ResourceVisibility,
   VideoSource,
 } from "@/lib/types";
@@ -52,7 +57,8 @@ const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime";
 interface ResourceEditorProps {
   /** Editing an existing item, or null when creating one of `createType`. */
   resource: ResourceItem | null;
-  createType?: ResourceType;
+  /** Only an upload-backed type can be created; posts are read-only legacy. */
+  createType?: CreatableResourceType;
   open: boolean;
   onClose: () => void;
   onSaved: (r: ResourceItem) => void;
@@ -76,7 +82,6 @@ export function ResourceEditor({
   const [permission, setPermission] = useState<ResourcePermission>(resource?.permission ?? "both");
   const [visibility, setVisibility] = useState<ResourceVisibility>(resource?.visibility ?? "library");
   const [thumbnail, setThumbnail] = useState(resource?.thumbnail ?? "");
-  const [body, setBody] = useState(resource?.body ?? "");
   const [source, setSource] = useState<VideoSource>(resource?.source ?? "embed");
   const [embedUrl, setEmbedUrl] = useState(
     resource?.provider === "youtube"
@@ -131,7 +136,6 @@ export function ResourceEditor({
         ...(isNew ? { type } : {}),
         ...(publish === undefined ? {} : { status: publish ? "Published" : "Draft" }),
       };
-      if (type === "post") payload.body = body;
       if (type === "video") {
         payload.source = source;
         payload.transcript = transcript;
@@ -165,13 +169,23 @@ export function ResourceEditor({
     }
   };
 
+  /* Belt and braces for the withdrawn flow: `createType` is typed to exclude
+     it, the menu that used to offer it is gone, and the API refuses it — but
+     an untyped or stale caller asking for a brand-new post gets nothing rather
+     than an empty composer. Placed after every hook so the hook order is
+     unconditional. */
+  if (isNew && type === "post") return null;
+
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>
-            {isNew ? "New" : "Edit"}{" "}
-            {type === "file" ? "file resource" : type === "post" ? "post" : "video"}
+            {isNew
+              ? type === "file"
+                ? "Upload a file"
+                : "Add a video"
+              : `Edit ${type === "file" ? "file" : type === "post" ? "post" : "video"}`}
           </DialogTitle>
           <DialogDescription>
             {visibility === "course-only"
@@ -194,33 +208,12 @@ export function ResourceEditor({
           </Field>
 
           {type === "post" && (
-            <Field label="Body">
-              <Tabs defaultValue="write">
-                <TabsList>
-                  <TabsTrigger value="write">Write</TabsTrigger>
-                  <TabsTrigger value="preview">Preview</TabsTrigger>
-                </TabsList>
-                <TabsContent value="write">
-                  <Textarea
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                    rows={14}
-                    className="font-mono text-xs"
-                    placeholder={"## How to use this checklist\n\nWalk the client through each section…\n\n@[resource](RS-003)"}
-                  />
-                  <p className="mt-1 text-xs text-ink-mute">
-                    Markdown: <code>## heading</code>, <code>**bold**</code>, <code>- list</code>,{" "}
-                    <code>[link](https://…)</code>, <code>![image](https://…)</code>. Put{" "}
-                    <code>@[resource](RS-003)</code> on its own line to embed another resource inline.
-                  </p>
-                </TabsContent>
-                <TabsContent value="preview">
-                  <div className="rounded-lg border border-hair p-4">
-                    <Markdown text={body} />
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </Field>
+            <p className="rounded-lg border border-hair bg-paper p-3 text-xs text-ink-mute">
+              This post was written before the library became upload-only. Its
+              text is read-only and stays exactly as published — you can still
+              change everything else here, or delete it. To publish something
+              new, upload a file.
+            </p>
           )}
 
           {type === "video" && (
