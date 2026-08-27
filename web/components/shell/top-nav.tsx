@@ -21,12 +21,11 @@ import type { Role } from "@/lib/types";
    paper background, with the brand lockup on the left, pill links in the
    middle, and presence + identity on the right.
 
-   The top row is three destinations: Community, Pipeline, Resources. Every
-   other destination moved behind "More" rather than being dropped — a short
-   nav is the point, an unreachable page is not. Admin, Files and Contracts in
-   particular have no other entrance, so deleting their links would strand
-   them. Home keeps a "More" entry as well as the logo, which has always been
-   a link to it. */
+   The nav is three destinations: Community, Pipeline, Resources. There is no
+   "More" — every other page is reached by its URL, by the logo (Home), or by
+   the in-app links that already point at it, not from here. Deliberate: the
+   routes all still exist and still enforce their own roles, so this is a
+   change to what the nav advertises, not to what anyone may open. */
 
 interface NavItem {
   href: string;
@@ -39,33 +38,6 @@ const PRIMARY: NavItem[] = [
   { href: "/community", label: "Community" },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/resources", label: "Resources" },
-];
-
-// Everything else. Roles are unchanged from when these sat on the top row or
-// in the old sidebar — this is a move, not a change of who may go where.
-// Courses is absent deliberately: the Resources artboard merged it into
-// /resources.
-const OVERFLOW: NavItem[] = [
-  { href: "/", label: "Home" },
-  // Admin/Lab Leader now manage a proposal from inside the Deal View
-  // (Pipeline → a deal → Proposal tab). A Contributor has no Pipeline
-  // visibility at all (PRD 3.3), so this stays their only way to reach a
-  // proposal they've been named on — unchanged for them.
-  { href: "/proposals", label: "Proposals", roles: ["Contributor"] },
-  { href: "/bench", label: "Directory" },
-  { href: "/optimist", label: "The Optimist", roles: ["Admin", "Lab Leader"] },
-  // Contracts stays for everyone: Contributor MSAs/Task Orders aren't deal-
-  // scoped (a Contributor agreement isn't tied to one client deal), so they
-  // can't move into the Deal View and this page is still how they're managed.
-  { href: "/contracts", label: "Contracts" },
-  // A Lab Leader's only action here (requesting an invoice) now lives in the
-  // Deal View's Invoice tab. Kept for Admin, whose admin-review queue and
-  // QuickBooks reconciliation are cross-deal by nature.
-  { href: "/invoices", label: "Invoice Requests", roles: ["Admin"] },
-  { href: "/files", label: "Files" },
-  { href: "/deal-flow", label: "Deal Flow", roles: ["Admin"] },
-  { href: "/templates", label: "Templates", roles: ["Admin"] },
-  { href: "/admin", label: "Admin", roles: ["Admin"] },
 ];
 
 function visible(items: NavItem[], role: Role | null) {
@@ -138,25 +110,6 @@ function BellIcon() {
   );
 }
 
-function ChevronDown() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="transition-transform duration-200 group-aria-expanded/more:rotate-180 motion-reduce:transition-none"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
-  );
-}
-
 const PILL =
   "flex-none rounded-full px-[15px] py-[9px] text-sm whitespace-nowrap transition-colors";
 
@@ -185,8 +138,6 @@ export function TopNav() {
   const meRecord = me ? people[me] : undefined;
 
   const primary = visible(PRIMARY, role);
-  const overflow = visible(OVERFLOW, role);
-  const overflowActive = overflow.some((item) => isActivePath(pathname, item.href));
 
   return (
     <header className="sticky top-0 z-40 border-b border-hair bg-paper/92 backdrop-blur-[8px]">
@@ -220,41 +171,6 @@ export function TopNav() {
               active={isActivePath(pathname, item.href)}
             />
           ))}
-
-          {overflow.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                className={cn(
-                  PILL,
-                  "group/more flex items-center gap-1.5 outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
-                  overflowActive
-                    ? "bg-violet-pale font-semibold text-violet-deep"
-                    : "font-medium text-ink-soft hover:bg-wash hover:text-violet-deep"
-                )}
-              >
-                More
-                <ChevronDown />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="min-w-52">
-                {overflow.map((item) => (
-                  <DropdownMenuItem key={item.href} asChild>
-                    <Link
-                      href={item.href}
-                      aria-current={
-                        isActivePath(pathname, item.href) ? "page" : undefined
-                      }
-                      className={cn(
-                        isActivePath(pathname, item.href) &&
-                          "bg-violet-pale font-semibold text-violet-deep"
-                      )}
-                    >
-                      {item.label}
-                    </Link>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
         </nav>
 
         <div className="flex flex-none items-center gap-[18px]">
