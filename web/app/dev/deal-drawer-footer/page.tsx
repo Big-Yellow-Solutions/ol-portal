@@ -18,10 +18,9 @@ import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
 const HINTS = [
   "Ready to save",
   "A deal name is required",
-  "Link a company or a person to save at Proposal Sent",
+  "Link a company or a person to save this deal at Proposal Sent",
   "Unlinked — fine at Lead, required at Proposal Sent",
-  "Attach a proposal before saving at Proposal Sent",
-  "Mark the proposal final and send it before saving at this stage",
+  "Upload a proposal before saving this deal at Proposal Sent",
   "A signed contract is required to close this deal",
   "Set the date this deal closed",
   "Blocked-by-an-unbreakable-identifier-0000000000000000000000",

@@ -50,7 +50,7 @@ export default function PipelinePage() {
 }
 
 function PipelineBoard() {
-  const { loading, error, deals, labs, people, companies, contacts, proposals, contracts, invoices, role, me, myLabs, setDeals } =
+  const { loading, error, deals, labs, people, companies, contacts, proposals, contracts, invoices, files, role, me, myLabs, setDeals } =
     usePortalData();
   const router = useRouter();
   const pathname = usePathname();
@@ -113,6 +113,14 @@ function PipelineBoard() {
     return map;
   }, [proposals]);
 
+  /* Which deals have a proposal document uploaded onto them — the drop gate
+     below reads this rather than a proposal record, because proposals are
+     written outside the portal now and uploaded on the deal's Documents tab. */
+  const dealsWithProposalFile = useMemo(
+    () => new Set(files.filter((f) => f.kind === "proposal" && f.deal).map((f) => f.deal!)),
+    [files]
+  );
+
   const leaders = useMemo(
     () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
@@ -159,9 +167,12 @@ function PipelineBoard() {
       return;
     }
     if (proposalRequiredAt(targetStage)) {
-      const proposal = latestProposalFor.get(deal.id);
-      if (!proposal?.sentAt) {
-        toast.info(proposal ? `${targetStage} needs the proposal marked final and sent` : `${targetStage} needs a sent proposal — start one first`);
+      /* A proposal sent from the portal before uploads replaced that flow
+         still clears the gate, mirroring backend/src/app.mjs. */
+      const cleared =
+        dealsWithProposalFile.has(deal.id) || !!latestProposalFor.get(deal.id)?.sentAt;
+      if (!cleared) {
+        toast.info(`${targetStage} needs a proposal — upload one on this deal`);
         openDeal(deal, targetStage, "documents");
         return;
       }

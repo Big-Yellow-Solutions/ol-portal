@@ -31,6 +31,11 @@ const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
 const s3 = new S3Client({});
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
+/* Which slot on a deal an uploaded document fills. Proposals and invoices are
+   produced outside the portal now and uploaded here, so the FILE record needs
+   to say which of the deal drawer's two upload boxes it belongs in — an
+   untagged file is still just a file on the Files page. */
+const FILE_KINDS = ["proposal", "invoice"];
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -249,8 +254,14 @@ async function updateDeal(ctx, id, body) {
   }
   if ("stage" in patch && STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
       STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
-    const sent = (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
-    if (!sent) return resp(400, { error: `${patch.stage} needs a proposal that's been sent to the client` });
+    // Proposals are written outside the portal and uploaded onto the deal, so
+    // an uploaded proposal file is what clears this gate. The older check —
+    // a PROPOSAL record that was marked final and sent from here — still
+    // passes, so deals that crossed the gate under the previous workflow can
+    // keep moving without re-uploading a document nobody kept.
+    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "proposal");
+    const sent = uploaded || (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
+    if (!sent) return resp(400, { error: `${patch.stage} needs a proposal uploaded to the deal` });
   }
 
   const next = { ...deal, ...patch, updated: today() };
@@ -344,19 +355,20 @@ async function listFiles(ctx) {
 }
 
 async function createFile(ctx, body) {
-  const { name, size, type, lab, deal } = body || {};
+  const { name, size, type, lab, deal, kind } = body || {};
   if (typeof name !== "string" || !name.trim()) return resp(400, { error: "name is required" });
   if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES)
     return resp(400, { error: "size must be 1 byte to 50 MB" });
   if (typeof type !== "string" || !type) return resp(400, { error: "type is required" });
   if (lab && !(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
   if (lab && !ctx.can.seesLab(lab)) return resp(403, { error: "lab not visible to you" });
+  if (kind && !FILE_KINDS.includes(kind)) return resp(400, { error: "invalid kind" });
 
   const id = await nextId("FILE", "F-");
   const key = `uploads/${id}/${name.trim().replace(/[^\w.\- ]/g, "_")}`;
   const record = {
     pk: "FILE", sk: id, name: name.trim(), key, size, type,
-    ...(lab ? { lab } : {}), ...(deal ? { deal } : {}),
+    ...(lab ? { lab } : {}), ...(deal ? { deal } : {}), ...(kind ? { kind } : {}),
     uploader: ctx.me.sk, date: new Date().toISOString(), status: "Uploading"
   };
   await put(record);
@@ -370,9 +382,13 @@ async function downloadFile(ctx, id) {
   const f = await get("FILE", id);
   if (!f) return resp(404, { error: "file not found" });
   if (!canSeeFile(ctx, f)) return resp(403, { error: "Not allowed to access this file" });
+  // `?disposition=inline` backs the deal drawer's View action: the same
+  // presigned URL, but opened in a tab rather than pushed to the downloads
+  // folder. Anything the browser can't render inline still downloads.
+  const disposition = ctx.query?.disposition === "inline" ? "inline" : "attachment";
   const url = await getSignedUrl(s3, new GetObjectCommand({
     Bucket: FILES_BUCKET, Key: f.key,
-    ResponseContentDisposition: `attachment; filename="${f.name.replace(/"/g, "")}"`
+    ResponseContentDisposition: `${disposition}; filename="${f.name.replace(/"/g, "")}"`
   }), { expiresIn: 300 });
   return resp(200, { url });
 }
