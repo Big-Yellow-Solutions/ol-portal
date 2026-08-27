@@ -21,10 +21,12 @@ import type { Role } from "@/lib/types";
    paper background, with the brand lockup on the left, pill links in the
    middle, and presence + identity on the right.
 
-   The design draws exactly seven primary destinations. The Portal has more
-   than seven, so everything the design does not name lives behind "More"
-   rather than being dropped — the drawn nav stays exactly as designed and no
-   destination becomes unreachable. */
+   The top row is three destinations: Community, Pipeline, Resources. Every
+   other destination moved behind "More" rather than being dropped — a short
+   nav is the point, an unreachable page is not. Admin, Files and Contracts in
+   particular have no other entrance, so deleting their links would strand
+   them. Home keeps a "More" entry as well as the logo, which has always been
+   a link to it. */
 
 interface NavItem {
   href: string;
@@ -34,23 +36,24 @@ interface NavItem {
 }
 
 const PRIMARY: NavItem[] = [
-  { href: "/", label: "Home" },
+  { href: "/community", label: "Community" },
   { href: "/pipeline", label: "Pipeline" },
+  { href: "/resources", label: "Resources" },
+];
+
+// Everything else. Roles are unchanged from when these sat on the top row or
+// in the old sidebar — this is a move, not a change of who may go where.
+// Courses is absent deliberately: the Resources artboard merged it into
+// /resources.
+const OVERFLOW: NavItem[] = [
+  { href: "/", label: "Home" },
   // Admin/Lab Leader now manage a proposal from inside the Deal View
   // (Pipeline → a deal → Proposal tab). A Contributor has no Pipeline
   // visibility at all (PRD 3.3), so this stays their only way to reach a
   // proposal they've been named on — unchanged for them.
   { href: "/proposals", label: "Proposals", roles: ["Contributor"] },
-  { href: "/resources", label: "Resources" },
   { href: "/bench", label: "Directory" },
-  { href: "/community", label: "Community" },
   { href: "/optimist", label: "The Optimist", roles: ["Admin", "Lab Leader"] },
-];
-
-// Destinations the design never drew. They keep the roles they had under the
-// old sidebar. Courses is absent deliberately — the Resources artboard merged
-// it into /resources.
-const OVERFLOW: NavItem[] = [
   // Contracts stays for everyone: Contributor MSAs/Task Orders aren't deal-
   // scoped (a Contributor agreement isn't tied to one client deal), so they
   // can't move into the Deal View and this page is still how they're managed.
