@@ -46,8 +46,7 @@ import type {
   Stage,
 } from "@/lib/types";
 import { BillingEntityPanel } from "@/components/pipeline/billing-entity-panel";
-import { ProposalPanel } from "@/components/pipeline/proposal-panel";
-import { InvoicesPanel } from "@/components/pipeline/invoices-panel";
+import { DocumentUploadPanel } from "@/components/pipeline/document-upload-panel";
 
 const OL_SIGNER_KEY = "ol";
 
@@ -87,7 +86,7 @@ export function DealDrawer({
   onDeleted: (id: string) => void;
   onOpenRecord: (type: "company" | "contact", id: string) => void;
 }) {
-  const { labs, people, proposals, role, me, myLabs } = usePortalData();
+  const { labs, people, proposals, files, role, me, myLabs } = usePortalData();
   const isNew = deal === "new";
   const existing = isNew ? null : deal;
   const editable = existing ? can.editDeal(existing, role!, myLabs, me) : can.addDeal(role!, myLabs);
@@ -125,6 +124,7 @@ export function DealDrawer({
   const [contactId, setContactId] = useState<string | null>(existing?.contactId ?? null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [pausing, setPausing] = useState(false);
 
   const [showAssignment, setShowAssignment] = useState(false);
   const existingNotice = existing?.assignmentNotice;
@@ -140,37 +140,42 @@ export function DealDrawer({
   const [signing, setSigning] = useState<string | null>(null);
   const [signatureText, setSignatureText] = useState("");
 
-  const dealProposal = useMemo(
-    () => (existing ? [...proposals].filter((p) => p.deal === existing.id).sort((a, b) => (b.updated ?? "").localeCompare(a.updated ?? ""))[0] : null),
-    [proposals, existing]
+  /* Proposals are written outside the portal and uploaded onto the deal, so
+     an uploaded proposal document is what clears the stage gate. A proposal
+     that was marked final and sent from here before that changed still
+     counts, so deals already past the gate are not asked to re-upload a
+     document nobody kept — backend/src/app.mjs accepts the same two. */
+  const hasProposal = useMemo(
+    () =>
+      !!existing &&
+      (files.some((f) => f.deal === existing.id && f.kind === "proposal") ||
+        proposals.some((p) => p.deal === existing.id && !!p.sentAt)),
+    [files, proposals, existing]
   );
 
   const isClosed = stage === "Closed";
   const gated = billingRequiredAt(stage);
   const linked = !!companyId || !!contactId;
   const propGated = proposalRequiredAt(stage);
-  const proposalSent = !!dealProposal?.sentAt;
   const canSave =
     !!title.trim() &&
     (linked || !gated) &&
-    (!propGated || proposalSent) &&
+    (!propGated || hasProposal) &&
     (!isClosed || (!!existing?.contractSigned && !!close));
 
   const hint = !title.trim()
     ? "A deal name is required"
     : !linked && gated
-      ? `Link a company or a person to save at ${stage}`
-      : propGated && !dealProposal
-        ? `Attach a proposal before saving at ${stage}`
-        : propGated && !proposalSent
-          ? "Mark the proposal final and send it before saving at this stage"
-          : isClosed && !existing?.contractSigned
-            ? "A signed contract is required to close this deal"
-            : isClosed && !close
-              ? "Set the date this deal closed"
-              : !linked
-                ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
-                : "Ready to save";
+      ? `Link a company or a person to save this deal at ${stage}`
+      : propGated && !hasProposal
+        ? `Upload a proposal before saving this deal at ${stage}`
+        : isClosed && !existing?.contractSigned
+          ? "A signed contract is required to close this deal"
+          : isClosed && !close
+            ? "Set the date this deal closed"
+            : !linked
+              ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
+              : "Ready to save";
 
   const buildNotice = (): AssignmentNotice | null => {
     const labLeadersOut: AssignmentNoticeLabLeader[] = [];
@@ -261,6 +266,27 @@ export function DealDrawer({
     } finally {
       setSigning(null);
       setSignatureText("");
+    }
+  };
+
+  /* Pausing recurring billing used to live in the drawer's Invoices section,
+     which is now an upload box for invoice documents. The control moved to
+     sit with the recurring flag it acts on; it PATCHes immediately rather
+     than waiting on Save, exactly as it did before. */
+  const togglePause = async () => {
+    if (!existing) return;
+    setPausing(true);
+    try {
+      const saved = await api<Deal>(`/deals/${existing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ recurPaused: !existing.recurPaused }),
+      });
+      toast.success(saved.recurPaused ? "Recurring billing paused" : "Recurring billing resumed");
+      onSaved(saved);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not update this deal.");
+    } finally {
+      setPausing(false);
     }
   };
 
@@ -461,18 +487,45 @@ export function DealDrawer({
               <Input id="pv2-close" type="date" value={close} onChange={(e) => setClose(e.target.value)} disabled={!editable} />
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-ink">
-              <Checkbox checked={recurring} onCheckedChange={(c) => setRecurring(!!c)} disabled={!editable} />
-              Recurring engagement — bills monthly until paused or ended
-            </label>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <Checkbox checked={recurring} onCheckedChange={(c) => setRecurring(!!c)} disabled={!editable} />
+                Recurring engagement — bills monthly until paused or ended
+              </label>
+              {existing?.recurring && (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-hair-soft bg-warm-panel px-3 py-2">
+                  <span className="text-xs text-ink-mute">
+                    Bills monthly{existing.recurPaused ? " · currently paused" : ""}
+                  </span>
+                  {editable && (
+                    <Button size="sm" variant="outline" className="rounded-full" onClick={togglePause} disabled={pausing}>
+                      {pausing ? "…" : existing.recurPaused ? "Resume" : "Pause"}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
 
               </>
             )}
 
             {showDocuments && (
               <>
-            <ProposalPanel deal={existing!} />
-            <InvoicesPanel deal={existing!} onDealUpdated={onSaved} />
+            <DocumentUploadPanel
+              deal={existing!}
+              kind="proposal"
+              label="Upload Proposal"
+              hint="Attach the proposal document for this deal. Uploads are saved immediately."
+              editable={editable}
+            />
+            <DocumentUploadPanel
+              deal={existing!}
+              kind="invoice"
+              label="Upload Invoice"
+              hint="Attach each invoice issued for this deal. Uploads are saved immediately."
+              multiple
+              editable={editable}
+            />
 
             {isClosed && (
               <div className="rounded-2xl border border-hair bg-warm-panel p-4">
@@ -480,7 +533,7 @@ export function DealDrawer({
                 <p className="text-xs text-ink-mute">
                   {existing?.contractSigned
                     ? "On file — a signed client contract is attached to this deal."
-                    : "Required to close. Generate and sign the contract from the Proposal section above, or on the Contracts page."}
+                    : "Required to close. The signed client contract is managed on the Contracts page."}
                 </p>
                 {existing?.contractSigned && (
                   <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>

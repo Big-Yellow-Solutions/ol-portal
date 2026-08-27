@@ -366,11 +366,17 @@ export interface InvoiceRequest {
   status: InvoiceStatus;
 }
 
+/** Which slot on a deal an uploaded document fills. Mirrors
+ *  backend/src/app.mjs's FILE_KINDS; an untagged file is a plain
+ *  Files-page upload with no place in the deal drawer. */
+export type FileKind = "proposal" | "invoice";
+
 export interface FileRecord {
   id: string;
   name: string;
   lab?: string;
   deal?: string;
+  kind?: FileKind;
   proposal?: string;
   contract?: string;
   contributorEmail?: string;
