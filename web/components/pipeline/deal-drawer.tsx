@@ -31,6 +31,7 @@ import {
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
+import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
 import { LabLeaderFeeSplitEditor } from "@/components/pipeline/fee-split-editor";
 import { fullName } from "@/lib/data";
 import { billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE } from "@/lib/pipeline";
@@ -535,19 +536,16 @@ export function DealDrawer({
           </div>
         </div>
 
-        <div className="flex flex-none items-center gap-2 border-t border-hair p-4">
-          {!isNew && can.deleteDeal(role!) && (
-            <Button variant="outline" className="rounded-full text-red" onClick={del} disabled={deleting}>
-              {deleting ? "Deleting…" : "Delete"}
-            </Button>
-          )}
-          <span className={`flex-1 text-xs leading-tight ${canSave ? "text-ink-mute" : "text-red"}`}>{hint}</span>
-          {editable && (
-            <Button className="rounded-full" onClick={handleSave} disabled={saving || !canSave}>
-              {saving ? "Saving…" : isNew ? "Create deal" : "Save"}
-            </Button>
-          )}
-        </div>
+        <DealDrawerFooter
+          hint={hint}
+          tone={canSave ? "mute" : "warn"}
+          onDelete={!isNew && can.deleteDeal(role!) ? del : undefined}
+          deleting={deleting}
+          onSave={editable ? handleSave : undefined}
+          saving={saving}
+          saveLabel={isNew ? "Create deal" : "Save"}
+          saveDisabled={!canSave}
+        />
       </SheetContent>
     </Sheet>
   );
