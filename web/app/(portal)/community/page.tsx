@@ -3,15 +3,10 @@
 import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { StarGlyph } from "@/components/shell/top-nav";
-import { ColumnsIcon, PinIcon, PlusIcon } from "@/components/community/icons";
-import {
-  Eyebrow,
-  FIELD,
-  Initials,
-  Panel,
-  TogglePill,
-} from "@/components/community/primitives";
-import { PostCard } from "@/components/community/post-card";
+import { ColumnsIcon, PlusIcon } from "@/components/community/icons";
+import { Eyebrow, Panel, TogglePill } from "@/components/community/primitives";
+import { CommunityFeed } from "@/components/community/feed";
+import { CommunityMembers } from "@/components/community/members";
 import { PostDetail } from "@/components/community/post-detail";
 import { EventDetail } from "@/components/community/event-detail";
 import { CommunityDialog } from "@/components/community/community-dialog";
@@ -20,24 +15,25 @@ import {
   EventDateBlock,
   LabList,
 } from "@/components/community/rail";
+import { benchRoster } from "@/components/bench/person-card";
 import {
   ALL_LABS,
   COMMUNITY_EVENTS,
-  COMMUNITY_LABS,
   COMMUNITY_POSTS,
   INITIAL_RSVPS,
-  PINNED_ANNOUNCEMENT,
   RSVP_CHOICES,
   type CommunityComment,
   type CommunityEvent,
+  type CommunityLab,
   type CommunityPost,
   type RsvpChoice,
 } from "@/lib/community";
+import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { fullName, initials } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
-type Tab = "feed" | "events" | "groups";
+type Tab = "feed" | "events" | "groups" | "members";
 
 export default function CommunityPage() {
   return (
@@ -50,7 +46,8 @@ export default function CommunityPage() {
 function Community() {
   const router = useRouter();
   const params = useSearchParams();
-  const { people, me, role } = usePortalData();
+  const { bench, labs, people, me, role } = usePortalData();
+  const { openWith, openList, roster: chatRoster } = useMessages();
   const meRecord = me ? people[me] : undefined;
   const meName = fullName(meRecord) || me || "You";
   const meInitials = initials(meRecord);
@@ -58,8 +55,6 @@ function Community() {
   const [tab, setTab] = useState<Tab>("feed");
   const [rail, setRail] = useState(true);
   const [filter, setFilter] = useState(ALL_LABS);
-  const [postTo, setPostTo] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
   /* Home's digest links straight at a story: /community?post=p1 opens that
      post's thread on arrival, the way Resources' ?r= does, and survives the
      static export. */
@@ -84,6 +79,25 @@ function Community() {
     () => extra.concat(COMMUNITY_POSTS),
     [extra]
   );
+
+  /* Members is the bench, so the labs a post can be filed under, the lab rows
+     in the rail and the groups on the Groups tab are the Portal's real labs
+     rather than a list of their own — that is what "membership stays in sync
+     with the Portal" means, and it is what makes "Message the group" able to
+     name an actual roster. Only the posts and events are still seed content. */
+  const members = useMemo(() => benchRoster(bench, labs), [bench, labs]);
+
+  const labList = useMemo<CommunityLab[]>(() => {
+    const headcount = (n: number) => `${n} ${n === 1 ? "member" : "members"}`;
+    return [
+      { name: ALL_LABS, count: headcount(members.length) },
+      ...labs.map((l) => ({
+        name: l.name,
+        count: headcount(members.filter((p) => p.labs.includes(l.name)).length),
+      })),
+    ];
+  }, [labs, members]);
+
   const visiblePosts = allPosts.filter(
     (p) => filter === ALL_LABS || p.lab === filter || p.lab === ALL_LABS
   );
@@ -101,19 +115,36 @@ function Community() {
 
   const pickLab = (name: string) => {
     setFilter(name);
-    setTab("feed");
+    setTab((t) => (t === "members" ? "members" : "feed"));
   };
 
-  const submitPost = () => {
-    const text = draft.trim();
-    if (!text) return;
+  /* Every way into a conversation lands here: a post's author, a member card,
+     a lab's "Message the group". When there is nobody to open it with — the
+     org account posts too, and a lab can be a lab of one — the drawer opens
+     on the list rather than doing nothing. */
+  const dm = (ids: string[], name?: string) =>
+    ids.length ? openWith(ids, name) : openList();
+
+  const dmAuthor = (who: string) => {
+    closePost();
+    const person = chatRoster.find((p) => p.name === who);
+    dm(person ? [person.id] : []);
+  };
+
+  const messageLab = (name: string) =>
+    dm(
+      members.filter((p) => p.labs.includes(name) && p.id !== me).map((p) => p.id),
+      name
+    );
+
+  const submitPost = (text: string, lab: string) =>
     setExtra((s) => [
       {
         id: `x${Date.now()}`,
         who: meName,
         initials: meInitials,
         online: true,
-        lab: postTo ?? filter,
+        lab,
         time: "just now",
         kind: "Update",
         likes: 0,
@@ -122,8 +153,6 @@ function Community() {
       },
       ...s,
     ]);
-    setDraft("");
-  };
 
   const addComment = (id: string, text: string) =>
     setThreads((s) => ({
@@ -142,7 +171,8 @@ function Community() {
   const tabs: { key: Tab; name: string; count: number }[] = [
     { key: "feed", name: "Feed", count: allPosts.length },
     { key: "events", name: "Events", count: COMMUNITY_EVENTS.length },
-    { key: "groups", name: "Groups", count: COMMUNITY_LABS.length - 1 },
+    { key: "groups", name: "Groups", count: labList.length - 1 },
+    { key: "members", name: "Members", count: members.length },
   ];
 
   // The design's copy says event creation belongs to Admins and Lab Leaders.
@@ -218,7 +248,7 @@ function Community() {
             <span className="px-1 pb-1 text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
               Your labs
             </span>
-            <LabList labs={COMMUNITY_LABS} filter={filter} onPick={pickLab} />
+            <LabList labs={labList} filter={filter} onPick={pickLab} />
             <button
               type="button"
               onClick={() => setTab("groups")}
@@ -234,108 +264,20 @@ function Community() {
 
         <main className="flex min-w-0 flex-col gap-4">
           {tab === "feed" && (
-            <>
-              <section className="flex gap-3.5 rounded-[16px] border border-hair-strong bg-violet-pale px-5 py-[18px]">
-                <PinIcon size={17} className="mt-0.5 flex-none text-violet-deep" />
-                <div className="min-w-0">
-                  <Eyebrow>Pinned announcement</Eyebrow>
-                  <h2 className="mt-1.5 mb-0 text-lg leading-[1.3] font-bold tracking-[-0.012em]">
-                    {PINNED_ANNOUNCEMENT.title}
-                  </h2>
-                  <p className="mt-1.5 mb-0 text-sm leading-[1.55] text-pretty text-ink/[0.78]">
-                    {PINNED_ANNOUNCEMENT.body}
-                  </p>
-                  <span className="mt-2 block text-[11px] font-semibold tracking-[0.1em] text-warm-gray uppercase">
-                    {PINNED_ANNOUNCEMENT.meta}
-                  </span>
-                </div>
-              </section>
-
-              <Panel className="px-[18px] py-4">
-                <div className="flex gap-3">
-                  <Initials tone="solid">{meInitials}</Initials>
-                  <div className="flex min-w-0 flex-1 flex-col gap-3">
-                    <textarea
-                      value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
-                      placeholder="Share a win, a link, or an ask with the network…"
-                      aria-label="Write a post"
-                      rows={3}
-                      className={cn(
-                        FIELD,
-                        "w-full resize-none rounded-[12px] px-3.5 py-[11px] text-[15px] leading-[1.5]"
-                      )}
-                    />
-                    <div className="flex flex-wrap items-center justify-end gap-2.5">
-                      <label className="flex items-center gap-[7px] text-[13px] whitespace-nowrap text-warm-gray">
-                        Posting to
-                        <select
-                          value={postTo ?? filter}
-                          onChange={(e) => setPostTo(e.target.value)}
-                          className={cn(
-                            FIELD,
-                            "cursor-pointer rounded-full px-[11px] py-[7px] text-[13px] font-semibold text-violet-deep"
-                          )}
-                        >
-                          {COMMUNITY_LABS.map((l) => (
-                            <option key={l.name} value={l.name}>
-                              {l.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={submitPost}
-                        disabled={!draft.trim()}
-                        className={cn(
-                          "rounded-full px-5 py-[9px] text-sm font-semibold transition-colors",
-                          draft.trim()
-                            ? "cursor-pointer bg-violet-deep text-white hover:bg-violet"
-                            : "cursor-not-allowed bg-violet-pale text-violet-deep/50"
-                        )}
-                      >
-                        Post
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-
-              <div className="flex flex-wrap items-center gap-2">
-                {COMMUNITY_LABS.map((l) => {
-                  const on = filter === l.name;
-                  return (
-                    <button
-                      key={l.name}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => pickLab(l.name)}
-                      className={cn(
-                        "cursor-pointer rounded-full border px-3.5 py-[7px] text-[13px] transition-colors",
-                        on
-                          ? "border-violet-deep bg-violet-deep font-semibold text-white"
-                          : "border-hair-strong bg-white font-medium text-ink-soft hover:bg-wash"
-                      )}
-                    >
-                      {l.name}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {visiblePosts.map((p) => (
-                <PostCard
-                  key={p.id}
-                  post={p}
-                  liked={!!liked[p.id]}
-                  likes={likesFor(p)}
-                  comments={commentsFor(p).length}
-                  onLike={() => toggleLike(p.id)}
-                  onOpen={() => setPickedPost(p.id)}
-                />
-              ))}
-            </>
+            <CommunityFeed
+              labs={labList}
+              filter={filter}
+              posts={visiblePosts}
+              meInitials={meInitials}
+              liked={(p) => !!liked[p.id]}
+              likes={likesFor}
+              comments={(p) => commentsFor(p).length}
+              onPickLab={pickLab}
+              onPost={submitPost}
+              onLike={(p) => toggleLike(p.id)}
+              onOpen={(p) => setPickedPost(p.id)}
+              onAuthor={dmAuthor}
+            />
           )}
 
           {tab === "events" && (
@@ -416,7 +358,7 @@ function Community() {
                 with the Portal. Nothing to join or manage.
               </p>
               <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(272px,1fr))]">
-                {COMMUNITY_LABS.slice(1).map((l) => {
+                {labList.slice(1).map((l) => {
                   const n = allPosts.filter((p) => p.lab === l.name).length;
                   return (
                     <Panel
@@ -439,12 +381,13 @@ function Community() {
                         >
                           View feed →
                         </button>
-                        <a
-                          href="/bench"
-                          className="text-[13px] font-medium text-warm-gray hover:text-violet-deep"
+                        <button
+                          type="button"
+                          onClick={() => messageLab(l.name)}
+                          className="cursor-pointer text-[13px] font-medium text-warm-gray transition-colors hover:text-violet-deep"
                         >
                           Message the group
-                        </a>
+                        </button>
                       </div>
                     </Panel>
                   );
@@ -465,12 +408,16 @@ function Community() {
               </div>
             </>
           )}
+
+          {tab === "members" && (
+            <CommunityMembers roster={members} lab={filter} />
+          )}
         </main>
 
         {rail && (
           <CommunityRail
             events={COMMUNITY_EVENTS}
-            labs={COMMUNITY_LABS}
+            labs={labList}
             filter={filter}
             rsvps={rsvps}
             goingLabel={goingLabel}
@@ -479,6 +426,7 @@ function Community() {
             onQuickRsvp={(id) => setRsvp(id, "Going")}
             onAllEvents={() => setTab("events")}
             onBrowseGroups={() => setTab("groups")}
+            onOpenMessages={openList}
           />
         )}
       </div>
@@ -499,6 +447,7 @@ function Community() {
             meInitials={meInitials}
             onLike={() => toggleLike(openPost.id)}
             onComment={(text) => addComment(openPost.id, text)}
+            onAuthor={() => dmAuthor(openPost.who)}
           />
         )}
       </CommunityDialog>

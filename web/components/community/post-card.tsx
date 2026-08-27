@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { CommentIcon, HeartIcon } from "@/components/community/icons";
 import {
   AvatarWithPresence,
@@ -48,6 +47,7 @@ export function PostCard({
   comments,
   onLike,
   onOpen,
+  onAuthor,
 }: {
   post: CommunityPost;
   liked: boolean;
@@ -55,6 +55,7 @@ export function PostCard({
   comments: number;
   onLike: () => void;
   onOpen: () => void;
+  onAuthor: () => void;
 }) {
   return (
     <Panel as="article" className="flex flex-col gap-3 p-5">
@@ -65,12 +66,13 @@ export function PostCard({
           online={post.who === "Optimistic Labs" ? undefined : !!post.online}
         />
         <span className="min-w-0 flex-1">
-          <Link
-            href="/bench"
-            className="block text-sm font-semibold text-ink hover:text-violet-deep"
+          <button
+            type="button"
+            onClick={onAuthor}
+            className="block cursor-pointer text-left text-sm font-semibold text-ink transition-colors hover:text-violet-deep"
           >
             {post.who}
-          </Link>
+          </button>
           <span className="block text-xs text-warm-gray">
             {post.lab} · {post.time}
           </span>

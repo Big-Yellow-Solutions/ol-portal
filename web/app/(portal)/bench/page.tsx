@@ -4,9 +4,8 @@ import { useMemo, useState } from "react";
 import { PlusIcon, SearchIcon } from "@/components/community/icons";
 import { FIELD } from "@/components/community/primitives";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
-import { PersonCard, type BenchPerson } from "@/components/bench/person-card";
-import { fullName, initials } from "@/lib/data";
-import { roleLine, useMessages } from "@/lib/messages";
+import { benchRoster, PersonCard } from "@/components/bench/person-card";
+import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
 
@@ -35,25 +34,8 @@ export default function BenchPage() {
   const [tag, setTag] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
-  /* Every Lab Leader and Contributor is listed — the backend has no
-     per-person "hide me from the directory" flag, only contact-visibility
-     toggles (bench.showEmail/showPhone), enforced server-side in bootstrap. */
-  const roster = useMemo<BenchPerson[]>(
-    () =>
-      bench
-        .filter((p) => p.role === "Lab Leader" || p.role === "Contributor")
-        .map((p) => ({
-          id: p.username,
-          name: fullName(p),
-          initials: initials(p),
-          role: roleLine(p, labs),
-          engage: p.bench?.blurb,
-          tags: p.bench?.specialties ?? [],
-          contact: p.bench?.email || p.bench?.phone,
-          photo: p.photo,
-        })),
-    [bench, labs]
-  );
+  /* The same roster Community's Members tab reads — see benchRoster. */
+  const roster = useMemo(() => benchRoster(bench, labs), [bench, labs]);
 
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import { HeartIcon } from "@/components/community/icons";
 import {
   AvatarWithPresence,
@@ -23,6 +22,7 @@ export function PostDetail({
   meInitials,
   onLike,
   onComment,
+  onAuthor,
 }: {
   post: CommunityPost;
   comments: CommunityComment[];
@@ -31,6 +31,7 @@ export function PostDetail({
   meInitials: string;
   onLike: () => void;
   onComment: (text: string) => void;
+  onAuthor: () => void;
 }) {
   const [draft, setDraft] = useState("");
 
@@ -52,12 +53,13 @@ export function PostDetail({
           size={38}
         />
         <span className="min-w-0 flex-1">
-          <Link
-            href="/bench"
-            className="block text-[15px] font-semibold text-ink hover:text-violet-deep"
+          <button
+            type="button"
+            onClick={onAuthor}
+            className="block cursor-pointer text-left text-[15px] font-semibold text-ink transition-colors hover:text-violet-deep"
           >
             {post.who}
-          </Link>
+          </button>
           <span className="block text-xs text-warm-gray">
             {post.lab} · {post.time}
           </span>

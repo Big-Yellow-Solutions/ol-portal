@@ -2,6 +2,10 @@
 
 import Image from "next/image";
 import { CommentIcon, PencilIcon } from "@/components/community/icons";
+import { fullName, initials } from "@/lib/data";
+import { roleLine } from "@/lib/messages";
+import type { PersonWithUsername } from "@/lib/portal-data";
+import type { Lab } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /* A bench card. The whole card opens the conversation with that person, which
@@ -16,12 +20,43 @@ export interface BenchPerson {
   name: string;
   initials: string;
   role: string;
+  /* Lab names, not ids — the lab filter on Community's Members tab and the
+     "Message the group" roster both work in the names the design shows. */
+  labs: string[];
   engage?: string;
   tags: string[];
   /* Email, or the phone number if that is all this person publishes. The
      server strips whichever they chose to hide, so anything here is public. */
   contact?: string;
   photo?: string;
+}
+
+/* The bench itself: every Lab Leader and Contributor, card-shaped. The
+   Directory and Community's Members tab are the same roster read twice, so
+   the mapping lives here rather than in either screen.
+
+   Everyone is listed — the backend has no per-person "hide me from the
+   directory" flag, only contact-visibility toggles (bench.showEmail /
+   bench.showPhone), enforced server-side in bootstrap. */
+export function benchRoster(
+  bench: PersonWithUsername[],
+  labs: Lab[]
+): BenchPerson[] {
+  return bench
+    .filter((p) => p.role === "Lab Leader" || p.role === "Contributor")
+    .map((p) => ({
+      id: p.username,
+      name: fullName(p),
+      initials: initials(p),
+      role: roleLine(p, labs),
+      labs: (p.labs ?? []).map(
+        (id) => labs.find((l) => l.id === id)?.name ?? id
+      ),
+      engage: p.bench?.blurb,
+      tags: p.bench?.specialties ?? [],
+      contact: p.bench?.email || p.bench?.phone,
+      photo: p.photo,
+    }));
 }
 
 const ABOVE = "relative z-[1]";

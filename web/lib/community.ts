@@ -56,20 +56,14 @@ export interface CommunityEvent {
   body: string;
 }
 
+/* A lab as the feed chips, the rail rows and the Groups tab draw it. The
+   names are the Portal's own labs; `count` is that lab's share of the bench. */
 export interface CommunityLab {
   name: string;
   count: string;
 }
 
 export const ALL_LABS = "All labs";
-
-export const COMMUNITY_LABS: CommunityLab[] = [
-  { name: ALL_LABS, count: "5 posts" },
-  { name: "Faith Lab", count: "4 members" },
-  { name: "Policy Lab", count: "3 members" },
-  { name: "Philanthropy Lab", count: "4 members" },
-  { name: "Sports Lab", count: "3 members" },
-];
 
 export const COMMUNITY_POSTS: CommunityPost[] = [
   {

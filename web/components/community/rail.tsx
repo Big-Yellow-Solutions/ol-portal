@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { ArrowRightIcon } from "@/components/community/icons";
 import { Panel, TogglePill } from "@/components/community/primitives";
 import type { CommunityEvent, CommunityLab, RsvpChoice } from "@/lib/community";
@@ -98,6 +97,7 @@ export function CommunityRail({
   onQuickRsvp,
   onAllEvents,
   onBrowseGroups,
+  onOpenMessages,
 }: {
   events: CommunityEvent[];
   labs: CommunityLab[];
@@ -109,6 +109,7 @@ export function CommunityRail({
   onQuickRsvp: (id: string) => void;
   onAllEvents: () => void;
   onBrowseGroups: () => void;
+  onOpenMessages: () => void;
 }) {
   return (
     <aside className="flex min-w-0 flex-col gap-4 lg:sticky lg:top-24">
@@ -171,16 +172,17 @@ export function CommunityRail({
           Need a real conversation?
         </h2>
         <p className="mt-2 mb-3.5 text-sm leading-[1.55] text-pretty text-white/[0.82]">
-          Comments live here. Direct and group messages live in the Directory,
-          where you can @ someone to notify them.
+          Comments stay on the post. Direct and group messages open in a
+          drawer, where you can @ someone to notify them.
         </p>
-        <Link
-          href="/bench"
-          className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-[9px] text-[13px] font-semibold text-violet-deep transition-colors hover:bg-violet-pale hover:text-violet-deep"
+        <button
+          type="button"
+          onClick={onOpenMessages}
+          className="inline-flex cursor-pointer items-center gap-2 rounded-full bg-white px-4 py-[9px] text-[13px] font-semibold text-violet-deep transition-colors hover:bg-violet-pale"
         >
           Open messages
           <ArrowRightIcon size={14} />
-        </Link>
+        </button>
       </section>
     </aside>
   );
