@@ -34,6 +34,7 @@ import { fullName, initials } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 type Tab = "feed" | "events" | "groups" | "members";
+const TABS: Tab[] = ["feed", "events", "groups", "members"];
 
 export default function CommunityPage() {
   return (
@@ -52,7 +53,13 @@ function Community() {
   const meName = fullName(meRecord) || me || "You";
   const meInitials = initials(meRecord);
 
-  const [tab, setTab] = useState<Tab>("feed");
+  /* Pipeline's Companies/People footnote points at the roster, so which tab
+     Community opens on has to be linkable: /community?tab=members. Read once
+     on arrival, the way ?post= is — the tab is state after that. */
+  const askedFor = params.get("tab");
+  const [tab, setTab] = useState<Tab>(
+    TABS.includes(askedFor as Tab) ? (askedFor as Tab) : "feed"
+  );
   const [rail, setRail] = useState(true);
   const [filter, setFilter] = useState(ALL_LABS);
   /* Home's digest links straight at a story: /community?post=p1 opens that

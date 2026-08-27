@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/sheet";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
+import { cn } from "@/lib/utils";
+import { LabLeaderFeeSplitEditor } from "@/components/pipeline/fee-split-editor";
 import { fullName } from "@/lib/data";
 import { billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
@@ -56,10 +58,18 @@ const OL_SIGNER_KEY = "ol";
    so fixing the blocker (billing entity / proposal / contract) and hitting
    Save also completes the move, mirroring the prototype's openDeal + setState
    pattern. */
+type DrawerTab = "details" | "documents";
+
+const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
+  { key: "details", label: "Details" },
+  { key: "documents", label: "Documents" },
+];
+
 export function DealDrawer({
   deal,
   open,
   pendingStage,
+  initialTab = "details",
   onClose,
   onSaved,
   onDeleted,
@@ -68,6 +78,9 @@ export function DealDrawer({
   deal: Deal | "new";
   open: boolean;
   pendingStage?: Stage;
+  /* Which tab to land on. The board's proposal and contract gates open the
+     drawer straight on Documents, because that is where the blocker is. */
+  initialTab?: DrawerTab;
   onClose: () => void;
   onSaved: (deal: Deal) => void;
   onDeleted: (id: string) => void;
@@ -77,6 +90,11 @@ export function DealDrawer({
   const isNew = deal === "new";
   const existing = isNew ? null : deal;
   const editable = existing ? can.editDeal(existing, role!, myLabs, me) : can.addDeal(role!, myLabs);
+
+  const [tab, setTab] = useState<DrawerTab>(initialTab);
+  /* A new deal has no tabs, so it always shows the details form. */
+  const showDetails = isNew || tab === "details";
+  const showDocuments = !isNew && tab === "documents";
 
   const leaders = useMemo(
     () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
@@ -93,7 +111,13 @@ export function DealDrawer({
   const [dealOwner, setDealOwner] = useState(existing?.dealOwner ?? existing?.owner ?? me ?? "");
   const [stage, setStage] = useState<Stage>(pendingStage ?? existing?.stage ?? "Lead");
   const [amount, setAmount] = useState(String(existing?.amount ?? ""));
-  const [close, setClose] = useState(existing?.close ?? "");
+  /* An expected-close date is a forecast; a close date is a fact. The design
+     will not let the first quietly become the second, so arriving at Closed
+     clears it — both on a drag that lands here and on the stage select
+     below — and the Save gate then asks for the real one. */
+  const [close, setClose] = useState(
+    pendingStage === "Closed" && existing?.stage !== "Closed" ? "" : (existing?.close ?? "")
+  );
   const [source, setSource] = useState<Source>(existing?.source ?? "Referral");
   const [recurring, setRecurring] = useState(existing?.recurring ?? false);
   const [companyId, setCompanyId] = useState<string | null>(existing?.companyId ?? null);
@@ -318,8 +342,36 @@ export function DealDrawer({
           </Button>
         </SheetHeader>
 
+        {/* A new deal has no documents yet — every panel below is gated on an
+            existing record — so the strip only appears once there is one. */}
+        {!isNew && (
+          <div className="flex flex-none items-end gap-0.5 border-b border-hair px-4">
+            {DRAWER_TABS.map((t) => {
+              const on = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  aria-current={on ? "page" : undefined}
+                  className={cn(
+                    "-mb-px cursor-pointer rounded-t-[10px] px-3.5 pt-2.5 pb-2 text-sm whitespace-nowrap transition-colors",
+                    on
+                      ? "border-b-2 border-violet-deep bg-violet-pale font-semibold text-violet-deep"
+                      : "font-medium text-ink-soft hover:bg-[#F1EEFE] hover:text-violet-deep"
+                  )}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-4">
           <div className="flex flex-col gap-4">
+            {showDetails && (
+              <>
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pv2-title">Deal name</Label>
               <Input id="pv2-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Grace Network — cohort two" disabled={!editable} />
@@ -347,7 +399,15 @@ export function DealDrawer({
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="pv2-stage">Stage</Label>
-                <Select value={stage} onValueChange={(v) => setStage(v as Stage)} disabled={!editable}>
+                <Select
+                  value={stage}
+                  onValueChange={(v) => {
+                    const next = v as Stage;
+                    if (next === "Closed" && stage !== "Closed") setClose("");
+                    setStage(next);
+                  }}
+                  disabled={!editable}
+                >
                   <SelectTrigger id="pv2-stage"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
@@ -405,10 +465,15 @@ export function DealDrawer({
               Recurring engagement — bills monthly until paused or ended
             </label>
 
-            {!isNew && <ProposalPanel deal={existing!} />}
-            {!isNew && <InvoicesPanel deal={existing!} onDealUpdated={onSaved} />}
+              </>
+            )}
 
-            {isClosed && !isNew && (
+            {showDocuments && (
+              <>
+            <ProposalPanel deal={existing!} />
+            <InvoicesPanel deal={existing!} onDealUpdated={onSaved} />
+
+            {isClosed && (
               <div className="rounded-2xl border border-hair bg-warm-panel p-4">
                 <div className="mb-1 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Signed contract</div>
                 <p className="text-xs text-ink-mute">
@@ -422,7 +487,7 @@ export function DealDrawer({
               </div>
             )}
 
-            {!isNew && existing?.stage === "Closed" && existingNotice && (
+            {existing?.stage === "Closed" && existingNotice && (
               <div className="flex flex-col gap-4 border-t border-hair pt-4">
                 <h3 className="text-sm font-medium text-ink">Assignment Notice</h3>
                 <LabLeaderFeeSplitEditor rows={noticeLabLeaders} setRows={setNoticeLabLeaders} options={labLeaderOptions} disabled={!editable || noticeLocked} />
@@ -465,6 +530,8 @@ export function DealDrawer({
                 </div>
               </div>
             )}
+              </>
+            )}
           </div>
         </div>
 
@@ -483,57 +550,5 @@ export function DealDrawer({
         </div>
       </SheetContent>
     </Sheet>
-  );
-}
-
-function LabLeaderFeeSplitEditor({
-  rows,
-  setRows,
-  options,
-  disabled,
-}: {
-  rows: { key: string; feeSharePct: string }[];
-  setRows: (rows: { key: string; feeSharePct: string }[]) => void;
-  options: { username: string; name: string }[];
-  disabled?: boolean;
-}) {
-  const total = rows.reduce((sum, r) => sum + (Number(r.feeSharePct) || 0), 0);
-
-  return (
-    <div className="flex flex-col gap-2" role="group" aria-labelledby="pv2-fee-split-label">
-      <Label id="pv2-fee-split-label">Lab Leader fee split</Label>
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-center gap-2">
-          <Select value={row.key} onValueChange={(v) => setRows(rows.map((r, idx) => (idx === i ? { ...r, key: v } : r)))} disabled={disabled}>
-            <SelectTrigger className="flex-1" aria-label={`Lab Leader for fee-share row ${i + 1}`}>
-              <SelectValue placeholder="Lab Leader" />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Input
-            type="number"
-            min={0}
-            max={100}
-            value={row.feeSharePct}
-            onChange={(e) => setRows(rows.map((r, idx) => (idx === i ? { ...r, feeSharePct: e.target.value } : r)))}
-            disabled={disabled}
-            className="w-20"
-            aria-label={`Fee share percent for row ${i + 1}`}
-          />
-          <span className="text-xs text-ink-mute">%</span>
-          {!disabled && rows.length > 1 && (
-            <Button variant="ghost" size="icon-sm" onClick={() => setRows(rows.filter((_, idx) => idx !== i))}>✕</Button>
-          )}
-        </div>
-      ))}
-      {!disabled && (
-        <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setRows([...rows, { key: "", feeSharePct: "" }])}>
-          + Add Lab Leader
-        </Button>
-      )}
-      <span className={`text-xs ${Math.abs(total - 100) > 0.01 ? "text-red" : "text-ink-mute"}`}>Total: {total}% (must equal 100%)</span>
-    </div>
   );
 }

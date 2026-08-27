@@ -87,7 +87,14 @@ export function ContactsTable({
           <div className="bg-white px-4.5 py-8 text-center text-sm text-ink-mute">No {view} match this search.</div>
         )}
       </div>
-      <p className="text-xs text-ink-mute">These are the same records used inside a deal — separate from the staff Directory.</p>
+      <p className="text-xs text-ink-mute">
+        These are the same records used inside a deal. People who work at
+        Optimistic Labs live in the{" "}
+        <a href="/community?tab=members" className="font-semibold text-violet-deep hover:text-violet">
+          Directory
+        </a>
+        .
+      </p>
     </div>
   );
 }

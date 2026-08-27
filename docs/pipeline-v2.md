@@ -50,6 +50,63 @@ New: `web/lib/pipeline.ts` (the gate rules, mirrored from the backend so
 drag-and-drop can pre-empt a rejected save) and
 `web/components/pipeline/{deal-drawer,billing-entity-panel,proposal-panel,invoices-panel,record-drawer,contacts-table,proposals-grid}.tsx`.
 
+## Handoff revision (8/26)
+
+A second cut of `design_handoff_pipeline_v2` landed after the first shipped.
+Its changes, and what each became here:
+
+**Proposals → Documents.** The fourth view is now every proposal, contract and
+invoice in the pipeline rather than proposals alone, with kind chips (All /
+Proposals / Contracts / Invoices), a sort select (newest / oldest / largest
+amount / name), and nine cards a page with pagination.
+`components/pipeline/documents-grid.tsx` replaces `proposals-grid.tsx`;
+`?view=proposals` is gone, and an old link falls back to the board.
+
+**The deal drawer has Details and Documents tabs.** Details is the form
+(name, billing entity, lab/stage, owners, source, amount, close, recurring);
+Documents is the proposal, contract, invoice and Assignment Notice panels. A
+new deal has no documents, so it has no tabs. The board's proposal and
+contract gates now open the drawer *on Documents*, because that is where the
+thing blocking the drag actually is.
+
+**Arriving at Closed clears the close date.** An expected close is a forecast
+and a close date is a fact; the handoff will not let the first silently become
+the second. Both entry points clear it — the stage select, and a drag that
+lands on Closed — and the existing Save gate then asks for the real one. The
+drag's toast is the design's: "Set the close date and add the signed contract."
+
+**A read-only version viewer** (`version-viewer.tsx`), reached from a caret
+list of earlier versions in the proposal panel. The prototype fills the page
+with skeleton bars because it has no document behind a version; this app has
+one, so the snapshot's own sections render. No Download button — a proposal
+snapshot lives in DynamoDB, not as a file with a URL to hand over.
+
+**Tweakable props** are constants in `lib/pipeline.ts`: `SHOW_BILLING_ON_CARDS`
+and `SHOW_COLUMN_TOTALS`. `billingRequiredFrom` is `BILLING_GATE_STAGE`, which
+unlike those two is *not* free to move — the backend enforces the same stage,
+so changing it here alone would only make the board lie about what the server
+will accept.
+
+**Copy** — the per-view blurbs, the Documents search placeholder, and the
+Companies/People footnote, which now links to the Directory. That is the
+Community page's Members tab, so it points at `/community?tab=members`; the
+Community page reads `?tab=` on arrival for exactly this.
+
+Still not built, for the same reasons as the first pass: file-versioned
+contracts and invoices (no backend model — judgment call 1), the
+Monthly/Quarterly/Annually schedule builder (judgment call 3), and "Open full
+record in Contacts →" (judgment call 4). The design's hand-rolled black pill
+toast is also not adopted: toasts here come from the app-wide sonner Toaster,
+and restyling it would change every page. The Optimist round-trip deep link
+(`?deal=&saved=1&v=&name=`) has nothing to round-trip to — that surface is
+parked in the design too.
+
+`deal-drawer.tsx` is 554 lines, over the repo's 500-line rule. It was 539
+before this pass; `fee-split-editor.tsx` came out of it to claw back most of
+what the tab strip added. Getting under the line means splitting the
+Assignment Notice concern out, which is a refactor of code this pass did not
+otherwise touch and cannot exercise behind auth — left alone deliberately.
+
 ## Judgment calls
 
 1. **The design's file-attachment proposal model was not built.** The handoff

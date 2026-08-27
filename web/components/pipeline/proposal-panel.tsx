@@ -22,7 +22,11 @@ import { can } from "@/lib/can";
 import { PROPOSAL_VARIANT, CONTRACT_VARIANT } from "@/lib/data";
 import { track } from "@/lib/analytics";
 import { usePortalData } from "@/lib/portal-data";
+import { ChevronDown } from "lucide-react";
+import { VersionViewer } from "@/components/pipeline/version-viewer";
 import { SECTION_KEYS, SECTION_LABELS } from "@/lib/types";
+import type { ProposalVersionSnapshot } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import type { Contract, Deal, Proposal } from "@/lib/types";
 
 const emptySections = (): Record<string, string> => Object.fromEntries(SECTION_KEYS.map((k) => [k, ""]));
@@ -227,11 +231,7 @@ export function ProposalPanel({ deal }: { deal: Deal }) {
             </div>
           </div>
 
-          {(proposal.versions?.length ?? 0) > 0 && (
-            <p className="mb-2 truncate text-[11px] text-warm-gray">
-              Earlier: {[...(proposal.versions ?? [])].reverse().slice(1).map((v) => `v${v.v} · ${v.status}`).join(" · ")}
-            </p>
-          )}
+          <VersionHistory proposal={proposal} />
 
           <ContributorShare deal={deal} proposal={proposal} editable={editable} />
 
@@ -393,5 +393,67 @@ function ContributorShare({ deal, proposal, editable }: { deal: Deal; proposal: 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* The design's version history: a caret toggle that opens a list of earlier
+   versions, each row opening the read-only viewer. The newest snapshot is the
+   proposal's current version, so it is not "earlier" and is left out. */
+function VersionHistory({ proposal }: { proposal: Proposal }) {
+  const [open, setOpen] = useState(false);
+  const [viewing, setViewing] = useState<ProposalVersionSnapshot | null>(null);
+
+  const earlier = [...(proposal.versions ?? [])]
+    .sort((a, b) => b.v - a.v)
+    .slice(1);
+  if (earlier.length === 0) return null;
+
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-warm-gray transition-colors hover:text-violet-deep"
+      >
+        <ChevronDown
+          size={13}
+          className={cn("transition-transform duration-150", open && "rotate-180")}
+          aria-hidden
+        />
+        {earlier.length} earlier version{earlier.length === 1 ? "" : "s"}
+      </button>
+
+      {open && (
+        <div className="mt-2 flex flex-col gap-1">
+          {earlier.map((v) => (
+            <button
+              key={v.v}
+              type="button"
+              onClick={() => setViewing(v)}
+              className="flex cursor-pointer items-center gap-2 rounded-[10px] px-2 py-1.5 text-left transition-colors hover:bg-white"
+            >
+              <span className="flex-none rounded-full bg-violet-pale px-2 py-0.5 text-[10px] font-bold text-violet-deep">
+                v{v.v}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-ink">
+                {proposal.title}
+              </span>
+              <span className="flex-none text-[11px] text-warm-gray">
+                {[v.status, v.date].filter(Boolean).join(" · ")}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <VersionViewer
+        open={!!viewing}
+        onOpenChange={(o) => !o && setViewing(null)}
+        snapshot={viewing}
+        title={proposal.title}
+        supersededBy={viewing ? proposal.version : undefined}
+      />
+    </div>
   );
 }

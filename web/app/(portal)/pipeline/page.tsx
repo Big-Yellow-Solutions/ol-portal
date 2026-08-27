@@ -13,33 +13,33 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { AlertCircle, Calendar, GripVertical, Repeat } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { fmtDollars, fullName } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { usePortalData } from "@/lib/portal-data";
-import { billingOf, billingRequiredAt, cadenceOf, proposalRequiredAt } from "@/lib/pipeline";
+import {
+  billingOf,
+  billingRequiredAt,
+  proposalRequiredAt,
+  SHOW_COLUMN_TOTALS,
+} from "@/lib/pipeline";
 import { STAGES } from "@/lib/types";
 import type { Deal, Stage } from "@/lib/types";
 import { DealDrawer } from "@/components/pipeline/deal-drawer";
 import { RecordDrawer } from "@/components/pipeline/record-drawer";
 import { ContactsTable } from "@/components/pipeline/contacts-table";
-import { ProposalsGrid } from "@/components/pipeline/proposals-grid";
+import { DocumentsGrid } from "@/components/pipeline/documents-grid";
+import { DealCard } from "@/components/pipeline/deal-card";
 
-type ViewKey = "board" | "companies" | "people" | "proposals";
+type ViewKey = "board" | "companies" | "people" | "documents";
 const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "board", label: "Board" },
   { key: "companies", label: "Companies" },
   { key: "people", label: "People" },
-  { key: "proposals", label: "Proposals" },
+  { key: "documents", label: "Documents" },
 ];
-
-function fmtClose(iso: string): string {
-  const [y, m, d] = iso.split("-").map(Number);
-  if (!y || !m || !d) return iso;
-  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
 
 export default function PipelinePage() {
   return (
@@ -50,7 +50,7 @@ export default function PipelinePage() {
 }
 
 function PipelineBoard() {
-  const { loading, error, deals, labs, people, companies, contacts, proposals, role, me, myLabs, setDeals } =
+  const { loading, error, deals, labs, people, companies, contacts, proposals, contracts, invoices, role, me, myLabs, setDeals } =
     usePortalData();
   const router = useRouter();
   const pathname = usePathname();
@@ -65,7 +65,7 @@ function PipelineBoard() {
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
 
-  const [dealDrawer, setDealDrawer] = useState<{ deal: Deal | "new"; pendingStage?: Stage } | null>(null);
+  const [dealDrawer, setDealDrawer] = useState<{ deal: Deal | "new"; pendingStage?: Stage; tab?: "details" | "documents" } | null>(null);
   const [recordDrawer, setRecordDrawer] = useState<{ type: "company" | "contact"; id: string; returnDealId: string | null } | null>(null);
 
   const viewingId = searchParams.get("deal");
@@ -80,8 +80,8 @@ function PipelineBoard() {
     router.push(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   }
 
-  function openDeal(deal: Deal | "new", pendingStage?: Stage) {
-    setDealDrawer({ deal, pendingStage });
+  function openDeal(deal: Deal | "new", pendingStage?: Stage, tab?: "details" | "documents") {
+    setDealDrawer({ deal, pendingStage, tab });
     // Only sync the URL for a plain open (a real deal, not mid drag-gate
     // correction) — a pendingStage override is transient and shouldn't be
     // shareable as a stale link.
@@ -134,7 +134,12 @@ function PipelineBoard() {
     () => deals.filter((d) => !d.companyId && !d.contactId && billingRequiredAt(d.stage)).length,
     [deals]
   );
-  const proposalDealCount = useMemo(() => new Set(proposals.map((p) => p.deal).filter(Boolean)).size, [proposals]);
+  /* One card per deal's proposal, plus every contract and invoice — the same
+     arithmetic DocumentsGrid does, so the tab count and the grid agree. */
+  const documentCount = useMemo(
+    () => new Set(proposals.map((p) => p.deal).filter(Boolean)).size + contracts.length + invoices.length,
+    [proposals, contracts, invoices]
+  );
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
   const reduceMotion = useReducedMotion();
@@ -157,13 +162,13 @@ function PipelineBoard() {
       const proposal = latestProposalFor.get(deal.id);
       if (!proposal?.sentAt) {
         toast.info(proposal ? `${targetStage} needs the proposal marked final and sent` : `${targetStage} needs a sent proposal — start one first`);
-        openDeal(deal, targetStage);
+        openDeal(deal, targetStage, "documents");
         return;
       }
     }
     if (targetStage === "Closed") {
-      toast.info("Closing a deal needs an outcome, a signed contract, and an Assignment Notice.");
-      openDeal(deal, "Closed");
+      toast.info("Set the close date and add the signed contract.");
+      openDeal(deal, "Closed", "documents");
       return;
     }
 
@@ -184,15 +189,15 @@ function PipelineBoard() {
 
   const blurb =
     view === "companies"
-      ? "Organizations that can be invoiced, with what each is worth across the pipeline. Open one to see its deals and primary contact."
+      ? "Customer organizations across the pipeline. Open one to see its deals and primary contact."
       : view === "people"
         ? "Individuals across the pipeline — some belong to a company, some are billed directly. Open one to see their deals."
-        : view === "proposals"
-          ? "Every proposal in flight, drafted or sent. Open one to send the current version or start a revision."
-          : "Deals by stage, across labs. Drag a card to move it forward; a deal needs a billing entity before it reaches Proposal Sent.";
+        : view === "documents"
+          ? "Every proposal, signed contract, and invoice across the pipeline, with its current version."
+          : "All of your deals by stage. Drag a card to move it forward and add the necessary documents at each stage to get to Closed.";
 
   const searchPlaceholder =
-    view === "companies" ? "Search companies…" : view === "people" ? "Search people…" : view === "proposals" ? "Search proposals…" : "Search deals, companies, or people…";
+    view === "companies" ? "Search companies…" : view === "people" ? "Search people…" : view === "documents" ? "Search documents…" : "Search deals, companies, or people…";
 
   return (
     <div className="flex flex-col gap-5">
@@ -214,7 +219,7 @@ function PipelineBoard() {
         <div className="flex items-end gap-0.5 overflow-x-auto">
           {VIEWS.map((v) => {
             const count =
-              v.key === "board" ? deals.length : v.key === "companies" ? companies.length : v.key === "people" ? contacts.length : proposalDealCount;
+              v.key === "board" ? deals.length : v.key === "companies" ? companies.length : v.key === "people" ? contacts.length : documentCount;
             const active = view === v.key;
             return (
               <button
@@ -310,7 +315,9 @@ function PipelineBoard() {
                   <h3 className="text-[15px] font-bold tracking-[-0.01em] text-ink">{stage}</h3>
                   <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">{stageDeals.length}</span>
                   <span className="flex-1" />
-                  {stageDeals.length > 0 && <span className="truncate text-xs text-warm-gray">{fmtDollars(total)}</span>}
+                  {SHOW_COLUMN_TOTALS && stageDeals.length > 0 && (
+                    <span className="truncate text-xs text-warm-gray">{fmtDollars(total)}</span>
+                  )}
                 </div>
 
                 <div className="flex min-h-[96px] flex-col gap-3">
@@ -350,8 +357,8 @@ function PipelineBoard() {
         <ContactsTable view={view} search={search} onOpenRecord={(type, id) => setRecordDrawer({ type, id, returnDealId: null })} />
       )}
 
-      {view === "proposals" && (
-        <ProposalsGrid search={search} lab={labFilter} onOpenDeal={(dealId) => {
+      {view === "documents" && (
+        <DocumentsGrid search={search} lab={labFilter} onOpenDeal={(dealId) => {
           const d = deals.find((x) => x.id === dealId);
           if (d) openDeal(d);
         }} />
@@ -361,6 +368,7 @@ function PipelineBoard() {
         <DealDrawer
           deal={activeDrawer.deal}
           pendingStage={activeDrawer.pendingStage}
+          initialTab={activeDrawer.tab}
           open
           onClose={closeDealDrawer}
           onSaved={(saved) => {
@@ -399,96 +407,5 @@ function PipelineBoard() {
         />
       )}
     </div>
-  );
-}
-
-function DealCard({
-  deal,
-  labName,
-  ownerName,
-  billing,
-  canDrag,
-  isDragging,
-  onDragStart,
-  onDragEnd,
-  onClick,
-}: {
-  deal: Deal;
-  labName: string;
-  ownerName: string;
-  billing: ReturnType<typeof billingOf>;
-  canDrag: boolean;
-  isDragging: boolean;
-  onDragStart: () => void;
-  onDragEnd: () => void;
-  onClick: () => void;
-}) {
-  const cadence = cadenceOf(deal);
-  return (
-    <button
-      onClick={onClick}
-      draggable={canDrag}
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", deal.id);
-        onDragStart();
-      }}
-      onDragEnd={onDragEnd}
-      className={cn(
-        "group relative flex w-full flex-col gap-0 rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
-        billing.due ? "border-red/45" : "border-hair",
-        canDrag && "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-45"
-      )}
-    >
-      {canDrag && (
-        <span aria-hidden className="absolute top-1/2 left-0.5 -translate-y-1/2 text-ink-mute opacity-0 transition-opacity group-hover:opacity-100">
-          <GripVertical size={14} />
-        </span>
-      )}
-
-      <div className="mb-2.5 flex items-center gap-1.5">
-        <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-violet-pale px-2.5 py-1 text-[10px] font-bold tracking-[0.09em] text-violet-deep uppercase">
-          <span aria-hidden className="size-1.5 rounded-full bg-violet" />
-          {labName}
-        </span>
-        <span className="flex-1" />
-        {deal.stage === "Closed" && deal.outcome === "Won" && (
-          <span className="rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
-        )}
-        {deal.recurring && <Repeat size={14} className="shrink-0 text-violet" aria-label="Recurring deal" />}
-      </div>
-
-      <h4 className="text-[15px] leading-[1.3] font-bold tracking-[-0.015em] text-ink">{deal.client}</h4>
-      {cadence && <p className="mt-1 truncate text-[11px] font-medium text-violet">{cadence}</p>}
-
-      <div className="mt-2.5 flex items-center gap-2">
-        <span
-          className={cn(
-            "flex size-6.5 shrink-0 items-center justify-center text-[11px] font-semibold",
-            billing.kind === "company" ? "rounded-[9px]" : "rounded-full",
-            billing.ok ? "bg-violet-pale text-violet-deep" : billing.due ? `border border-dashed border-red/55 text-red` : "border border-dashed border-hair-strong text-violet-deep"
-          )}
-        >
-          {billing.initials}
-        </span>
-        <span className="min-w-0">
-          <span className={cn("block truncate text-[13px] font-semibold", billing.ok ? "text-ink" : billing.due ? "text-red" : "text-ink-mute")}>{billing.name}</span>
-          <span className="block truncate text-xs text-ink-mute">{billing.sub}</span>
-        </span>
-      </div>
-
-      <div className="mt-[11px] mb-2.5 h-px bg-hair-soft" />
-
-      <div className="flex items-center gap-2">
-        <span className="flex min-w-0 shrink items-center gap-1.5 text-xs whitespace-nowrap text-ink-mute">
-          <Calendar size={13} aria-hidden />
-          {fmtClose(deal.close)}
-        </span>
-        <span className="flex-1" />
-        <span className="shrink-0 text-[15px] font-bold tracking-[-0.01em] text-ink tabular-nums">{fmtDollars(deal.amount)}</span>
-      </div>
-      <div className="mt-2 truncate text-[11px] text-ink-mute">{ownerName}</div>
-    </button>
   );
 }

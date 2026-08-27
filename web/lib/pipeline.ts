@@ -7,6 +7,15 @@ import { STAGES } from "@/lib/types";
    same rule the server enforces. */
 export const BILLING_GATE_STAGE: Stage = "Proposal Sent";
 
+/* The handoff's "tweakable props — surface as config, not UI". They are
+   constants rather than settings because nothing in the portal stores
+   per-user board preferences; a build is the place this gets changed.
+   `billingRequiredFrom` is BILLING_GATE_STAGE above, and unlike these two it
+   is not free to move — the backend enforces the same stage, so changing it
+   here alone would only make the board lie about what the server will accept. */
+export const SHOW_BILLING_ON_CARDS = true;
+export const SHOW_COLUMN_TOTALS = true;
+
 const stageIndex = (s: Stage) => STAGES.indexOf(s);
 
 export const billingRequiredAt = (stage: Stage): boolean =>
