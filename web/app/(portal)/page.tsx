@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useMemo } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { Digest } from "@/components/dashboard/digest";
 import {
@@ -9,7 +9,11 @@ import {
   PresenceCard,
   type StageTotal,
 } from "@/components/dashboard/aside";
-import { COMMUNITY_POSTS } from "@/lib/community";
+import {
+  listPosts,
+  toCommunityPost,
+  type CommunityPost,
+} from "@/lib/community";
 import {
   digestStories,
   editionLabel,
@@ -31,11 +35,14 @@ import { STAGES, type Deal, type Stage } from "@/lib/types";
  *
  * Where the numbers come from: the header stats and the pipeline card are the
  * real API, scoped by role the way the server scopes /deals. The digest and
- * the presence list are cut from the community records (lib/community.ts) —
- * see lib/dashboard.ts for why they read out of the same records the feed
- * does. Until a community API exists there are no such records, so the digest
- * shows its empty state and the presence card does not render at all: an
- * "Around right now" that is permanently empty says less than no card.
+ * the presence list are cut from the same posts the Community feed reads
+ * (GET /posts) — see lib/dashboard.ts for why they read out of the same
+ * records rather than holding content of their own. Both panels are editorial
+ * fields a post does not carry yet (`headline` for the digest, presence for
+ * the card), so a feed of ordinary posts still leaves the digest on its empty
+ * state and the presence card unrendered: an "Around right now" that is
+ * permanently empty says less than no card. A feed that fails to load is the
+ * same shape as an empty one here — Home is not the place to report it.
  */
 
 /* How many presence rows fit the card before it becomes a directory. */
@@ -68,10 +75,26 @@ export default function DashboardPage() {
      bootstrap resolves, so it never runs during the static prerender. */
   const now = useMemo(() => new Date(), []);
 
-  const stories = useMemo(() => digestStories(COMMUNITY_POSTS), []);
+  const [posts, setPosts] = useState<CommunityPost[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    listPosts()
+      .then((records) => {
+        if (live) setPosts(records.map((r) => toCommunityPost(r, people, labs, new Date())));
+      })
+      .catch(() => {
+        // Both panels already render correctly with nothing in them.
+      });
+    return () => {
+      live = false;
+    };
+  }, [people, labs]);
+
+  const stories = useMemo(() => digestStories(posts), [posts]);
   const leaders = useMemo(
-    () => presenceLeaders(COMMUNITY_POSTS, meName),
-    [meName]
+    () => presenceLeaders(posts, meName),
+    [posts, meName]
   );
 
   /* Messaging lives in the shell now, so a presence row opens the same panel

@@ -7,7 +7,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { ALL_LABS, COMMUNITY_POSTS, COMMUNITY_THREADS } from "@/lib/community";
+import { COMMUNITY_THREADS, initialsOfName } from "@/lib/community";
 import { messageTime } from "@/lib/dashboard";
 import { fullName, initials } from "@/lib/data";
 import { usePortalData } from "@/lib/portal-data";
@@ -24,9 +24,11 @@ import type { Lab, Person } from "@/lib/types";
  * empty: nobody is shown words a colleague never wrote. Two things follow,
  * both deliberate:
  *
- * 1. The roster is the real bench (who the directory lists) plus anyone the
- *    community feed carries who is not on it. lib/community.ts is empty until
- *    that API lands, so today the roster is exactly the bench.
+ * 1. The roster is the real bench (who the directory lists) plus anyone a
+ *    seeded thread names who is not on it. Posts are no longer such a source:
+ *    every post has a portal author now (see lib/community.ts), so a post's
+ *    author is already on the bench. COMMUNITY_THREADS is empty until a
+ *    messages API lands, so today the roster is exactly the bench.
  * 2. Sending appends immediately. When the API lands, that append becomes the
  *    optimistic write and the reconcile follows it; nothing else here moves.
  */
@@ -148,22 +150,19 @@ export function segments(text: string, people: MessagePerson[]): Segment[] {
 
 /* ---------- the network seed ---------- */
 
-/* The community people Home shows presence for. Organisation accounts post
-   but are not people, so they carry no presence flag and are skipped. */
+/* The people a seeded thread is with who are not on the bench — without them
+   a seeded conversation would list a row nobody can be identified in. Name is
+   all such a record has, so that is all this makes a card out of. */
 function networkPeople(meName: string): MessagePerson[] {
-  const seen = new Map<string, MessagePerson>();
-  for (const post of COMMUNITY_POSTS) {
-    if (post.online === undefined || post.who === meName) continue;
-    if (seen.has(post.who)) continue;
-    seen.set(post.who, {
-      id: networkId(post.who),
-      name: post.who,
-      first: post.who.split(" ")[0],
-      initials: post.initials,
-      role: post.lab === ALL_LABS ? "Lab Leader" : `Lab Leader · ${post.lab}`,
-    });
-  }
-  return [...seen.values()];
+  return Object.keys(COMMUNITY_THREADS)
+    .filter((who) => who !== meName)
+    .map((who) => ({
+      id: networkId(who),
+      name: who,
+      first: who.split(" ")[0],
+      initials: initialsOfName(who),
+      role: "",
+    }));
 }
 
 /* Per-person suggestions above the composer, carried over from the dashboard

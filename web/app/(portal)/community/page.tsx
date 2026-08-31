@@ -1,7 +1,8 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { ColumnsIcon, PlusIcon } from "@/components/community/icons";
 import { Eyebrow, Panel, TogglePill } from "@/components/community/primitives";
@@ -19,15 +20,19 @@ import { benchRoster } from "@/components/bench/person-card";
 import {
   ALL_LABS,
   COMMUNITY_EVENTS,
-  COMMUNITY_POSTS,
   INITIAL_RSVPS,
   RSVP_CHOICES,
+  createPost,
+  listPosts,
+  toCommunityPost,
   type CommunityComment,
   type CommunityEvent,
   type CommunityLab,
   type CommunityPost,
+  type PostRecord,
   type RsvpChoice,
 } from "@/lib/community";
+import { ApiError } from "@/lib/api";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { fullName, initials } from "@/lib/data";
@@ -47,7 +52,7 @@ export default function CommunityPage() {
 function Community() {
   const router = useRouter();
   const params = useSearchParams();
-  const { bench, labs, people, me, role } = usePortalData();
+  const { bench, labs, myLabs, people, me, role } = usePortalData();
   const { openWith, openList, roster: chatRoster } = useMessages();
   const meRecord = me ? people[me] : undefined;
   const meName = fullName(meRecord) || me || "You";
@@ -71,8 +76,38 @@ function Community() {
   const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [rsvps, setRsvps] =
     useState<Record<string, RsvpChoice | null>>(INITIAL_RSVPS);
-  const [extra, setExtra] = useState<CommunityPost[]>([]);
   const [threads, setThreads] = useState<Record<string, CommunityComment[]>>({});
+
+  /* The feed is the server's, always. It is held here rather than in
+     usePortalData because only this page and Home read it, and Home reads it
+     for a different shape. */
+  const [records, setRecords] = useState<PostRecord[]>([]);
+  const [postsLoading, setPostsLoading] = useState(true);
+  const [postsError, setPostsError] = useState<string | null>(null);
+
+  /* The clock is stamped with the feed rather than read at render, so
+     "3h ago" is the age of the data on screen and every card agrees on it. */
+  const [loadedAt, setLoadedAt] = useState(() => new Date());
+
+  const loadPosts = useCallback(async () => {
+    setRecords(await listPosts());
+    setLoadedAt(new Date());
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        await loadPosts();
+        setPostsError(null);
+      } catch (err) {
+        setPostsError(
+          err instanceof ApiError ? err.message : "Could not load the feed."
+        );
+      } finally {
+        setPostsLoading(false);
+      }
+    })();
+  }, [loadPosts]);
 
   /* A link is the state while it is in the URL, so closing has to clear the
      query too — otherwise a reload reopens a thread the reader dismissed. */
@@ -83,16 +118,16 @@ function Community() {
   };
 
   const allPosts = useMemo(
-    () => extra.concat(COMMUNITY_POSTS),
-    [extra]
+    () => records.map((r) => toCommunityPost(r, people, labs, loadedAt)),
+    [records, people, labs, loadedAt]
   );
 
   /* Members is the bench, so the labs a post can be filed under, the lab rows
      in the rail and the groups on the Groups tab are the Portal's real labs
      rather than a list of their own — that is what "membership stays in sync
      with the Portal" means, and it is what makes "Message the group" able to
-     name an actual roster. Posts and events have no API behind them yet, so
-     those two lists arrive empty and each tab says so. */
+     name an actual roster. Events still have no API behind them, so that list
+     arrives empty and the tab says so. */
   const members = useMemo(() => benchRoster(bench, labs), [bench, labs]);
 
   const labList = useMemo<CommunityLab[]>(() => {
@@ -105,6 +140,14 @@ function Community() {
       })),
     ];
   }, [labs, members]);
+
+  /* What the composer may file a post under. The server refuses a lab the
+     author is not in, so offering one here would only produce an error the
+     person could not have avoided. */
+  const postLabs = useMemo(() => {
+    const mine = role === "Admin" ? labs : labs.filter((l) => myLabs.includes(l.id));
+    return [ALL_LABS, ...mine.map((l) => l.name)];
+  }, [role, labs, myLabs]);
 
   const visiblePosts = allPosts.filter(
     (p) => filter === ALL_LABS || p.lab === filter || p.lab === ALL_LABS
@@ -145,22 +188,31 @@ function Community() {
       name
     );
 
-  const submitPost = (text: string, lab: string) =>
-    setExtra((s) => [
-      {
-        id: `x${Date.now()}`,
-        who: meName,
-        initials: meInitials,
-        online: true,
-        lab,
-        time: "just now",
-        kind: "Update",
-        likes: 0,
-        text,
-        comments: [],
-      },
-      ...s,
-    ]);
+  /* Post, then re-read. The created record comes back in the response and
+     could be spliced in, but a feed that shows the writer their own copy is
+     how the old bug looked from the inside — what is on screen after this
+     returns is what the store holds, for everyone. */
+  const submitPost = async (text: string, labName: string) => {
+    const lab = labs.find((l) => l.name === labName)?.id;
+    try {
+      await createPost({ text, ...(lab ? { lab } : {}) });
+    } catch (err) {
+      toast.error(
+        err instanceof ApiError ? err.message : "Could not post that."
+      );
+      // Rethrown so the composer keeps the draft rather than clearing it.
+      throw err;
+    }
+    try {
+      await loadPosts();
+      setPostsError(null);
+      toast.success(
+        labName === ALL_LABS ? "Posted to the network." : `Posted to ${labName}.`
+      );
+    } catch {
+      toast.error("Posted, but the feed could not be reloaded. Refresh to see it.");
+    }
+  };
 
   const addComment = (id: string, text: string) =>
     setThreads((s) => ({
@@ -274,8 +326,11 @@ function Community() {
           {tab === "feed" && (
             <CommunityFeed
               labs={labList}
+              postLabs={postLabs}
               filter={filter}
               posts={visiblePosts}
+              loading={postsLoading}
+              error={postsError}
               meInitials={meInitials}
               liked={(p) => !!liked[p.id]}
               likes={likesFor}
