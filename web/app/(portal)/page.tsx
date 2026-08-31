@@ -31,9 +31,11 @@ import { STAGES, type Deal, type Stage } from "@/lib/types";
  *
  * Where the numbers come from: the header stats and the pipeline card are the
  * real API, scoped by role the way the server scopes /deals. The digest and
- * the presence list are the community seed content (lib/community.ts) —
+ * the presence list are cut from the community records (lib/community.ts) —
  * see lib/dashboard.ts for why they read out of the same records the feed
- * does, and what changes when a real feed and a presence source exist.
+ * does. Until a community API exists there are no such records, so the digest
+ * shows its empty state and the presence card does not render at all: an
+ * "Around right now" that is permanently empty says less than no card.
  */
 
 /* How many presence rows fit the card before it becomes a directory. */
@@ -155,7 +157,7 @@ export default function DashboardPage() {
         <main className="flex min-w-0 flex-col gap-4">
           <Digest
             stories={stories}
-            edition={editionLabel(now, stories.length)}
+            edition={stories.length ? editionLabel(now, stories.length) : ""}
             meInitials={meInitials}
           />
         </main>
@@ -168,11 +170,13 @@ export default function DashboardPage() {
               nudge={nextClose && <CloseNudge close={nextClose} now={now} />}
             />
           )}
-          <PresenceCard
-            leaders={leaders.slice(0, PRESENCE_ROWS)}
-            more={Math.max(0, leaders.length - PRESENCE_ROWS)}
-            onMessage={(leader) => openWith([networkId(leader.name)])}
-          />
+          {leaders.length > 0 && (
+            <PresenceCard
+              leaders={leaders.slice(0, PRESENCE_ROWS)}
+              more={Math.max(0, leaders.length - PRESENCE_ROWS)}
+              onMessage={(leader) => openWith([networkId(leader.name)])}
+            />
+          )}
         </aside>
       </div>
     </>
