@@ -13,8 +13,8 @@ import type { FileKind, FileRecord } from "@/lib/types";
 export const MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 export const MAX_UPLOAD_LABEL = "50 MB";
 
-/* The business-document formats a deal's proposal or invoice actually arrives
-   in. The backend stores any type (the Files page takes screen recordings),
+/* The business-document formats a deal's proposal, contract or invoice
+   actually arrives in. The backend stores any type (the Files page takes screen recordings),
    so this is a deal-drawer rule, enforced by extension because browsers are
    inconsistent about the MIME type they attach to .doc and .xls. */
 const ACCEPTED_EXTENSIONS = ["pdf", "doc", "docx", "xls", "xlsx", "png", "jpg", "jpeg"];

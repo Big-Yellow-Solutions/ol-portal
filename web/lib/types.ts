@@ -369,7 +369,11 @@ export interface InvoiceRequest {
 /** Which slot on a deal an uploaded document fills. Mirrors
  *  backend/src/app.mjs's FILE_KINDS; an untagged file is a plain
  *  Files-page upload with no place in the deal drawer. */
-export type FileKind = "proposal" | "invoice";
+export type FileKind = "proposal" | "contract" | "invoice";
+
+/** The single-document slots, where a new upload supersedes the last rather
+ *  than sitting beside it. Mirrors backend/src/app.mjs's VERSIONED_KINDS. */
+export const VERSIONED_FILE_KINDS: FileKind[] = ["proposal", "contract"];
 
 export interface FileRecord {
   id: string;
@@ -377,6 +381,10 @@ export interface FileRecord {
   lab?: string;
   deal?: string;
   kind?: FileKind;
+  /** Which version of its slot's document this is, 1-based. Absent on files
+   *  stored before versioning existed and on unversioned kinds (invoices);
+   *  read an absent value as 1. */
+  version?: number;
   proposal?: string;
   contract?: string;
   contributorEmail?: string;
