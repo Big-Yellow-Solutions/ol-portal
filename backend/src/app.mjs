@@ -31,11 +31,18 @@ const TABLE = process.env.TABLE_NAME;
 const FILES_BUCKET = process.env.FILES_BUCKET;
 const s3 = new S3Client({});
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
-/* Which slot on a deal an uploaded document fills. Proposals and invoices are
-   produced outside the portal now and uploaded here, so the FILE record needs
-   to say which of the deal drawer's two upload boxes it belongs in — an
-   untagged file is still just a file on the Files page. */
-const FILE_KINDS = ["proposal", "invoice"];
+/* Which slot on a deal an uploaded document fills. Proposals, contracts and
+   invoices are produced outside the portal now and uploaded here, so the FILE
+   record needs to say which of the deal drawer's three upload boxes it belongs
+   in — an untagged file is still just a file on the Files page. */
+const FILE_KINDS = ["proposal", "contract", "invoice"];
+/* Slots that hold one document rather than a pile of them. A second upload
+   into one of these is the next version of the same paper, not a second
+   document: createFile stamps it `version: n + 1` and the drawer shows the
+   highest version, folding the earlier ones away. An invoice box is the other
+   shape — a deal can be invoiced many times, and each invoice stands alone —
+   so invoices are unversioned and every upload keeps its own row. */
+const VERSIONED_KINDS = ["proposal", "contract"];
 const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
@@ -237,8 +244,15 @@ async function updateDeal(ctx, id, body) {
   // automatically once both exist, so the only way to hit this is closing one
   // by hand ahead of that. `contractSigned` isn't in `editable`, so it always
   // reflects what rollUpDeal itself set, never a client-supplied value.
-  if (closingNow && !deal.contractSigned)
-    return resp(400, { error: "A signed contract is required to close a deal" });
+  //
+  // A contract uploaded onto the deal clears this too, the same way an
+  // uploaded proposal clears the Proposal Sent gate below: paper signed
+  // outside the portal never reaches rollUpDeal, and a deal whose signed
+  // contract is sitting in its own Documents tab should not be unclosable.
+  if (closingNow && !deal.contractSigned) {
+    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract");
+    if (!uploaded) return resp(400, { error: "A signed contract is required to close a deal" });
+  }
 
   // Billing-entity and sent-proposal gates only fire on the transition that
   // actually crosses the gate (or when the billing link itself is being
@@ -364,11 +378,24 @@ async function createFile(ctx, body) {
   if (lab && !ctx.can.seesLab(lab)) return resp(403, { error: "lab not visible to you" });
   if (kind && !FILE_KINDS.includes(kind)) return resp(400, { error: "invalid kind" });
 
+  /* A second upload into a single-document slot is the next version of that
+     document, not a rival to it, so number it above every version already on
+     the deal. Files stored before versioning existed carry no `version` and
+     read as v1. A gap left by a deleted version is not reused — the v4 after a
+     removed v3 is still the fourth proposal, which is what the record should
+     say. */
+  let version;
+  if (deal && VERSIONED_KINDS.includes(kind)) {
+    const siblings = (await listType("FILE")).filter(f => f.deal === deal && f.kind === kind);
+    version = siblings.reduce((max, f) => Math.max(max, f.version || 1), 0) + 1;
+  }
+
   const id = await nextId("FILE", "F-");
   const key = `uploads/${id}/${name.trim().replace(/[^\w.\- ]/g, "_")}`;
   const record = {
     pk: "FILE", sk: id, name: name.trim(), key, size, type,
     ...(lab ? { lab } : {}), ...(deal ? { deal } : {}), ...(kind ? { kind } : {}),
+    ...(version ? { version } : {}),
     uploader: ctx.me.sk, date: new Date().toISOString(), status: "Uploading"
   };
   await put(record);

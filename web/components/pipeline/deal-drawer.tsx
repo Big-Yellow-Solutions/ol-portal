@@ -153,6 +153,17 @@ export function DealDrawer({
     [files, proposals, existing]
   );
 
+  /* The signed contract works the same way: rollUpDeal sets `contractSigned`
+     for paper signed through the portal, and a contract uploaded onto the deal
+     covers paper signed outside it — backend/src/app.mjs accepts either. */
+  const hasContract = useMemo(
+    () =>
+      !!existing &&
+      (!!existing.contractSigned ||
+        files.some((f) => f.deal === existing.id && f.kind === "contract")),
+    [files, existing]
+  );
+
   const isClosed = stage === "Closed";
   const gated = billingRequiredAt(stage);
   const linked = !!companyId || !!contactId;
@@ -161,7 +172,7 @@ export function DealDrawer({
     !!title.trim() &&
     (linked || !gated) &&
     (!propGated || hasProposal) &&
-    (!isClosed || (!!existing?.contractSigned && !!close));
+    (!isClosed || (hasContract && !!close));
 
   const hint = !title.trim()
     ? "A deal name is required"
@@ -169,8 +180,8 @@ export function DealDrawer({
       ? `Link a company or a person to save this deal at ${stage}`
       : propGated && !hasProposal
         ? `Upload a proposal before saving this deal at ${stage}`
-        : isClosed && !existing?.contractSigned
-          ? "A signed contract is required to close this deal"
+        : isClosed && !hasContract
+          ? "Upload the signed contract before closing this deal"
           : isClosed && !close
             ? "Set the date this deal closed"
             : !linked
@@ -515,7 +526,14 @@ export function DealDrawer({
               deal={existing!}
               kind="proposal"
               label="Upload Proposal"
-              hint="Attach the proposal document for this deal. Uploads are saved immediately."
+              hint="Attach the proposal document for this deal. Uploading again supersedes it — earlier versions stay on record."
+              editable={editable}
+            />
+            <DocumentUploadPanel
+              deal={existing!}
+              kind="contract"
+              label="Upload Contract"
+              hint="Attach the signed contract for this deal. Uploading again supersedes it — earlier versions stay on record."
               editable={editable}
             />
             <DocumentUploadPanel
@@ -523,7 +541,6 @@ export function DealDrawer({
               kind="invoice"
               label="Upload Invoice"
               hint="Attach each invoice issued for this deal. Uploads are saved immediately."
-              multiple
               editable={editable}
             />
 
@@ -533,7 +550,9 @@ export function DealDrawer({
                 <p className="text-xs text-ink-mute">
                   {existing?.contractSigned
                     ? "On file — a signed client contract is attached to this deal."
-                    : "Required to close. The signed client contract is managed on the Contracts page."}
+                    : hasContract
+                      ? "On file — a signed contract is uploaded above."
+                      : "Required to close. Upload the signed contract above, or build and sign one on the Contracts page."}
                 </p>
                 {existing?.contractSigned && (
                   <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>
