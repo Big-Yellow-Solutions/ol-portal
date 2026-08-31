@@ -63,7 +63,10 @@ export function PostCard({
         <AvatarWithPresence
           initials={post.initials}
           who={post.who}
-          online={post.who === "Optimistic Labs" ? undefined : !!post.online}
+          /* Undefined draws no dot. There is no presence backend, and a
+             stored post carries no presence, so coercing this to a boolean
+             would put a permanent "away" marker on every real author. */
+          online={post.online}
         />
         <span className="min-w-0 flex-1">
           <button

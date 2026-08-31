@@ -24,6 +24,7 @@ import * as signing from "./signing.mjs";
 import * as resources from "./resources.mjs";
 import * as courses from "./courses.mjs";
 import * as guides from "./guides.mjs";
+import * as community from "./community.mjs";
 import { fullName } from "./util.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
@@ -563,6 +564,13 @@ async function route(ctx, method, path, seg, body) {
   if (method === "GET" && seg[0] === "courses" && seg[1]) return await courses.getCourse(ctx, seg[1]);
   if (method === "PATCH" && seg[0] === "courses" && seg[1]) return await courses.updateCourse(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "courses" && seg[1]) return await courses.deleteCourse(ctx, seg[1]);
+  /* Community feed. The `{id}` forms sit after the bare `/posts` ones, which
+     the sequential router would otherwise never reach. */
+  if (method === "GET" && path === "/posts") return await community.listPosts(ctx);
+  if (method === "POST" && path === "/posts") return await community.createPost(ctx, body);
+  if (method === "GET" && seg[0] === "posts" && seg[1]) return await community.getPost(ctx, seg[1]);
+  if (method === "PATCH" && seg[0] === "posts" && seg[1]) return await community.updatePost(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "posts" && seg[1]) return await community.deletePost(ctx, seg[1]);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
   if (method === "GET" && path === "/kb") return await kb.listKb(ctx);

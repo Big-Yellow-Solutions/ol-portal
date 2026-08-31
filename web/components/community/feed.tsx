@@ -19,11 +19,19 @@ import { cn } from "@/lib/utils";
 
 /* The Feed tab: the pinned announcement, the composer, the lab chips and the
    posts. The draft lives here rather than on the page because nothing outside
-   this tab reads it — the page only hears about a post once it is submitted. */
+   this tab reads it — the page only hears about a post once it is submitted.
+
+   `onPost` is awaited, and a rejection keeps the draft: the text somebody just
+   typed is the one thing this component must not lose. `labs` is what the
+   chips filter by (every lab), `postLabs` is what the composer may file under
+   (the ones this person is in) — they are different lists on purpose. */
 export function CommunityFeed({
   labs,
+  postLabs,
   filter,
   posts,
+  loading,
+  error,
   meInitials,
   liked,
   likes,
@@ -35,27 +43,47 @@ export function CommunityFeed({
   onAuthor,
 }: {
   labs: CommunityLab[];
+  postLabs: string[];
   filter: string;
   posts: CommunityPost[];
+  loading: boolean;
+  error: string | null;
   meInitials: string;
   liked: (post: CommunityPost) => boolean;
   likes: (post: CommunityPost) => number;
   comments: (post: CommunityPost) => number;
   onPickLab: (name: string) => void;
-  onPost: (text: string, lab: string) => void;
+  onPost: (text: string, lab: string) => Promise<void>;
   onLike: (post: CommunityPost) => void;
   onOpen: (post: CommunityPost) => void;
   onAuthor: (who: string) => void;
 }) {
   const [draft, setDraft] = useState("");
   const [postTo, setPostTo] = useState<string | null>(null);
+  const [posting, setPosting] = useState(false);
 
-  const submit = () => {
+  /* The filter can be a lab this person cannot post to — they can read every
+     lab's chip but only file under their own — so the select falls back to
+     the network rather than showing a value that is not one of its options. */
+  const chosen = postTo ?? filter;
+  const target = postLabs.includes(chosen) ? chosen : ALL_LABS;
+
+  const submit = async () => {
     const text = draft.trim();
-    if (!text) return;
-    onPost(text, postTo ?? filter);
-    setDraft("");
+    if (!text || posting) return;
+    setPosting(true);
+    try {
+      await onPost(text, target);
+      setDraft("");
+    } catch {
+      // The page has already said what went wrong; the draft stays put so it
+      // can be sent again.
+    } finally {
+      setPosting(false);
+    }
   };
+
+  const canSubmit = !!draft.trim() && !posting;
 
   return (
     <>
@@ -87,6 +115,7 @@ export function CommunityFeed({
               placeholder="Share a win, a link, or an ask with the network…"
               aria-label="Write a post"
               rows={3}
+              disabled={posting}
               className={cn(
                 FIELD,
                 "w-full resize-none rounded-[12px] px-3.5 py-[11px] text-[15px] leading-[1.5]"
@@ -96,16 +125,17 @@ export function CommunityFeed({
               <label className="flex items-center gap-[7px] text-[13px] whitespace-nowrap text-warm-gray">
                 Posting to
                 <select
-                  value={postTo ?? filter}
+                  value={target}
                   onChange={(e) => setPostTo(e.target.value)}
+                  disabled={posting}
                   className={cn(
                     FIELD,
-                    "cursor-pointer rounded-full px-[11px] py-[7px] text-[13px] font-semibold text-violet-deep"
+                    "cursor-pointer rounded-full px-[11px] py-[7px] text-[13px] font-semibold text-violet-deep disabled:cursor-not-allowed"
                   )}
                 >
-                  {labs.map((l) => (
-                    <option key={l.name} value={l.name}>
-                      {l.name}
+                  {postLabs.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
                     </option>
                   ))}
                 </select>
@@ -113,15 +143,15 @@ export function CommunityFeed({
               <button
                 type="button"
                 onClick={submit}
-                disabled={!draft.trim()}
+                disabled={!canSubmit}
                 className={cn(
                   "rounded-full px-5 py-[9px] text-sm font-semibold transition-colors",
-                  draft.trim()
+                  canSubmit
                     ? "cursor-pointer bg-violet-deep text-white hover:bg-violet"
                     : "cursor-not-allowed bg-violet-pale text-violet-deep/50"
                 )}
               >
-                Post
+                {posting ? "Posting…" : "Post"}
               </button>
             </div>
           </div>
@@ -150,7 +180,18 @@ export function CommunityFeed({
         })}
       </div>
 
-      {posts.length === 0 ? (
+      {error ? (
+        <div className="rounded-[16px] border border-dashed border-hair-strong bg-white p-10 text-center">
+          <p className="m-0 text-[15px] leading-[1.55] text-pretty text-red">
+            {error}
+          </p>
+          <p className="mt-1.5 mb-0 text-[13px] text-warm-gray">
+            Nothing has been lost — reload the page to try again.
+          </p>
+        </div>
+      ) : loading ? (
+        <p className="px-1 text-sm text-ink-mute">Loading the feed…</p>
+      ) : posts.length === 0 ? (
         /* The composer is directly above this, so the empty state says what
            the feed is for rather than repeating the button that fills it. */
         <div className="rounded-[16px] border border-dashed border-hair-strong bg-white p-10 text-center">
