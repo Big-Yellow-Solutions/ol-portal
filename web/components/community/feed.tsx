@@ -10,6 +10,7 @@ import {
 } from "@/components/community/primitives";
 import { PostCard } from "@/components/community/post-card";
 import {
+  ALL_LABS,
   PINNED_ANNOUNCEMENT,
   type CommunityLab,
   type CommunityPost,
@@ -58,21 +59,23 @@ export function CommunityFeed({
 
   return (
     <>
-      <section className="flex gap-3.5 rounded-[16px] border border-hair-strong bg-violet-pale px-5 py-[18px]">
-        <PinIcon size={17} className="mt-0.5 flex-none text-violet-deep" />
-        <div className="min-w-0">
-          <Eyebrow>Pinned announcement</Eyebrow>
-          <h2 className="mt-1.5 mb-0 text-lg leading-[1.3] font-bold tracking-[-0.012em]">
-            {PINNED_ANNOUNCEMENT.title}
-          </h2>
-          <p className="mt-1.5 mb-0 text-sm leading-[1.55] text-pretty text-ink/[0.78]">
-            {PINNED_ANNOUNCEMENT.body}
-          </p>
-          <span className="mt-2 block text-[11px] font-semibold tracking-[0.1em] text-warm-gray uppercase">
-            {PINNED_ANNOUNCEMENT.meta}
-          </span>
-        </div>
-      </section>
+      {PINNED_ANNOUNCEMENT && (
+        <section className="flex gap-3.5 rounded-[16px] border border-hair-strong bg-violet-pale px-5 py-[18px]">
+          <PinIcon size={17} className="mt-0.5 flex-none text-violet-deep" />
+          <div className="min-w-0">
+            <Eyebrow>Pinned announcement</Eyebrow>
+            <h2 className="mt-1.5 mb-0 text-lg leading-[1.3] font-bold tracking-[-0.012em]">
+              {PINNED_ANNOUNCEMENT.title}
+            </h2>
+            <p className="mt-1.5 mb-0 text-sm leading-[1.55] text-pretty text-ink/[0.78]">
+              {PINNED_ANNOUNCEMENT.body}
+            </p>
+            <span className="mt-2 block text-[11px] font-semibold tracking-[0.1em] text-warm-gray uppercase">
+              {PINNED_ANNOUNCEMENT.meta}
+            </span>
+          </div>
+        </section>
+      )}
 
       <Panel className="px-[18px] py-4">
         <div className="flex gap-3">
@@ -147,18 +150,39 @@ export function CommunityFeed({
         })}
       </div>
 
-      {posts.map((p) => (
-        <PostCard
-          key={p.id}
-          post={p}
-          liked={liked(p)}
-          likes={likes(p)}
-          comments={comments(p)}
-          onLike={() => onLike(p)}
-          onOpen={() => onOpen(p)}
-          onAuthor={() => onAuthor(p.who)}
-        />
-      ))}
+      {posts.length === 0 ? (
+        /* The composer is directly above this, so the empty state says what
+           the feed is for rather than repeating the button that fills it. */
+        <div className="rounded-[16px] border border-dashed border-hair-strong bg-white p-10 text-center">
+          <p className="m-0 text-[15px] leading-[1.55] text-pretty text-warm-gray">
+            {filter === ALL_LABS
+              ? "Nothing has been posted yet. Wins, links and asks the network should see land here."
+              : `Nothing in ${filter} yet.`}
+          </p>
+          {filter !== ALL_LABS && (
+            <button
+              type="button"
+              onClick={() => onPickLab(ALL_LABS)}
+              className="mt-2 cursor-pointer text-[13px] font-semibold text-violet-deep hover:text-violet"
+            >
+              See every lab
+            </button>
+          )}
+        </div>
+      ) : (
+        posts.map((p) => (
+          <PostCard
+            key={p.id}
+            post={p}
+            liked={liked(p)}
+            likes={likes(p)}
+            comments={comments(p)}
+            onLike={() => onLike(p)}
+            onOpen={() => onOpen(p)}
+            onAuthor={() => onAuthor(p.who)}
+          />
+        ))
+      )}
     </>
   );
 }

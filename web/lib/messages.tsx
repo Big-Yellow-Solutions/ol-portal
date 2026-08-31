@@ -20,14 +20,13 @@ import type { Lab, Person } from "@/lib/types";
  * icon, the bench cards, Home's presence rows, and any link to `#messages`.
  *
  * There is no messages API — backend/src has no route for one — so a
- * conversation is seed content plus whatever the session appends. Two things
- * follow, both deliberate:
+ * conversation is whatever the session appends to it, and every thread starts
+ * empty: nobody is shown words a colleague never wrote. Two things follow,
+ * both deliberate:
  *
- * 1. The roster is the real bench (who the directory lists) *plus* the
- *    community network Home already ships presence for. The seeded threads are
- *    the same COMMUNITY_THREADS the dashboard drawer read, so nothing is
- *    invented about a real colleague: a thread with someone on the bench
- *    starts empty until somebody types in it.
+ * 1. The roster is the real bench (who the directory lists) plus anyone the
+ *    community feed carries who is not on it. lib/community.ts is empty until
+ *    that API lands, so today the roster is exactly the bench.
  * 2. Sending appends immediately. When the API lands, that append becomes the
  *    optimistic write and the reconcile follows it; nothing else here moves.
  */

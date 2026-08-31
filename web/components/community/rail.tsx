@@ -125,6 +125,11 @@ export function CommunityRail({
           </button>
         </div>
         <div className="flex flex-col gap-3.5">
+          {events.length === 0 && (
+            <p className="m-0 text-[13px] text-warm-gray">
+              Nothing scheduled yet.
+            </p>
+          )}
           {events.map((e) => {
             const mine = rsvps[e.id];
             return (

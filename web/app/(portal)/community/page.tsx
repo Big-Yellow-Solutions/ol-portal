@@ -91,7 +91,8 @@ function Community() {
      in the rail and the groups on the Groups tab are the Portal's real labs
      rather than a list of their own — that is what "membership stays in sync
      with the Portal" means, and it is what makes "Message the group" able to
-     name an actual roster. Only the posts and events are still seed content. */
+     name an actual roster. Posts and events have no API behind them yet, so
+     those two lists arrive empty and each tab says so. */
   const members = useMemo(() => benchRoster(bench, labs), [bench, labs]);
 
   const labList = useMemo<CommunityLab[]>(() => {
@@ -318,6 +319,12 @@ function Community() {
                   </span>
                 )}
               </div>
+
+              {COMMUNITY_EVENTS.length === 0 && (
+                <div className="rounded-[16px] border border-dashed border-hair-strong bg-white p-10 text-center text-[15px] text-warm-gray">
+                  Nothing on the calendar yet.
+                </div>
+              )}
 
               {COMMUNITY_EVENTS.map((e) => (
                 <Panel as="article" key={e.id} className="flex gap-[18px] p-5">

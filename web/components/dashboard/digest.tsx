@@ -108,9 +108,13 @@ export function Digest({
             Across the Network
           </span>
         </h2>
-        <span className="text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
-          {edition}
-        </span>
+        {/* No stories, no edition line: "0 stories" is a count nobody asked
+            for, and the empty state below already says it. */}
+        {edition && (
+          <span className="text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
+            {edition}
+          </span>
+        )}
       </div>
       <div className="h-0.5 bg-violet-deep" />
 
