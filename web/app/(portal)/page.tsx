@@ -22,7 +22,7 @@ import {
 } from "@/lib/dashboard";
 import { networkId, useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
-import { fmtCompact, fullName, initials } from "@/lib/data";
+import { fmtCompact, fullName, initials, isActive } from "@/lib/data";
 import { STAGES, type Deal, type Stage } from "@/lib/types";
 import { isClosedStage } from "@/lib/pipeline";
 
@@ -121,7 +121,7 @@ export default function DashboardPage() {
     .reduce((sum, d) => sum + (d.amount ?? 0), 0);
 
   const leaderCount = Object.values(people).filter(
-    (p) => p.role === "Lab Leader"
+    (p) => isActive(p) && p.role === "Lab Leader"
   ).length;
 
   const stageTotals: StageTotal[] = OPEN_STAGES.map((stage) => ({

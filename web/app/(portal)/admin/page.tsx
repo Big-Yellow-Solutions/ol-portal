@@ -59,6 +59,7 @@ interface AdminUser {
   name: string;
   role: Role | "";
   labs: string[];
+  active: boolean;
 }
 
 interface AuditEntry {
@@ -77,7 +78,7 @@ interface KbEntry {
   updatedBy: string;
 }
 
-const INVITE_ROLES: Role[] = ["Lab Leader", "Contributor", "Admin"];
+const ROLE_OPTIONS: Role[] = ["Lab Leader", "Contributor", "Admin"];
 
 /* What each directory does on invite and on reset, in the words the admin
    sees. The mechanics differ (a temporary password vs. an invitation link; a
@@ -117,6 +118,7 @@ const STATUS_BADGE: Record<string, [BadgeVariant, string]> = {
   CONFIRMED: ["success", "Active"],
   FORCE_CHANGE_PASSWORD: ["warning", "Invite pending"],
   NO_ACCOUNT: ["outline", "No account"],
+  DEACTIVATED: ["destructive", "Offboarded"],
   RESET_REQUIRED: ["destructive", "Reset required"],
 };
 
@@ -299,6 +301,93 @@ function AdminConsole({
     }
   };
 
+  /* Role and labs live on the PERSON record, which is what buildContext reads
+     on every request — so a change here lands on the person's next request
+     with no re-invite and no sign-out. Self is left off the row on purpose:
+     the backend refuses it too, and that refusal is what keeps the org from
+     ever being left without an Admin. */
+  const [accessDialogUser, setAccessDialogUser] = useState<AdminUser | null>(null);
+  const [accessRole, setAccessRole] = useState<Role>("Contributor");
+  const [accessLabs, setAccessLabs] = useState<Set<string>>(new Set());
+  const [savingAccess, setSavingAccess] = useState(false);
+
+  const openAccessDialog = (u: AdminUser) => {
+    setAccessDialogUser(u);
+    setAccessRole((u.role || "Contributor") as Role);
+    setAccessLabs(new Set(u.labs || []));
+  };
+
+  const toggleAccessLab = (key: string, checked: boolean) => {
+    setAccessLabs((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  };
+
+  const saveAccess = async () => {
+    if (!accessDialogUser) return;
+    setSavingAccess(true);
+    try {
+      await api(`/admin/users/${accessDialogUser.username}/access`, {
+        method: "PATCH",
+        body: JSON.stringify({ role: accessRole, labs: [...accessLabs] }),
+      });
+      toast.success(
+        `${accessDialogUser.name || accessDialogUser.username} is now a ${accessRole}.`
+      );
+      setAccessDialogUser(null);
+      await loadUsers();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSavingAccess(false);
+    }
+  };
+
+  /* Offboarding is deactivation, not deletion: the sign-in is removed and the
+     record is marked, so a deal this person owned still resolves to their
+     name. Restore re-invites them — the directory account is gone, so there is
+     nothing to switch back on. */
+  const offboard = async (u: AdminUser) => {
+    const who = u.name || u.username;
+    if (
+      !confirm(
+        `Offboard ${who}? Their sign-in is removed and any unaccepted invite is revoked, and they lose portal access immediately — even if they're signed in right now.\n\nTheir profile is kept, so deals and contracts they own still show their name. You can restore them later, which sends a fresh invite.`
+      )
+    )
+      return;
+    setBusyUser(u.username);
+    try {
+      await api(`/admin/users/${u.username}/offboard`, { method: "POST" });
+      toast.success(`${who} has been offboarded.`);
+      await loadUsers();
+      await loadAudit();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyUser(null);
+    }
+  };
+
+  const restore = async (u: AdminUser) => {
+    const who = u.name || u.username;
+    if (!confirm(`Restore ${who} as a ${u.role}? A fresh invite is emailed and their labs come back with them.`))
+      return;
+    setBusyUser(u.username);
+    try {
+      await api(`/admin/users/${u.username}/restore`, { method: "POST" });
+      toast.success(`${who} restored — an invite is on its way.`);
+      await loadUsers();
+      await loadAudit();
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setBusyUser(null);
+    }
+  };
+
   const actAs = async (username: string) => {
     setBusyUser(username);
     try {
@@ -457,7 +546,7 @@ function AdminConsole({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {INVITE_ROLES.map((r) => (
+                        {ROLE_OPTIONS.map((r) => (
                           <SelectItem key={r} value={r}>
                             {r}
                           </SelectItem>
@@ -537,7 +626,8 @@ function AdminConsole({
                         u.status,
                       ];
                       const pending = u.status === "FORCE_CHANGE_PASSWORD";
-                      const hasAccount = u.status !== "NO_ACCOUNT";
+                      const offboarded = !u.active;
+                      const hasAccount = u.status !== "NO_ACCOUNT" && !offboarded;
                       const self = u.username === myUsername;
                       const busy = busyUser === u.username;
                       return (
@@ -559,7 +649,25 @@ function AdminConsole({
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div>{u.role || "—"}</div>
+                            <div className="flex items-center gap-1.5 whitespace-nowrap">
+                              {u.role || <span className="text-red">no role</span>}
+                              {/* An empty role means no PERSON record at all — a
+                                  directory account nobody invited. There is
+                                  nothing to edit, and the backend refuses it
+                                  with a 404, which is the invite-only rule
+                                  doing its job rather than a bug to work
+                                  around. */}
+                              {!self && u.role && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon-xs"
+                                  title="Change role and labs"
+                                  onClick={() => openAccessDialog(u)}
+                                >
+                                  ✎
+                                </Button>
+                              )}
+                            </div>
                             <div className="text-xs text-ink-mute">
                               {(u.labs || []).map((k) => labName(k)).join(", ")}
                             </div>
@@ -574,7 +682,7 @@ function AdminConsole({
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1.5">
-                              {pending && (
+                              {pending && !offboarded && (
                                 <>
                                   <Button
                                     variant="outline"
@@ -604,7 +712,7 @@ function AdminConsole({
                                   {COPY.resetLabel}
                                 </Button>
                               )}
-                              {!pending && !self && u.role !== "Admin" && (
+                              {!pending && !self && !offboarded && u.role !== "Admin" && (
                                 <Button
                                   variant="outline"
                                   size="sm"
@@ -612,6 +720,26 @@ function AdminConsole({
                                   onClick={() => actAs(u.username)}
                                 >
                                   Act as
+                                </Button>
+                              )}
+                              {!self && !offboarded && (
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  disabled={busy}
+                                  onClick={() => offboard(u)}
+                                >
+                                  Offboard
+                                </Button>
+                              )}
+                              {offboarded && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={busy}
+                                  onClick={() => restore(u)}
+                                >
+                                  Restore
                                 </Button>
                               )}
                             </div>
@@ -757,6 +885,66 @@ function AdminConsole({
             </Button>
             <Button onClick={saveEmail} disabled={savingEmail || !emailDraft.trim()}>
               {savingEmail ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------- change role + labs dialog ---------- */}
+      <Dialog
+        open={!!accessDialogUser}
+        onOpenChange={(open) => !open && setAccessDialogUser(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change role &amp; labs</DialogTitle>
+            <DialogDescription>
+              {accessDialogUser &&
+                `${accessDialogUser.name || accessDialogUser.username} — takes effect on their next request. They don\u2019t need to sign in again.`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="accessRole">Role</Label>
+              <Select value={accessRole} onValueChange={(v) => setAccessRole(v as Role)}>
+                <SelectTrigger id="accessRole" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium text-ink">
+                Labs (for Lab Leaders / Contributors)
+              </span>
+              <div className="flex flex-wrap gap-4">
+                {labs.map((lab) => (
+                  <label
+                    key={lab.id}
+                    className="flex items-center gap-2 text-sm text-ink-soft"
+                  >
+                    <Checkbox
+                      checked={accessLabs.has(lab.id)}
+                      onCheckedChange={(c) => toggleAccessLab(lab.id, c === true)}
+                    />
+                    {lab.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAccessDialogUser(null)}>
+              Cancel
+            </Button>
+            <Button onClick={saveAccess} disabled={savingAccess}>
+              {savingAccess ? "Saving\u2026" : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

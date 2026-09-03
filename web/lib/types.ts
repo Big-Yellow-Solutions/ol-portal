@@ -84,6 +84,11 @@ export interface Person {
   onboarded?: boolean;
   photo?: string;
   bench?: PersonBench;
+  /* Offboarded people are still sent by bootstrap on purpose: a deal or
+     contract they own names them by key, and dropping them from `people`
+     would leave those pointing at nothing. They are filtered out of the
+     places that offer a person to pick instead — see isActive in lib/data. */
+  active?: boolean;
 }
 
 // bootstrap's `labs` is a map keyed by lab id (pk/sk stripped), not an

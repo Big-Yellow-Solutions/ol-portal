@@ -65,7 +65,13 @@ const withProfile = (account, person) => ({
   lastName: person?.lastName || "",
   name: fullName(person) || account.username,
   role: person?.role || "",
-  labs: person?.labs || []
+  labs: person?.labs || [],
+  /* A deactivated person has no sign-in left, so the directory reports them as
+     NO_ACCOUNT — the same status as somebody who was never invited. They are
+     not the same thing at all, and only the PERSON record can tell them apart,
+     so the status is overridden here rather than inferred on the page. */
+  active: person?.active !== false,
+  status: person?.active === false ? "DEACTIVATED" : account.status
 });
 
 /* ---------- invites (PRD 2.2) ----------
@@ -221,6 +227,52 @@ export async function updateUserEmail(ctx, username, body) {
   return resp(200, { username: r.username, email });
 }
 
+/* Role and labs both live on the PERSON record and nowhere else. The WorkOS
+   invitation deliberately carries neither (see workos.mjs sendInvitation), and
+   buildContext reads `me.role` in preference to the token's claim under both
+   providers — so a change here takes effect on the person's very next request,
+   with no re-authentication and nothing to keep in step in the directory.
+
+   Under Cognito the pool group is left as it was for the same reason: it is
+   only ever the fallback, and resetMfa rewrites it from this record anyway.
+
+   Self-edits are refused. An Admin demoting themselves would lose this page
+   mid-change, and if they were the only Admin nobody could put it back — which
+   also makes this the guard that keeps at least one Admin standing. */
+export async function updateUserAccess(ctx, username, body) {
+  if (!isAdmin(ctx)) return forbidden();
+  if (username === ctx.me.sk) return resp(400, { error: "you can't change your own role" });
+  const { role, labs } = body || {};
+  if (!ROLES.includes(role)) return resp(400, { error: "role must be Admin, Lab Leader, or Contributor" });
+
+  const person = await getPerson(username);
+  if (!person) return resp(404, { error: "no such user" });
+
+  // An omitted `labs` leaves the existing ones alone; an empty array clears them.
+  const labList = labs === undefined ? (person.labs || []) : labs;
+  if (!Array.isArray(labList)) return resp(400, { error: "labs must be an array" });
+  for (const lab of labList) {
+    const known = (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk: "LAB", sk: lab } }))).Item;
+    if (!known) return resp(400, { error: `unknown lab: ${lab}` });
+  }
+
+  if (person.role === role && sameLabs(person.labs || [], labList))
+    return resp(200, { username, role, labs: labList, unchanged: true });
+
+  await doc.send(new PutCommand({
+    TableName: TABLE, Item: { ...person, role, labs: labList }
+  }));
+  await writeAudit(ctx.me.sk, "user.access-changed",
+    `${username}: ${person.role || "none"} \u2192 ${role} (${labList.length ? labList.join(", ") : "no labs"})`);
+  return resp(200, { username, role, labs: labList });
+}
+
+const sameLabs = (a, b) => {
+  if (a.length !== b.length) return false;
+  const sortedB = [...b].sort();
+  return [...a].sort().every((x, i) => x === sortedB[i]);
+};
+
 /* PRD 2.5 lost-device recovery: admin resets access after an out-of-band
    identity check. What "reset" does is the directory's business (see
    directory.mjs); the portal profile is untouched either way. */
@@ -236,6 +288,66 @@ export async function resetUserMfa(ctx, username) {
   return resp(200, { mfaReset: username });
 }
 
+/* ---------- offboarding ----------
+
+   Deactivation, not deletion. Deals, proposals, contracts and audit rows all
+   name a person by their PERSON key by value, so deleting the record would
+   leave live work pointing at nothing — and the portal's standing rule is that
+   history stays put (see updateUserEmail above). The record is kept and marked
+   instead, which is what lets a deal a departed Lab Leader owned still resolve
+   to their name.
+
+   Access is cut in two places because one is not enough:
+
+     the directory   deleting the WorkOS user (and revoking any unaccepted
+                     invitation) stops any NEW token being issued
+     `active: false` buildContext refuses the request, which stops the access
+                     token they are ALREADY holding — those live out their
+                     remaining minutes otherwise
+
+   Self is refused for the same reason it is on a role change: the caller is
+   always an Admin, so the org can never be left without one. */
+export async function offboardUser(ctx, username) {
+  if (!isAdmin(ctx)) return forbidden();
+  if (username === ctx.me.sk) return resp(400, { error: "you can't offboard yourself" });
+  const person = await getPerson(username);
+  if (!person) return resp(404, { error: "no such user" });
+  if (person.active === false) return resp(409, { error: "already offboarded" });
+
+  // No account to remove is the ordinary NO_ACCOUNT case, not a failure.
+  const r = await directory.deleteAccount(username);
+
+  await doc.send(new PutCommand({
+    TableName: TABLE,
+    Item: { ...person, active: false, offboardedAt: new Date().toISOString(), offboardedBy: ctx.me.sk }
+  }));
+  const removed = [r.deleted && "sign-in removed", r.invitationRevoked && "invite revoked"]
+    .filter(Boolean).join(", ") || "no sign-in to remove";
+  await writeAudit(ctx.me.sk, "user.offboarded", `${username} (${removed})`);
+  return resp(200, { offboarded: username, ...r });
+}
+
+/* The way back. The record is un-marked and a fresh invitation goes out, since
+   the directory account was deleted rather than suspended — WorkOS has nothing
+   to re-enable. Role and labs are whatever they were, because the record kept
+   them the whole time. */
+export async function restoreUser(ctx, username) {
+  if (!isAdmin(ctx)) return forbidden();
+  const person = await getPerson(username);
+  if (!person) return resp(404, { error: "no such user" });
+  if (person.active !== false) return resp(409, { error: "that user is already active" });
+
+  const account = await directory.createAccount({
+    username, email: person.email || username, role: person.role
+  });
+
+  const { offboardedAt, offboardedBy, ...kept } = person;
+  await doc.send(new PutCommand({ TableName: TABLE, Item: { ...kept, active: true } }));
+  await writeAudit(ctx.me.sk, "user.restored",
+    `${username}${account.existing ? " (sign-in already existed)" : " (re-invited)"}`);
+  return resp(200, { restored: username, reinvited: !account.existing });
+}
+
 /* ---------- act as (god-mode view/edit as another user) ----------
    Gated on ctx.realRole, not ctx.role: by the time a request reaches here,
    ctx.role may already be the impersonated target's (see app.mjs), so the
@@ -248,6 +360,7 @@ export async function startActingAs(ctx, body) {
   const person = target && await getPerson(target);
   if (!person) return resp(404, { error: "no such user" });
   if (person.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
+  if (person.active === false) return resp(403, { error: "Can't act as an offboarded user" });
   await writeAudit(ctx.realMe.sk, "admin.act-as-start", `${target} (${person.role})`);
   return resp(200, { username: target, name: fullName(person), role: person.role });
 }

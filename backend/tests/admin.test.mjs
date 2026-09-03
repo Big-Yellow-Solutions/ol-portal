@@ -84,6 +84,10 @@ globalThis.fetch = async (url, init = {}) => {
     Object.assign(user, body);
     return json(200, user);
   }
+  if (method === "DELETE" && (m = u.pathname.match(/^\/user_management\/users\/(.+)$/))) {
+    wos.users = wos.users.filter(x => x.id !== m[1]);
+    return json(200);
+  }
   if (method === "DELETE" && (m = u.pathname.match(/^\/auth\/factors\/(.+)$/))) {
     for (const id in wos.factors) wos.factors[id] = wos.factors[id].filter(f => f.id !== m[1]);
     return json(200);
@@ -271,6 +275,75 @@ test("changing the email of someone only invited re-issues the invitation", asyn
   assert.equal(rows.get(rowKey("PERSON", "liz@newdomain.org")).role, "Admin");
 });
 
+/* ---------- role + labs ---------- */
+
+test("a role change rewrites the PERSON record and asks WorkOS nothing", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", firstName: "Nora", lastName: "K",
+    role: "Contributor", labs: [], email: "nora@optimisticlabs.com"
+  });
+
+  const r = await admin.updateUserAccess(asAdmin(), "nora@optimisticlabs.com", {
+    role: "Lab Leader", labs: ["sports"]
+  });
+  assert.equal(r.statusCode, 200);
+  assert.deepEqual(body(r), { username: "nora@optimisticlabs.com", role: "Lab Leader", labs: ["sports"] });
+
+  const person = rows.get(rowKey("PERSON", "nora@optimisticlabs.com"));
+  assert.equal(person.role, "Lab Leader");
+  assert.deepEqual(person.labs, ["sports"]);
+  assert.equal(person.firstName, "Nora", "the rest of the profile survives the rewrite");
+  assert.equal(wos.calls.length, 0, "role lives on the PERSON record, so the directory has nothing to say");
+  assert.deepEqual(audit(), ["user.access-changed"]);
+});
+
+test("a change that changes nothing writes nothing", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Lab Leader", labs: ["sports"]
+  });
+  const r = await admin.updateUserAccess(asAdmin(), "nora@optimisticlabs.com", {
+    role: "Lab Leader", labs: ["sports"]
+  });
+  assert.equal(r.statusCode, 200);
+  assert.equal(body(r).unchanged, true);
+  assert.deepEqual(audit(), [], "no audit row for a no-op");
+});
+
+test("omitted labs are left alone; an empty array clears them", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Lab Leader", labs: ["sports"]
+  });
+  await admin.updateUserAccess(asAdmin(), "nora@optimisticlabs.com", { role: "Contributor" });
+  assert.deepEqual(rows.get(rowKey("PERSON", "nora@optimisticlabs.com")).labs, ["sports"]);
+
+  await admin.updateUserAccess(asAdmin(), "nora@optimisticlabs.com", { role: "Contributor", labs: [] });
+  assert.deepEqual(rows.get(rowKey("PERSON", "nora@optimisticlabs.com")).labs, []);
+});
+
+test("a role change is refused before it can strand the org or invent a lab", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Contributor", labs: []
+  });
+  const refused = async (username, patch) =>
+    (await admin.updateUserAccess(asAdmin(), username, patch)).statusCode;
+
+  // The self-guard is what keeps at least one Admin standing: the last Admin
+  // is always the caller, and the caller can never demote themselves.
+  assert.equal(await refused("teddy@optimisticlabs.com", { role: "Contributor" }), 400);
+  assert.equal(await refused("nora@optimisticlabs.com", { role: "Overlord" }), 400);
+  assert.equal(await refused("nora@optimisticlabs.com", { role: "Contributor", labs: ["ghost"] }), 400);
+  assert.equal(await refused("nora@optimisticlabs.com", { role: "Contributor", labs: "sports" }), 400);
+  assert.equal(await refused("nobody@optimisticlabs.com", { role: "Contributor" }), 404);
+
+  assert.equal(rows.get(rowKey("PERSON", "teddy@optimisticlabs.com")).role, "Admin");
+  assert.equal(rows.get(rowKey("PERSON", "nora@optimisticlabs.com")).role, "Contributor");
+  assert.deepEqual(audit(), []);
+});
+
 /* ---------- 2FA reset ---------- */
 
 test("reset removes every authenticator and nothing else", async () => {
@@ -292,13 +365,127 @@ test("reset removes every authenticator and nothing else", async () => {
   assert.equal((await admin.resetUserMfa(asAdmin(), "teddy@optimisticlabs.com")).statusCode, 400, "not yourself");
 });
 
+/* ---------- offboarding ---------- */
+
+test("offboarding removes the sign-in and keeps the record", async () => {
+  reset();
+  wos.users.push({ id: "user_nora", email: "nora@optimisticlabs.com" });
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", firstName: "Nora", lastName: "K",
+    role: "Lab Leader", labs: ["sports"], email: "nora@optimisticlabs.com"
+  });
+
+  const r = await admin.offboardUser(asAdmin(), "nora@optimisticlabs.com");
+  assert.equal(r.statusCode, 200);
+  assert.equal(body(r).deleted, true);
+  assert.equal(sent("DELETE", "/user_management/users/user_nora").length, 1);
+  assert.equal(wos.users.find(u => u.id === "user_nora"), undefined, "no way in left");
+
+  /* The whole point of deactivating rather than deleting: a deal this person
+     owns still resolves to a name, and their role and labs survive so a
+     restore does not have to reconstruct them. */
+  const person = rows.get(rowKey("PERSON", "nora@optimisticlabs.com"));
+  assert.equal(person.active, false);
+  assert.equal(person.role, "Lab Leader");
+  assert.deepEqual(person.labs, ["sports"]);
+  assert.equal(person.firstName, "Nora");
+  assert.equal(person.offboardedBy, "teddy@optimisticlabs.com");
+  assert.deepEqual(audit(), ["user.offboarded"]);
+});
+
+test("an unaccepted invitation is a way in, and is revoked too", async () => {
+  reset();
+  wos.invitations.push({ id: "invitation_n", email: "nora@optimisticlabs.com", state: "pending" });
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Contributor", email: "nora@optimisticlabs.com"
+  });
+
+  const r = await admin.offboardUser(asAdmin(), "nora@optimisticlabs.com");
+  assert.equal(r.statusCode, 200);
+  assert.equal(body(r).invitationRevoked, true);
+  assert.equal(sent("POST", "/user_management/invitations/invitation_n/revoke").length, 1);
+  assert.equal(rows.get(rowKey("PERSON", "nora@optimisticlabs.com")).active, false);
+});
+
+test("a profile that was never invited offboards without a directory account", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Contributor", email: "nora@optimisticlabs.com"
+  });
+  const r = await admin.offboardUser(asAdmin(), "nora@optimisticlabs.com");
+  assert.equal(r.statusCode, 200);
+  assert.equal(body(r).deleted, false);
+  assert.equal(rows.get(rowKey("PERSON", "nora@optimisticlabs.com")).active, false);
+});
+
+test("offboarding refuses yourself, a stranger, and a repeat", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Contributor", active: false
+  });
+  assert.equal((await admin.offboardUser(asAdmin(), "teddy@optimisticlabs.com")).statusCode, 400);
+  assert.equal((await admin.offboardUser(asAdmin(), "nobody@optimisticlabs.com")).statusCode, 404);
+  assert.equal((await admin.offboardUser(asAdmin(), "nora@optimisticlabs.com")).statusCode, 409);
+  assert.equal(rows.get(rowKey("PERSON", "teddy@optimisticlabs.com")).active, undefined);
+  assert.deepEqual(audit(), []);
+});
+
+test("restoring re-invites and gives back the role and labs the record kept", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", role: "Lab Leader", labs: ["sports"],
+    email: "nora@optimisticlabs.com", active: false,
+    offboardedAt: "2026-09-03T00:00:00Z", offboardedBy: "teddy@optimisticlabs.com"
+  });
+
+  const r = await admin.restoreUser(asAdmin(), "nora@optimisticlabs.com");
+  assert.equal(r.statusCode, 200);
+  assert.equal(body(r).reinvited, true);
+  assert.equal(sent("POST", "/user_management/invitations")[0].body.email, "nora@optimisticlabs.com");
+
+  const person = rows.get(rowKey("PERSON", "nora@optimisticlabs.com"));
+  assert.equal(person.active, true);
+  assert.equal(person.role, "Lab Leader");
+  assert.deepEqual(person.labs, ["sports"]);
+  assert.equal(person.offboardedAt, undefined, "the offboarding is cleared, not layered");
+  assert.equal(person.offboardedBy, undefined);
+  assert.deepEqual(audit(), ["user.restored"]);
+});
+
+test("restoring an active user is a conflict and invites nobody", async () => {
+  reset();
+  const r = await admin.restoreUser(asAdmin(), "teddy@optimisticlabs.com");
+  assert.equal(r.statusCode, 409);
+  assert.equal(wos.calls.length, 0);
+});
+
+test("an offboarded person is listed as DEACTIVATED, not as never-invited", async () => {
+  reset();
+  rows.set(rowKey("PERSON", "nora@optimisticlabs.com"), {
+    pk: "PERSON", sk: "nora@optimisticlabs.com", firstName: "Nora", lastName: "K",
+    role: "Contributor", email: "nora@optimisticlabs.com", active: false
+  });
+  const listed = body(await admin.listPortalUsers(asAdmin()));
+  const nora = listed.find(u => u.username === "nora@optimisticlabs.com");
+  assert.equal(nora.status, "DEACTIVATED", "the directory can only say NO_ACCOUNT");
+  assert.equal(nora.active, false);
+  assert.equal(nora.role, "Contributor", "still shown, so an admin can see what they had");
+
+  const teddy = listed.find(u => u.username === "teddy@optimisticlabs.com");
+  assert.equal(teddy.active, true);
+  assert.equal(teddy.status, "CONFIRMED");
+});
+
 test("every route is admin-only", async () => {
   reset();
   for (const call of [
     () => admin.resendInvite(asLeader(), "x@y.z"),
     () => admin.revokeInvite(asLeader(), "x@y.z"),
     () => admin.updateUserEmail(asLeader(), "x@y.z", { email: "a@b.co" }),
-    () => admin.resetUserMfa(asLeader(), "x@y.z")
+    () => admin.resetUserMfa(asLeader(), "x@y.z"),
+    () => admin.updateUserAccess(asLeader(), "x@y.z", { role: "Admin" }),
+    () => admin.offboardUser(asLeader(), "x@y.z"),
+    () => admin.restoreUser(asLeader(), "x@y.z")
   ]) assert.equal((await call()).statusCode, 403);
   assert.equal(wos.calls.length, 0);
 });

@@ -134,6 +134,12 @@ export function fmtCompact(n: number | undefined | null): string {
   return `$${Number((n / unit).toFixed(1))}${suffix}`;
 }
 
+/* Records written before offboarding existed carry no `active` field at all,
+   so this asks whether the person was explicitly deactivated rather than
+   whether they were explicitly activated. */
+export const isActive = (person: { active?: boolean } | undefined | null): boolean =>
+  person?.active !== false;
+
 export function fullName(person: Person | undefined | null): string {
   if (!person) return "";
   return [person.firstName, person.lastName].filter(Boolean).join(" ");

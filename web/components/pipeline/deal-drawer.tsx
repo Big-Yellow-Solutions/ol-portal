@@ -24,7 +24,7 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
-import { fullName } from "@/lib/data";
+import { fullName, isActive } from "@/lib/data";
 import { assignmentState, billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE, CLOSED_WON } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
@@ -90,7 +90,7 @@ export function DealDrawer({
   const showAssignmentTab = !isNew && tab === "assignment";
 
   const leaders = useMemo(
-    () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
+    () => Object.entries(people).filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader")).map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
   );
 

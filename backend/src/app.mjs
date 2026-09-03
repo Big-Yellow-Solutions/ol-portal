@@ -520,10 +520,18 @@ async function route(ctx, method, path, seg, body) {
     return await admin.resendInvite(ctx, seg[2]);
   if (method === "DELETE" && seg[0] === "admin" && seg[1] === "invites" && seg[2])
     return await admin.revokeInvite(ctx, seg[2]);
+  // Ahead of the bare PATCH below, which matches on seg[2] alone and would
+  // otherwise swallow this path and read it as an email change.
+  if (method === "PATCH" && seg[0] === "admin" && seg[1] === "users" && seg[2] && seg[3] === "access")
+    return await admin.updateUserAccess(ctx, seg[2], body);
   if (method === "PATCH" && seg[0] === "admin" && seg[1] === "users" && seg[2])
     return await admin.updateUserEmail(ctx, seg[2], body);
   if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "reset-mfa")
     return await admin.resetUserMfa(ctx, seg[2]);
+  if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "offboard")
+    return await admin.offboardUser(ctx, seg[2]);
+  if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "restore")
+    return await admin.restoreUser(ctx, seg[2]);
   if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
   if (method === "POST" && path === "/admin/act-as") return await admin.startActingAs(ctx, body);
   if (method === "POST" && path === "/admin/act-as/stop") return await admin.stopActingAs(ctx);

@@ -76,7 +76,9 @@ export async function updateProfile(ctx, username, body) {
    opted out, phone hides unless opted in. */
 export function publicView(person, viewerKey, viewerRole, personKey) {
   if (viewerRole === "Admin" || personKey === viewerKey) return person;
-  const { email, onboarded, ...rest } = person;
+  /* `active` stays — the pickers and the bench read it. Who offboarded whom
+     and when is admin business, and bootstrap sends this to everyone. */
+  const { email, onboarded, offboardedAt, offboardedBy, ...rest } = person;
   if (rest.bench) {
     const b = { ...rest.bench };
     if (b.showEmail === false) delete b.email;

@@ -159,6 +159,14 @@ export async function buildContext({ username, role, actAsTarget, meta = {}, que
     return { error: { status: 403, message: "More than one portal profile uses this email address. An Admin needs to merge them." } };
   if (!me) return { error: { status: 403, message: "No portal profile for this user" } };
 
+  /* Offboarded. The directory account is gone too (admin.mjs offboardUser), so
+     no new token can be minted — but one already in the caller's hands stays
+     validly signed until it expires, and this is what stops it being spent.
+     Tested with `=== false` on purpose: every record written before
+     offboarding existed has no `active` field at all, and those are active. */
+  if (me.active === false)
+    return { error: { status: 403, message: "This account has been deactivated" } };
+
   /* The PERSON record is the source of truth for role; the token's claim is
      only a fallback.
 
@@ -177,6 +185,7 @@ export async function buildContext({ username, role, actAsTarget, meta = {}, que
     const target = await get("PERSON", actAsTarget);
     if (!target) return { error: { status: 404, message: "No such user to act as" } };
     if (target.role === "Admin") return { error: { status: 403, message: "Can't act as another Admin" } };
+    if (target.active === false) return { error: { status: 403, message: "Can't act as an offboarded user" } };
     return {
       ctx: {
         me: target, role: target.role,

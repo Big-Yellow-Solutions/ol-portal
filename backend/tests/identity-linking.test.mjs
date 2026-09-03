@@ -156,3 +156,62 @@ test("acting as someone still resolves the target by its own key", async () => {
   assert.equal(ctx.realMe.sk, "liz");
   assert.equal(ctx.actingAs, true);
 });
+
+/* ---------- offboarding ----------
+
+   The directory account is deleted at offboard time, so nothing new can be
+   signed. These pin the other half: the token already in a departed person's
+   hands, which stays validly signed until it expires and would otherwise keep
+   working for as long as it had left. */
+
+test("an offboarded record is refused even with a valid token", async () => {
+  seed();
+  person({
+    sk: "marcus", firstName: "Marcus", lastName: "Vale", role: "Lab Leader",
+    labs: ["faith"], email: "marcus@optimisticlabs.com", active: false
+  });
+
+  const { ctx, error } = await buildContext({ username: "marcus@optimisticlabs.com" });
+  assert.equal(ctx, undefined);
+  assert.equal(error.status, 403);
+  assert.match(error.message, /deactivated/);
+});
+
+test("an offboarded record is refused through the email fallback too", async () => {
+  seed();
+  // Pre-cutover key, reached by email — the path that would otherwise let an
+  // offboarded legacy record back in through the side door.
+  person({
+    sk: "liz", firstName: "Liz", lastName: "Russell", role: "Admin", labs: [],
+    email: "liz@optimisticlabs.com", active: false
+  });
+
+  const { error } = await buildContext({ username: "liz@optimisticlabs.com" });
+  assert.equal(error.status, 403);
+  assert.match(error.message, /deactivated/);
+});
+
+test("records written before offboarding existed carry no flag and stay active", async () => {
+  seed();
+  const record = rows.get(rowKey("PERSON", "teddy@optimisticlabs.com"));
+  assert.equal("active" in record, false, "the seed has no active field at all");
+
+  const { ctx, error } = await buildContext({ username: "teddy@optimisticlabs.com" });
+  assert.equal(error, undefined);
+  assert.equal(ctx.role, "Admin");
+});
+
+test("an admin cannot act as an offboarded user", async () => {
+  seed();
+  person({
+    sk: "marcus", firstName: "Marcus", lastName: "Vale", role: "Lab Leader",
+    labs: ["faith"], email: "marcus@optimisticlabs.com", active: false
+  });
+
+  const { ctx, error } = await buildContext({
+    username: "teddy@optimisticlabs.com", actAsTarget: "marcus"
+  });
+  assert.equal(ctx, undefined);
+  assert.equal(error.status, 403);
+  assert.match(error.message, /offboarded/);
+});

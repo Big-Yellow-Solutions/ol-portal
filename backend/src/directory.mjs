@@ -114,6 +114,15 @@ const cognito = {
     return { username };
   },
 
+  /* Offboarding removes the way in, not the person: admin.mjs keeps the PERSON
+     record so deals they own still resolve to a name. A missing account is not
+     an error — a profile that was never invited is offboarded just the same. */
+  async deleteAccount(username) {
+    if (!(await cognitoUser(username))) return { deleted: false };
+    await idp.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: username }));
+    return { deleted: true };
+  },
+
   /* PRD 2.5: Cognito has no admin API to detach a verified software token
      while pool MFA is ON (AdminSetUserMFAPreference leaves the old token
      challenging), so the reliable reset is delete + recreate: a fresh emailed
@@ -212,6 +221,18 @@ const wos = {
     await workos.revokeInvitation(pending.id);
     await workos.sendInvitation(email);
     return { username: addr(email), reinvited: true };
+  },
+
+  /* Both halves of a way in, because either one alone is still a way in: the
+     user if they accepted, and the invitation if they never did. An address
+     with neither is not an error — the PERSON record is offboarded regardless
+     (see admin.mjs), which is exactly the NO_ACCOUNT case. */
+  async deleteAccount(username) {
+    const user = await workos.findUserByEmail(username);
+    if (user) await workos.deleteUser(user.id);
+    const pending = await workos.findPendingInvitation(username);
+    if (pending) await workos.revokeInvitation(pending.id);
+    return { deleted: !!user, invitationRevoked: !!pending };
   },
 
   /* Deleting every factor is the whole reset. Nothing is recreated and no

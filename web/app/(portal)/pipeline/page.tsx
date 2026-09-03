@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AlertCircle } from "lucide-react";
-import { fmtDollars, fullName } from "@/lib/data";
+import { fmtDollars, fullName, isActive } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
@@ -128,7 +128,7 @@ function PipelineBoard() {
   );
 
   const leaders = useMemo(
-    () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
+    () => Object.entries(people).filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader")).map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
   );
 

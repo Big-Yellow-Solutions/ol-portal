@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
-import { fmtDollars, fullName } from "@/lib/data";
+import { fmtDollars, fullName, isActive } from "@/lib/data";
 import {
   ASSIGNMENT_APPROVER, CADENCES, POOL_PCT, SOFT_RESERVE_PCT,
   assignmentMath, assignmentState, initialsOf, splitEvenly,
@@ -50,7 +50,7 @@ export function AssignmentTab({
   const leaderOptions = useMemo(
     () =>
       Object.entries(people)
-        .filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader")
+        .filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader"))
         .map(([key, p]) => ({ key, name: fullName(p) || key }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     [people]

@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { api, ApiError, actingAsTarget, clearActingAs } from "@/lib/api";
+import { isActive } from "@/lib/data";
 import type {
   ActingAs,
   Bootstrap,
@@ -196,8 +197,14 @@ export function PortalDataProvider({
     return people[me]?.labs ?? [];
   }, [me, people]);
 
+  /* Offboarded people stay in `people` so an owner reference still resolves
+     to a name, but they are not on the bench: the directory, the message
+     recipient picker and the related-people card all read this. */
   const bench = useMemo(
-    () => Object.entries(people).map(([username, p]) => ({ ...p, username })),
+    () =>
+      Object.entries(people)
+        .filter(([, p]) => isActive(p))
+        .map(([username, p]) => ({ ...p, username })),
     [people]
   );
 
