@@ -400,6 +400,7 @@ function PipelineBoard() {
 
       {recordDrawer && (
         <RecordDrawer
+          key={`${recordDrawer.type}:${recordDrawer.id}`}
           type={recordDrawer.type}
           id={recordDrawer.id}
           open
