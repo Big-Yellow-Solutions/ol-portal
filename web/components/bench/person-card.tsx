@@ -1,7 +1,14 @@
 "use client";
 
 import Image from "next/image";
+import { MoreHorizontal } from "lucide-react";
 import { CommentIcon, PencilIcon } from "@/components/community/icons";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { fullName, initials } from "@/lib/data";
 import { roleLine } from "@/lib/messages";
 import type { PersonWithUsername } from "@/lib/portal-data";
@@ -69,6 +76,7 @@ export function PersonCard({
   onTag,
   onMessage,
   onEdit,
+  onImpersonate,
 }: {
   person: BenchPerson;
   tag: string | null;
@@ -77,6 +85,9 @@ export function PersonCard({
   onTag: (tag: string) => void;
   onMessage: () => void;
   onEdit: () => void;
+  /* Admin "act as". Absent for everyone else, and for your own card — the
+     server refuses both anyway, so the menu simply does not appear. */
+  onImpersonate?: () => void;
 }) {
   return (
     <article className="relative flex flex-col gap-3.5 rounded-[16px] border border-hair bg-white p-5 shadow-card transition-[transform,box-shadow] duration-[250ms] ease-soft hover:-translate-y-1 hover:shadow-lift motion-reduce:transition-none motion-reduce:hover:translate-y-0">
@@ -102,6 +113,26 @@ export function PersonCard({
             {person.role}
           </span>
         </span>
+        {onImpersonate && (
+          /* Sits above the Message button's full-card overlay, or the card
+             would swallow the click and open a conversation instead. */
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              aria-label={`More actions for ${person.name}`}
+              className={cn(
+                ABOVE,
+                "flex flex-none cursor-pointer items-center rounded-full border border-hair-strong bg-white p-[7px] text-ink-soft transition-colors hover:bg-violet-pale hover:text-violet-deep"
+              )}
+            >
+              <MoreHorizontal size={14} />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className={ABOVE}>
+              <DropdownMenuItem onSelect={onImpersonate}>
+                Impersonate {person.name.split(" ")[0]}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       <p className="m-0 text-[15px] leading-[1.55] text-pretty">

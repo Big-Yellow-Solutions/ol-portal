@@ -5,6 +5,9 @@ import { PlusIcon, SearchIcon } from "@/components/community/icons";
 import { FIELD } from "@/components/community/primitives";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
 import { PersonCard, type BenchPerson } from "@/components/bench/person-card";
+import { toast } from "sonner";
+import { startActingAs } from "@/lib/act-as";
+import { ApiError } from "@/lib/api";
 import { ALL_LABS } from "@/lib/community";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
@@ -31,6 +34,16 @@ export function CommunityMembers({
   lab: string;
 }) {
   const { people, me, role, refresh } = usePortalData();
+
+  /* Admin "act as", from the card the Admin is already looking at — the other
+     way in is the Admin page's user table, and both call the same helper. */
+  const impersonate = async (username: string, name: string) => {
+    try {
+      await startActingAs(username, name);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not act as this person.");
+    }
+  };
   const { openWith, openNew } = useMessages();
 
   const [query, setQuery] = useState("");
@@ -125,6 +138,9 @@ export function CommunityMembers({
               onTag={(t) => setTag((cur) => (cur === t ? null : t))}
               onMessage={() => openWith([p.id])}
               onEdit={() => setEditingKey(p.id)}
+              onImpersonate={
+                role === "Admin" && p.id !== me ? () => impersonate(p.id, p.name) : undefined
+              }
             />
           ))}
         </div>

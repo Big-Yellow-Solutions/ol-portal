@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { usePortalData } from "@/lib/portal-data";
-import { api, ApiError, setActingAs } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
+import { startActingAs } from "@/lib/act-as";
 import type { Role } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "@/lib/data";
@@ -268,20 +269,9 @@ function AdminConsole({
   };
 
   const actAs = async (username: string) => {
-    if (
-      !confirm(
-        `View and act as ${username}? You'll see exactly what they see and can make changes as them until you exit — every action is logged.`
-      )
-    )
-      return;
     setBusyUser(username);
     try {
-      const info = await api<{ username: string; name: string; role: Role }>("/admin/act-as", {
-        method: "POST",
-        body: JSON.stringify({ target: username }),
-      });
-      setActingAs(info.username);
-      window.location.href = "/";
+      if (!(await startActingAs(username))) setBusyUser(null);
     } catch (e) {
       toast.error(errMsg(e));
       setBusyUser(null);
