@@ -100,3 +100,22 @@ export function cadenceOf(deal: Pick<Deal, "recurring" | "recurPaused" | "recurE
   if (deal.recurPaused) return "Monthly · paused";
   return deal.recurEnd ? `Monthly · until ${deal.recurEnd}` : "Monthly";
 }
+
+/** The company to show for a person. Their own record wins; failing that, the
+ *  company on a deal they are the point of contact for. A person named on a
+ *  deal that bills to a company is not "an individual — no company", which is
+ *  what reading `contact.companyId` on its own made them look like. */
+export function companyForContact(
+  contact: Pick<Contact, "id" | "companyId">,
+  companies: Record<string, Company>,
+  deals: Pick<Deal, "contactId" | "companyId">[]
+): { company: Company | undefined; viaDeal: boolean } {
+  const own = contact.companyId ? companies[contact.companyId] : undefined;
+  if (own) return { company: own, viaDeal: false };
+  for (const d of deals) {
+    if (d.contactId !== contact.id || !d.companyId) continue;
+    const company = companies[d.companyId];
+    if (company) return { company, viaDeal: true };
+  }
+  return { company: undefined, viaDeal: false };
+}

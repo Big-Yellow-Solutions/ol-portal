@@ -510,6 +510,7 @@ async function route(ctx, method, path, seg, body) {
   if (method === "GET" && path === "/contacts") return await contacts.listContacts(ctx);
   if (method === "POST" && path === "/contacts") return await contacts.createContact(ctx, body);
   if (method === "PATCH" && seg[0] === "contacts" && seg[1]) return await contacts.updateContact(ctx, seg[1], body);
+  if (method === "DELETE" && seg[0] === "contacts" && seg[1]) return await contacts.deleteContact(ctx, seg[1]);
   if (method === "GET" && path === "/invoices")
     return await listScoped(ctx, "INVOICE", i => ctx.role === "Lab Leader" && i.requestedBy === ctx.me.sk);
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);

@@ -6,11 +6,11 @@
    (ctx.can.manageContacts) rather than a per-record one. A Contributor has no
    pipeline visibility at all and never sees these either.
 
-   No delete endpoint: the design never exposes one (only "remove from this
-   deal", which just clears the deal's companyId/contactId), so there's
-   nothing to build against a UI that doesn't ask for it. */
+   Companies have no delete endpoint: the design never exposes one (only
+   "remove from this deal", which just clears the deal's companyId). A contact
+   does — see deleteContact, which refuses while a deal still points at it. */
 
-import { resp, today, get, put, listType, nextId } from "./util.mjs";
+import { resp, today, get, put, del, listType, nextId } from "./util.mjs";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Allows an optional leading "+" for international numbers, plus digits and
@@ -169,4 +169,36 @@ export async function updateContact(ctx, id, body) {
   await put(next);
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
+}
+
+/* A person can be deleted, but never out from under a deal. A deal past the
+   billing gate must have a company or a contact (app.mjs enforces that on
+   every write), so removing the person a deal points at would leave it
+   billable to nobody — and the deal, not the contact, is the record that
+   matters. The blocking deals come back with the refusal so the UI can say
+   which ones to detach first rather than just saying no. */
+export async function deleteContact(ctx, id) {
+  if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to delete contacts" });
+  const c = await get("CONTACT", id);
+  if (!c) return resp(404, { error: "contact not found" });
+
+  const onDeals = (await listType("DEAL")).filter(d => d.contactId === id);
+  if (onDeals.length) {
+    const n = onDeals.length;
+    return resp(409, {
+      error: `${c.name} is the person on ${n} ${n === 1 ? "deal" : "deals"} and can't be deleted — ` +
+        `${n === 1 ? "it" : "they"} would be left without a person. ` +
+        `Remove ${c.name} from ${n === 1 ? "that deal" : "those deals"} first.`,
+      deals: onDeals.map(d => ({ id: d.sk, client: d.client }))
+    });
+  }
+
+  // A company naming this person as its primary contact would be left holding
+  // a dangling id, which reads in the UI as a contact that cannot be opened.
+  const stamp = today();
+  for (const company of await listType("COMPANY"))
+    if (company.contactId === id) await put({ ...company, contactId: null, updated: stamp });
+
+  await del("CONTACT", id);
+  return resp(200, { deleted: id });
 }

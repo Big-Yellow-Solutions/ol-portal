@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { fmtDollars } from "@/lib/data";
-import { initialsOf } from "@/lib/pipeline";
+import { companyForContact, initialsOf } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 
 /* Pipeline v2 (design handoff), sections 2 & 3: Companies and People share one
@@ -25,16 +25,21 @@ export function ContactsTable({
   const rows = useMemo(() => {
     const base =
       view === "people"
-        ? contacts.map((c) => ({
-            kind: "contact" as const,
-            id: c.id,
-            name: c.name,
-            sub: c.title || "",
-            count: deals.filter((d) => d.contactId === c.id).length,
-            value: deals.filter((d) => d.contactId === c.id).reduce((sum, d) => sum + (d.amount || 0), 0),
-            link: c.companyId ? (companyMap[c.companyId]?.name ?? "") : "Individual — no company",
-            linked: !!c.companyId,
-          }))
+        ? contacts.map((c) => {
+            // Their own company, or the one on a deal they are the contact for
+            // — a point of contact on a company's deal is not an individual.
+            const { company } = companyForContact(c, companyMap, deals);
+            return {
+              kind: "contact" as const,
+              id: c.id,
+              name: c.name,
+              sub: c.title || "",
+              count: deals.filter((d) => d.contactId === c.id).length,
+              value: deals.filter((d) => d.contactId === c.id).reduce((sum, d) => sum + (d.amount || 0), 0),
+              link: company ? company.name : "Individual — no company",
+              linked: !!company,
+            };
+          })
         : companies.map((c) => ({
             kind: "company" as const,
             id: c.id,

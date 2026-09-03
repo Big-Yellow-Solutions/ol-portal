@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Mail, Phone, Link2 } from "lucide-react";
+import { Mail, Phone, Link2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { fmtDollars } from "@/lib/data";
 import { cn } from "@/lib/utils";
-import { initialsOf } from "@/lib/pipeline";
+import { companyForContact, initialsOf } from "@/lib/pipeline";
 import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
 import type { Contact } from "@/lib/types";
@@ -35,7 +35,7 @@ export function RecordDrawer({
   onBackToDeal: (dealId: string) => void;
   onOpenDeal: (dealId: string) => void;
 }) {
-  const { companies, contacts, deals, labs, role, setContacts } = usePortalData();
+  const { companies, contacts, deals, labs, role, setCompanies, setContacts } = usePortalData();
   const companyMap = useMemo(() => Object.fromEntries(companies.map((c) => [c.id, c])), [companies]);
   const contactMap = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
 
@@ -53,6 +53,7 @@ export function RecordDrawer({
   const [phone, setPhone] = useState(record?.phone ?? "");
   const [email, setEmail] = useState(record?.email ?? "");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (!record) return null;
 
@@ -81,9 +82,31 @@ export function RecordDrawer({
     }
   };
 
+  /* A person's own companyId still wins, but a point of contact named on a
+     company's deal is not "an individual" — reading companyId alone left
+     someone like that with no company row at all. */
+  const derived = type === "contact" ? companyForContact(record as Contact, companyMap, deals) : null;
+  const remove = async () => {
+    if (!window.confirm(`Delete ${record.name}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await api(`/contacts/${id}`, { method: "DELETE" });
+      setContacts((prev) => prev.filter((c) => c.id !== id));
+      // The server clears a company that named this person as its primary
+      // contact; mirror that locally so the UI matches without a refetch.
+      setCompanies((prev) => prev.map((c) => (c.contactId === id ? { ...c, contactId: null } : c)));
+      toast.success(`${record.name} deleted`);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not delete this person.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const linked = type === "company"
     ? (record as { contactId?: string | null }).contactId ? contactMap[(record as { contactId?: string }).contactId!] : undefined
-    : (record as { companyId?: string | null }).companyId ? companyMap[(record as { companyId?: string }).companyId!] : undefined;
+    : derived?.company;
 
   const recordDeals = deals.filter((d) => (type === "company" ? d.companyId === id : d.contactId === id));
   const totalValue = recordDeals.reduce((sum, d) => sum + (d.amount || 0), 0);
@@ -164,7 +187,7 @@ export function RecordDrawer({
                 <Link2 size={15} className="shrink-0 text-violet-deep" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-violet-deep">{linked.name}</span>
                 <span className="shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">
-                  {type === "company" ? "Primary contact" : "Company"}
+                  {type === "company" ? "Primary contact" : derived?.viaDeal ? "Company · via deal" : "Company"}
                 </span>
               </span>
             )}
@@ -198,6 +221,29 @@ export function RecordDrawer({
               </button>
             ))}
           </div>
+
+          {/* A deal past the billing gate must carry a company or a person, so
+              deleting the person a deal names would strand it. The reason sits
+              under the list that is the evidence for it. */}
+          {editable && (
+            <div className="mt-4 border-t border-hair pt-4">
+              {recordDeals.length > 0 ? (
+                <div className="flex items-start gap-2.5 rounded-xl border border-hair-strong bg-warm-panel p-3">
+                  <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red" />
+                  <span className="text-xs leading-relaxed text-ink-mute">
+                    <span className="font-semibold text-ink">{record.name} can&rsquo;t be deleted.</span> They are the
+                    person on {recordDeals.length === 1 ? "this deal" : `these ${recordDeals.length} deals`}, which
+                    would be left without one. Remove them from{" "}
+                    {recordDeals.length === 1 ? "it" : "them"} first.
+                  </span>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" className="rounded-full text-red" disabled={deleting} onClick={remove}>
+                  {deleting ? "Deleting…" : "Delete person"}
+                </Button>
+              )}
+            </div>
+          )}
         </div>
 
         {editable && (

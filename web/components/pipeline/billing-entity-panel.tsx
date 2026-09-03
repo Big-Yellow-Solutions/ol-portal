@@ -48,6 +48,10 @@ export function BillingEntityPanel({
   const company = companies.find((c) => c.id === companyId) ?? null;
   const contact = contacts.find((c) => c.id === contactId) ?? null;
   const companyOfContact = (c: Contact) => (c.companyId ? companies.find((x) => x.id === c.companyId) : undefined);
+  /* The person attached to this deal works with the deal's company even when
+     their own record names none — reading `contact.companyId` alone made a
+     point of contact on a company's deal read as "Individual". */
+  const contactCompany = (contact ? companyOfContact(contact) : undefined) ?? company ?? undefined;
   const linked = !!company || !!contact;
   const gated = billingRequiredAt(stage);
   const suggestion =
@@ -251,7 +255,7 @@ export function BillingEntityPanel({
           >
             <span className="block truncate text-sm font-semibold text-ink">{contact.name}</span>
             <span className="block truncate text-xs text-violet-deep">
-              {companyOfContact(contact) ? `${contact.title || "Contact"} · ${companyOfContact(contact)!.name}` : contact.title || "Individual"}
+              {contactCompany ? `${contact.title || "Contact"} · ${contactCompany.name}` : contact.title || "Individual"}
             </span>
           </button>
           {editable && (
