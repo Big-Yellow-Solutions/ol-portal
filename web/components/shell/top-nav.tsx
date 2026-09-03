@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import {
@@ -132,6 +132,7 @@ function NavPill({ item, active }: { item: NavItem; active: boolean }) {
 
 export function TopNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const { role, people, me } = usePortalData();
   const { openList } = useMessages();
   const { logout } = useAuth();
@@ -221,6 +222,9 @@ export function TopNav() {
                 </div>
                 {role && <div className="text-xs text-ink-mute">{role}</div>}
               </div>
+              <DropdownMenuItem onSelect={() => router.push("/profile")}>
+                Your profile
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => logout()}>
                 Sign out
               </DropdownMenuItem>
