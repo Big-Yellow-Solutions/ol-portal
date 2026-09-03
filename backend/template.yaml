@@ -30,8 +30,10 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Overrides the expected `iss` claim. Leave empty unless the environment
-      uses a WorkOS custom auth domain, which changes the issuer.
+      Overrides the expected `iss` claim. Leave empty: it is derived from
+      WorkosClientId as https://api.workos.com/user_management/<client id>,
+      which is what AuthKit actually signs tokens with. Set it only for a
+      custom auth domain.
 
 Globals:
   Function:

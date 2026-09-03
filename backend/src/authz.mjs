@@ -12,21 +12,31 @@
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
-/* WorkOS documents the issuer as "https://api.workos.com/" and warns that it
-   changes if the environment uses a custom auth domain — so it is read from
-   configuration, not hardcoded. (The portal deliberately skipped the $99/mo
-   custom domain, so the default is what production will use.)
+/* AuthKit access tokens are issued by a CLIENT-SCOPED url:
 
-   Both spellings of the default are accepted because the trailing slash is
-   inconsistent between WorkOS's own docs and reference code, and a mismatch
-   there fails every request with an error that reads like a bad key. This is
-   not a relaxation: both name the same host, and the real binding to *this*
-   application is the JWKS path below. */
-const DEFAULT_ISSUERS = ["https://api.workos.com/", "https://api.workos.com"];
+     https://api.workos.com/user_management/<client id>
+
+   not by "https://api.workos.com/" (what WorkOS's prose says) and not by the
+   AuthKit domain the browser is redirected to (what its discovery document
+   advertises). Expecting either of those rejects every token in the
+   environment with `unexpected "iss" claim value`, which reads exactly like a
+   bad signing key. That took the portal down on 9/3/26; authorizer.mjs now
+   logs the issuer it actually saw so the next mismatch names itself.
+
+   Deriving it from the client id means no environment has to configure this
+   to work, and it is strictly tighter than the old default: a token minted
+   for another WorkOS application no longer matches the expected issuer, on
+   top of already failing the client-scoped JWKS below.
+
+   WORKOS_TOKEN_ISSUER still overrides, for a custom auth domain. */
+const issuerFor = clientId => `https://api.workos.com/user_management/${clientId}`;
 
 const issuers = () => {
   const configured = (process.env.WORKOS_TOKEN_ISSUER || "").trim();
-  return configured ? [configured] : DEFAULT_ISSUERS;
+  if (configured) return [configured];
+  const clientId = (process.env.WORKOS_CLIENT_ID || "").trim();
+  if (!clientId) throw new Error("WORKOS_CLIENT_ID is not set");
+  return [issuerFor(clientId)];
 };
 
 /* Cached across invocations: jose fetches the keys on demand and holds them

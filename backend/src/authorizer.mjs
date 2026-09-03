@@ -12,13 +12,14 @@
    identity.mjs reads either spelling. */
 
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { decodeJwt } from "jose";
 import { verifyWorkosToken } from "./authz.mjs";
 import { doc, TABLE, writeAudit, AUDIT_TTL_DAYS } from "./util.mjs";
 
 const DENY = { isAuthorized: false };
 
-const log = (message, detail) =>
-  console.error(JSON.stringify({ level: "error", message, detail }));
+const log = (message, detail, extra = {}) =>
+  console.error(JSON.stringify({ level: "error", message, detail, ...extra }));
 
 /* Sessions this container has already audited.
 
@@ -73,7 +74,17 @@ export const handler = async event => {
        mean the same thing to the caller. Logged with the reason because the
        difference matters a great deal from this side — an issuer mismatch
        after a config change looks exactly like a bad signature otherwise. */
-    log("token rejected", err.message);
+    /* The issuer the token actually carries, alongside the one we expected.
+       Both are public URLs, never a secret, and without them an `iss`
+       mismatch is indistinguishable from a bad key — which is exactly the
+       config error that took the portal down on 9/3. Decoded without
+       verifying, so a forged token can only put a string in a log line. */
+    let sawIssuer;
+    try { sawIssuer = decodeJwt(token).iss; } catch { sawIssuer = "undecodable"; }
+    log("token rejected", err.message, {
+      issuerSeen: sawIssuer,
+      issuerExpected: process.env.WORKOS_TOKEN_ISSUER || "(default)"
+    });
     return DENY;
   }
 

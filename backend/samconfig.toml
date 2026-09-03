@@ -7,3 +7,6 @@ region = "us-east-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
+# Pinned so a bare `sam deploy` cannot silently reset these to the template's
+# defaults — AuthProvider falling back to "cognito" would take sign-in down.
+parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCE1QJW4DH3XRNDG6EEFZ WorkosSecretId=WorkOs"

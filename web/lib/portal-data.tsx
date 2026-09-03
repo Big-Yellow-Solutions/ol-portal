@@ -76,6 +76,38 @@ const PortalDataContext = createContext<PortalDataValue | undefined>(
   undefined
 );
 
+/* The portal's whole first paint needs ten endpoints, and firing them at once
+   is what a Promise.all does. That is more parallelism than this AWS account
+   has: its Lambda concurrent-execution quota is 10 for every function
+   together, and each API call also invokes the authorizer, so one page load
+   asks for roughly twice the account's entire budget and API Gateway answers
+   the overflow with 503. The portal then boots with whichever half survived —
+   an empty roster, no labs, "Welcome back, there".
+
+   Running them a few at a time keeps a page load inside the budget and costs
+   a little latency. Raising the quota is the real fix; this makes the app
+   behave while it is still 10, and behave better than a burst afterwards.
+
+   Ordering is preserved, so callers keep destructuring positionally. The
+   first rejection still rejects the whole thing, exactly as Promise.all did:
+   these responses are load-bearing and a half-loaded portal is worse than a
+   reported failure. */
+const BOOT_BATCH = 3;
+
+type Awaitedeach<T> = { -readonly [K in keyof T]: Awaited<ReturnType<
+  T[K] extends () => Promise<unknown> ? T[K] : never
+>> };
+
+async function inBatches<T extends readonly (() => Promise<unknown>)[]>(
+  tasks: readonly [...T]
+): Promise<Awaitedeach<T>> {
+  const out: unknown[] = [];
+  for (let i = 0; i < tasks.length; i += BOOT_BATCH) {
+    out.push(...(await Promise.all(tasks.slice(i, i + BOOT_BATCH).map(run => run()))));
+  }
+  return out as Awaitedeach<T>;
+}
+
 export function PortalDataProvider({
   children,
 }: {
@@ -104,15 +136,15 @@ export function PortalDataProvider({
       bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes,
       recurrencesRes, guidesRes, companiesRes, contactsRes,
     ] =
-      await Promise.all([
-        api<Bootstrap>("/bootstrap"),
-        api<Deal[]>("/deals"),
-        api<Proposal[]>("/proposals"),
-        api<InvoiceRequest[]>("/invoices"),
-        api<FileRecord[]>("/files"),
-        api<Contract[]>("/contracts"),
-        api<Recurrence[]>("/recurrences"),
-        api<Guide[]>("/guides"),
+      await inBatches([
+        () => api<Bootstrap>("/bootstrap"),
+        () => api<Deal[]>("/deals"),
+        () => api<Proposal[]>("/proposals"),
+        () => api<InvoiceRequest[]>("/invoices"),
+        () => api<FileRecord[]>("/files"),
+        () => api<Contract[]>("/contracts"),
+        () => api<Recurrence[]>("/recurrences"),
+        () => api<Guide[]>("/guides"),
         // Pipeline v2's billing-entity endpoints. Every other request here is
         // load-bearing — one rejection fails the whole Promise.all and every
         // page renders the error state — but these two are new, so a frontend
@@ -121,8 +153,8 @@ export function PortalDataProvider({
         // Pipeline's billing panel to "add a new company" and leaves the rest
         // of the portal working, which is the right failure for a partial
         // deploy or an independent backend rollback.
-        api<Company[]>("/companies").catch(() => [] as Company[]),
-        api<Contact[]>("/contacts").catch(() => [] as Contact[]),
+        () => api<Company[]>("/companies").catch(() => [] as Company[]),
+        () => api<Contact[]>("/contacts").catch(() => [] as Contact[]),
       ]);
     setLabs(Object.entries(bootstrap.labs).map(([id, lab]) => ({ id, name: lab.name })));
     setPeople(bootstrap.people);
