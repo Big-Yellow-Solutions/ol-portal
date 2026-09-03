@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { billingRequiredAt, initialsOf, BILLING_GATE_STAGE } from "@/lib/pipeline";
+import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
 import type { Company, Contact, Stage } from "@/lib/types";
 
@@ -84,9 +85,11 @@ export function BillingEntityPanel({
     }
   }
 
+  const ipPhoneErr = phoneError(ipPhone);
+
   async function saveContact() {
     const name = ipName.trim();
-    if (!name) return;
+    if (!name || ipPhoneErr) return;
     setSaving(true);
     try {
       const created = await api<Contact>("/contacts", {
@@ -326,14 +329,22 @@ export function BillingEntityPanel({
           <Input placeholder="Full name" value={ipName} onChange={(e) => setIpName(e.target.value)} className="mb-2" />
           <div className="flex gap-2">
             <Input placeholder="Email" value={ipEmail} onChange={(e) => setIpEmail(e.target.value)} />
-            <Input placeholder="Phone" value={ipPhone} onChange={(e) => setIpPhone(e.target.value)} />
+            <div className="flex-1">
+              <Input
+                placeholder="Phone, e.g. +1 555 123 4567"
+                value={ipPhone}
+                onChange={(e) => setIpPhone(e.target.value)}
+                className={ipPhoneErr ? "border-red" : undefined}
+              />
+            </div>
           </div>
+          {ipPhoneErr && <p className="mt-1 text-xs text-red">{ipPhoneErr}</p>}
           <div className="mt-3 flex items-center gap-2.5">
             <span className="flex-1 text-[11px] text-ink-mute">
               {company ? `Linked to ${company.name}` : "Saved as an individual"}
             </span>
             <Button variant="ghost" size="sm" onClick={() => setInline(null)}>Cancel</Button>
-            <Button size="sm" disabled={!ipName.trim() || saving} onClick={saveContact}>Save &amp; attach</Button>
+            <Button size="sm" disabled={!ipName.trim() || !!ipPhoneErr || saving} onClick={saveContact}>Save &amp; attach</Button>
           </div>
         </div>
       )}

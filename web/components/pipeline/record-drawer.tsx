@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Mail, Phone, Link2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { api, ApiError } from "@/lib/api";
+import { can } from "@/lib/can";
 import { fmtDollars } from "@/lib/data";
+import { cn } from "@/lib/utils";
 import { initialsOf } from "@/lib/pipeline";
+import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
+import type { Contact } from "@/lib/types";
 
 /* Pipeline v2 (design handoff), section 5b: the company/person record drawer.
    Opened either from the Companies/People tab or from a deal's Billing entity
@@ -28,12 +35,51 @@ export function RecordDrawer({
   onBackToDeal: (dealId: string) => void;
   onOpenDeal: (dealId: string) => void;
 }) {
-  const { companies, contacts, deals, labs } = usePortalData();
+  const { companies, contacts, deals, labs, role, setContacts } = usePortalData();
   const companyMap = useMemo(() => Object.fromEntries(companies.map((c) => [c.id, c])), [companies]);
   const contactMap = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
 
   const record = type === "company" ? companyMap[id] : contactMap[id];
+  // Companies aren't editable here yet — only the person ("Contact") side of
+  // a billing entity is. manageContacts mirrors backend/src/contacts.mjs's
+  // permission check on the PATCH /contacts/:id route this saves to.
+  const editable = type === "contact" && can.manageContacts(role!);
+
+  // The page keys this component by `${type}:${id}` so it remounts (and
+  // these reset) whenever a different record is opened, without needing an
+  // effect to resync state.
+  const [name, setName] = useState(record?.name ?? "");
+  const [title, setTitle] = useState(type === "contact" ? ((record as Contact | undefined)?.title ?? "") : "");
+  const [phone, setPhone] = useState(record?.phone ?? "");
+  const [email, setEmail] = useState(record?.email ?? "");
+  const [saving, setSaving] = useState(false);
+
   if (!record) return null;
+
+  const phoneErr = editable ? phoneError(phone) : null;
+  const dirty =
+    name.trim() !== record.name ||
+    title !== ((record as Contact).title ?? "") ||
+    phone.trim() !== (record.phone ?? "") ||
+    email.trim() !== (record.email ?? "");
+  const canSave = editable && dirty && !!name.trim() && !phoneErr;
+
+  const save = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const saved = await api<Contact>(`/contacts/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: name.trim(), title: title.trim(), phone: phone.trim(), email: email.trim() }),
+      });
+      setContacts((prev) => prev.map((c) => (c.id === id ? saved : c)));
+      toast.success("Person saved");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not save this person.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const linked = type === "company"
     ? (record as { contactId?: string | null }).contactId ? contactMap[(record as { contactId?: string }).contactId!] : undefined
@@ -47,7 +93,7 @@ export function RecordDrawer({
       <SheetContent className="w-full gap-0 p-0 sm:max-w-[520px]" overlayClassName="bg-[rgba(17,17,17,0.28)] backdrop-blur-none" showCloseButton={false}>
         <SheetHeader className="flex-row items-center gap-3 border-b border-hair p-4">
           <div className="min-w-0 flex-1">
-            <SheetTitle className="truncate">{record.name}</SheetTitle>
+            <SheetTitle className="truncate">{name.trim() || record.name}</SheetTitle>
             <SheetDescription className="text-xs">{type === "company" ? "Company record" : "Person record"}</SheetDescription>
           </div>
           {returnDealId && (
@@ -67,22 +113,51 @@ export function RecordDrawer({
             >
               {initialsOf(record.name)}
             </span>
-            <div className="min-w-0">
-              <div className="truncate text-lg font-bold text-ink">{record.name}</div>
-              <div className="mt-0.5 truncate text-sm text-ink-mute">
-                {type === "company" ? (record as { kind?: string }).kind || "Company" : (record as { title?: string }).title || "Individual"}
-              </div>
+            <div className="min-w-0 flex-1">
+              {editable ? (
+                <Input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Full name"
+                  className="mb-1 h-8 text-sm font-semibold"
+                />
+              ) : (
+                <div className="truncate text-lg font-bold text-ink">{record.name}</div>
+              )}
+              {editable ? (
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="h-8 text-sm" />
+              ) : (
+                <div className="mt-0.5 truncate text-sm text-ink-mute">
+                  {type === "company" ? (record as { kind?: string }).kind || "Company" : (record as { title?: string }).title || "Individual"}
+                </div>
+              )}
             </div>
           </div>
 
           <div className="mb-5 flex flex-col gap-px overflow-hidden rounded-2xl border border-hair bg-hair-soft">
             <span className="flex items-center gap-3 bg-white px-3.5 py-3">
               <Mail size={15} className="shrink-0 text-violet-deep" />
-              <span className="min-w-0 flex-1 truncate text-sm">{record.email || "No email on file"}</span>
+              {editable ? (
+                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="h-8 min-w-0 flex-1 text-sm" />
+              ) : (
+                <span className="min-w-0 flex-1 truncate text-sm">{record.email || "No email on file"}</span>
+              )}
             </span>
             <span className="flex items-center gap-3 bg-white px-3.5 py-3">
               <Phone size={15} className="shrink-0 text-violet-deep" />
-              <span className="min-w-0 flex-1 text-sm">{record.phone || "No phone on file"}</span>
+              {editable ? (
+                <div className="min-w-0 flex-1">
+                  <Input
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="Phone, e.g. +1 555 123 4567"
+                    className={cn("h-8 text-sm", phoneErr && "border-red")}
+                  />
+                  {phoneErr && <p className="mt-1 text-xs text-red">{phoneErr}</p>}
+                </div>
+              ) : (
+                <span className="min-w-0 flex-1 text-sm">{record.phone || "No phone on file"}</span>
+              )}
             </span>
             {linked && (
               <span className="flex items-center gap-3 bg-white px-3.5 py-3">
@@ -124,6 +199,27 @@ export function RecordDrawer({
             ))}
           </div>
         </div>
+
+        {editable && (
+          <div className="flex items-center justify-end gap-2 border-t border-hair p-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!dirty || saving}
+              onClick={() => {
+                setName(record.name);
+                setTitle((record as Contact).title ?? "");
+                setPhone(record.phone ?? "");
+                setEmail(record.email ?? "");
+              }}
+            >
+              Reset
+            </Button>
+            <Button size="sm" disabled={!canSave || saving} onClick={save}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        )}
       </SheetContent>
     </Sheet>
   );
