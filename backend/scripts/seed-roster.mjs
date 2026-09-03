@@ -49,7 +49,9 @@ const ROLES = ["Admin", "Lab Leader", "Contributor"];
 
 const args = process.argv.slice(2);
 const confirm = args.includes("--confirm");
-const rosterPath = args[args.indexOf("--roster") + 1] || "scripts/roster.json";
+/* indexOf gives -1 when the flag is absent, and args[0] would then be read
+   as the path — "--confirm", on the one run that matters. */
+const rosterPath = args.includes("--roster") ? args[args.indexOf("--roster") + 1] : "scripts/roster.json";
 
 const query = async pk => {
   const out = [];

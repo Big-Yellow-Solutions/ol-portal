@@ -1,0 +1,4 @@
+[
+  { "email": "teddy@optimisticlabs.com", "firstName": "Teddy", "lastName": "Schwarz", "role": "Admin", "labs": [] },
+  { "email": "hello@optimisticlabs.com", "firstName": "Liz", "lastName": "Russell", "role": "Admin", "labs": [] }
+]
