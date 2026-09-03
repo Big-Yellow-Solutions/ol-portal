@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, useEffect, useId, useMemo, useState } from "react";
+import { cloneElement, useEffect, useId, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { QRCodeSVG } from "qrcode.react";
@@ -43,6 +43,21 @@ export default function LoginPage() {
   useEffect(() => {
     if (auth.status === "signedIn") router.replace("/");
   }, [auth.status, router]);
+
+  /* Under AuthKit the credential screens live on WorkOS's domain, so this page
+     is a staging post rather than a form: bounce straight out to the hosted
+     sign-in. The ref keeps a re-render — or React's development double-invoke —
+     from starting a second authorization while the first is still navigating,
+     which would leave a stale PKCE verifier behind and fail the exchange. */
+  const { hostedSignIn, status } = auth;
+  const redirecting = useRef(false);
+  useEffect(() => {
+    if (!hostedSignIn || status !== "signedOut" || redirecting.current) return;
+    redirecting.current = true;
+    hostedSignIn().catch(() => {
+      redirecting.current = false;
+    });
+  }, [hostedSignIn, status]);
 
   const applyStep = (next: LoginStep) => {
     if (next === "DONE") {
@@ -104,6 +119,24 @@ export default function LoginPage() {
     if (!auth.totpSetup) return null;
     return { uri: auth.totpSetup.setupUri, secret: auth.totpSetup.sharedSecret };
   }, [auth.totpSetup]);
+
+  if (hostedSignIn) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-violet-deep px-4">
+        <div className="w-full max-w-sm rounded-2xl bg-white p-8 shadow-xl">
+          <div className="mb-6 flex flex-col items-center gap-2">
+            <Image src="/ol-mark.svg" alt="" width={32} height={32} />
+            <span className="font-serif text-lg italic text-ink">
+              The Portal
+            </span>
+          </div>
+          <p className="text-center text-sm text-ink-mute" aria-live="polite">
+            Taking you to sign in…
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-violet-deep px-4">

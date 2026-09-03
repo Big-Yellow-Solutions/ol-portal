@@ -1,5 +1,5 @@
-import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { CONFIG } from "@/lib/config";
+import { endSession, getAuthToken } from "@/lib/session";
 
 const ACTING_AS_KEY = "olportal.actingAs";
 
@@ -35,8 +35,7 @@ export async function api<T = unknown>(
   path: string,
   opts: RequestInit & { skipActAs?: boolean } = {}
 ): Promise<T> {
-  const session = await fetchAuthSession();
-  const token = session.tokens?.idToken?.toString();
+  const token = await getAuthToken();
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -49,8 +48,9 @@ export async function api<T = unknown>(
   const res = await fetch(`${CONFIG.apiUrl}${path}`, { ...opts, headers });
 
   if (res.status === 401) {
-    await signOut();
-    if (typeof window !== "undefined") window.location.href = "/login";
+    // endSession both clears the session and navigates; the throw only stops
+    // this caller from carrying on as though it had data.
+    await endSession();
     throw new ApiError("Unauthorized", 401);
   }
 

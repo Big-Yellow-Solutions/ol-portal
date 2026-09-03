@@ -1,6 +1,6 @@
-import { fetchAuthSession, signOut } from "aws-amplify/auth";
 import { CONFIG } from "@/lib/config";
 import { actingAsTarget } from "@/lib/api";
+import { endSession, getAuthToken } from "@/lib/session";
 
 /* The Optimist's client half.
 
@@ -9,8 +9,8 @@ import { actingAsTarget } from "@/lib/api";
    document, which is exactly wrong for an endpoint whose entire purpose is to
    hand back an answer a few words at a time. The chat also lives on its own
    origin: API Gateway cannot stream, so the assistant runs behind a Lambda
-   Function URL (see backend/src/optimist-stream.mjs). Same Cognito token,
-   different host.
+   Function URL (see backend/src/optimist-stream.mjs). Same token as the
+   rest of the API, different host.
 
    The wire format is newline-delimited JSON, one event per line. */
 
@@ -66,8 +66,7 @@ export async function streamOptimist(
     );
   }
 
-  const session = await fetchAuthSession();
-  const token = session.tokens?.idToken?.toString();
+  const token = await getAuthToken();
   const target = actingAsTarget();
 
   const res = await fetch(CONFIG.optimistUrl, {
@@ -92,8 +91,7 @@ export async function streamOptimist(
      the answer has started and every later problem arrives as an error event
      instead — see the note in optimist-stream.mjs. */
   if (res.status === 401) {
-    await signOut();
-    if (typeof window !== "undefined") window.location.href = "/login";
+    await endSession();
     throw new OptimistError("Unauthorized");
   }
   if (!res.ok || !res.body) {

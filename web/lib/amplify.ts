@@ -7,6 +7,9 @@ let configured = false;
 
 export function configureAmplify() {
   if (configured) return;
+  /* A WorkOS build has no user pool to point at, and configuring Amplify with
+     empty ids makes its first call fail somewhere far from the cause. */
+  if (CONFIG.authProvider !== "cognito") return;
   configured = true;
   Amplify.configure({
     Auth: {

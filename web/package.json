@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@workos-inc/authkit-react": "^0.16.2",
     "aws-amplify": "^6.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
