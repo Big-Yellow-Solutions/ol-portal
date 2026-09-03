@@ -21,21 +21,26 @@ import type { Role } from "@/lib/types";
    paper background, with the brand lockup on the left, pill links in the
    middle, and presence + identity on the right.
 
-   The nav is three destinations: Community, Pipeline, Resources. There is no
-   "More" — every other page is reached by its URL, by the logo (Home), or by
-   the in-app links that already point at it, not from here. Deliberate: the
+   The nav is three destinations: Community, Pipeline, Resources. Community
+   is also the landing page, so it and the logo lead to the same screen.
+   There is no "More" — every other page is reached by its URL or by the
+   in-app links that already point at it, not from here. Deliberate: the
    routes all still exist and still enforce their own roles, so this is a
    change to what the nav advertises, not to what anyone may open. */
 
 interface NavItem {
   href: string;
   label: string;
+  /* Other paths this item is the current page for. Community is the portal's
+     landing page, so it answers at "/" and at the "/community" URL its own
+     deep links still use. */
+  also?: string[];
   /* Undefined means "everyone". */
   roles?: Role[];
 }
 
 const PRIMARY: NavItem[] = [
-  { href: "/community", label: "Community" },
+  { href: "/", label: "Community", also: ["/community"] },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/resources", label: "Resources" },
 ];
@@ -44,8 +49,14 @@ function visible(items: NavItem[], role: Role | null) {
   return items.filter((item) => !item.roles || (role && item.roles.includes(role)));
 }
 
-function isActivePath(pathname: string, href: string) {
-  return pathname === href || (href !== "/" && pathname.startsWith(href));
+function owns(pathname: string, path: string) {
+  if (pathname === path) return true;
+  // "/" is every path's prefix, so it only ever matches exactly.
+  return path !== "/" && pathname.startsWith(`${path}/`);
+}
+
+function isActivePath(pathname: string, item: NavItem) {
+  return owns(pathname, item.href) || (item.also ?? []).some(p => owns(pathname, p));
 }
 
 // The 8-point star, the design system's eyebrow glyph and section divider.
@@ -143,22 +154,18 @@ export function TopNav() {
   return (
     <header className="sticky top-0 z-40 border-b border-hair bg-paper/92 backdrop-blur-[8px]">
       <div className="mx-auto flex max-w-[1420px] items-center gap-[26px] px-4 py-3.5 md:px-8">
-        <Link href="/" className="flex flex-none items-center gap-3.5">
+        {/* The logo carries the left of the bar on its own now: the "The
+            Portal" wordmark and the rule that separated it are gone, so it is
+            sized to hold that space rather than share it. */}
+        <Link href="/" className="flex flex-none items-center" aria-label="Optimistic Labs">
           <Image
             src="/ol-logo.svg"
             alt="Optimistic Labs"
-            width={132}
-            height={24}
-            className="h-6 w-auto"
+            width={104}
+            height={36}
+            className="h-9 w-auto"
             priority
           />
-          <span
-            aria-hidden="true"
-            className="hidden h-[22px] w-px bg-[rgba(124,109,245,0.28)] sm:block"
-          />
-          <span className="hidden font-serif text-[19px] whitespace-nowrap text-violet-deep italic sm:block">
-            The Portal
-          </span>
         </Link>
 
         <nav
@@ -169,7 +176,7 @@ export function TopNav() {
             <NavPill
               key={item.href}
               item={item}
-              active={isActivePath(pathname, item.href)}
+              active={isActivePath(pathname, item)}
             />
           ))}
         </nav>
