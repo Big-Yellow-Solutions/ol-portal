@@ -11,7 +11,7 @@ import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
-  const { loading, error, needsWelcome, refresh } = usePortalData();
+  const { loading, error, errorStatus, needsWelcome, refresh } = usePortalData();
   const router = useRouter();
 
   useEffect(() => {
@@ -29,7 +29,13 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   }
 
   if (error) {
-    return <PortalLoadError message={error} onRetry={refresh} />;
+    return (
+      <PortalLoadError
+        message={error}
+        status={errorStatus}
+        onRetry={refresh}
+      />
+    );
   }
 
   /* The design puts the chrome on top rather than down the side, so the shell
@@ -60,15 +66,30 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
  * request used to replace the whole portal with a raw exception string and no
  * way out but a manual reload. Keep the recovery paths on screen.
  */
+/* Three failures reach this screen and they need different words, because two
+   of them are not the user's to fix by waiting:
+
+     403  the API knows who you are and will not serve you — either no PERSON
+          record matches your sign-in, or your account carries no portal role.
+          Retrying cannot change that; an Admin has to act.
+     4xx/5xx  the request reached the API and failed. Worth retrying.
+     no status  the request never got an answer: offline, DNS, CORS. Also
+          worth retrying, but the advice is about the connection.
+
+   A 401 never lands here — api() ends the session and navigates to /login. */
 function PortalLoadError({
   message,
+  status,
   onRetry,
 }: {
   message: string;
+  status: number | null;
   onRetry: () => Promise<void>;
 }) {
   const { logout } = useAuth();
   const [retrying, setRetrying] = useState(false);
+
+  const refused = status === 403;
 
   const retry = async () => {
     setRetrying(true);
@@ -87,19 +108,42 @@ function PortalLoadError({
       >
         <div className="flex flex-col gap-1">
           <h1 className="font-serif text-xl italic text-ink">
-            Unable to load the portal
+            {refused
+              ? "Your account cannot open the portal"
+              : "Unable to load the portal"}
           </h1>
           <p className="text-sm text-ink-mute">
-            Check your connection and try again. If it keeps failing, sign out
-            and back in.
+            {refused ? (
+              <>
+                You signed in, but the portal has no profile record for this
+                address. An Admin can link or create one under Admin &amp;
+                invites. The reason given was: {message}
+              </>
+            ) : status ? (
+              <>
+                The portal answered with an error. Try again, and if it keeps
+                failing sign out and back in.
+              </>
+            ) : (
+              <>
+                Check your connection and try again. If it keeps failing, sign
+                out and back in.
+              </>
+            )}
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button onClick={retry} disabled={retrying}>
-            {retrying ? "Retrying…" : "Try again"}
-          </Button>
-          <Button variant="outline" onClick={() => logout()} disabled={retrying}>
+          {!refused && (
+            <Button onClick={retry} disabled={retrying}>
+              {retrying ? "Retrying…" : "Try again"}
+            </Button>
+          )}
+          <Button
+            variant={refused ? "default" : "outline"}
+            onClick={() => logout()}
+            disabled={retrying}
+          >
             Sign out
           </Button>
         </div>

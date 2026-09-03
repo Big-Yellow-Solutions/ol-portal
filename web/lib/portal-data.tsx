@@ -8,7 +8,7 @@ import React, {
   useMemo,
   useState,
 } from "react";
-import { api, actingAsTarget, clearActingAs } from "@/lib/api";
+import { api, ApiError, actingAsTarget, clearActingAs } from "@/lib/api";
 import type {
   ActingAs,
   Bootstrap,
@@ -36,6 +36,11 @@ export type PersonWithUsername = Person & { username: string };
 interface PortalDataValue {
   loading: boolean;
   error: string | null;
+  /* HTTP status behind `error`, so a caller can tell an authorization
+     refusal (the API knows who you are and says no, or cannot find a profile
+     for you) from a request that simply failed. `null` for a network or
+     parse failure, which carries no status at all. */
+  errorStatus: number | null;
   labs: Lab[];
   people: Record<string, Person>;
   role: Role | null;
@@ -77,6 +82,7 @@ export function PortalDataProvider({
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [labs, setLabs] = useState<Lab[]>([]);
   const [people, setPeople] = useState<Record<string, Person>>({});
   const [role, setRole] = useState<Role | null>(null);
@@ -136,6 +142,11 @@ export function PortalDataProvider({
   const load = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
+    setErrorStatus(null);
+    const fail = (err: unknown) => {
+      setError(err instanceof Error ? err.message : "Failed to load portal data");
+      setErrorStatus(err instanceof ApiError ? err.status : null);
+    };
     try {
       await fetchAll();
     } catch (err) {
@@ -145,10 +156,10 @@ export function PortalDataProvider({
         try {
           await fetchAll();
         } catch (retryErr) {
-          setError(retryErr instanceof Error ? retryErr.message : "Failed to load portal data");
+          fail(retryErr);
         }
       } else {
-        setError(err instanceof Error ? err.message : "Failed to load portal data");
+        fail(err);
       }
     } finally {
       setLoading(false);
@@ -194,6 +205,7 @@ export function PortalDataProvider({
     () => ({
       loading,
       error,
+      errorStatus,
       labs,
       people,
       role,
@@ -226,6 +238,7 @@ export function PortalDataProvider({
     [
       loading,
       error,
+      errorStatus,
       labs,
       people,
       role,

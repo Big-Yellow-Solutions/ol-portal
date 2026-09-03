@@ -2,6 +2,7 @@
 
 import { notFound } from "next/navigation";
 import ProfilePage from "@/app/(portal)/profile/page";
+import { PortalShell } from "@/components/shell/portal-shell";
 import { useAuth } from "@/lib/auth";
 import { MessagesProvider } from "@/lib/messages";
 import { PortalDataProvider } from "@/lib/portal-data";
@@ -40,9 +41,12 @@ export default function DevProfilePage() {
   return (
     <PortalDataProvider>
       <MessagesProvider>
-        <div className="mx-auto flex w-full max-w-[1420px] flex-col gap-[22px] px-8 pt-[34px] pb-20">
+        {/* The real shell, so the states above the page — the bootstrap
+            failure screens, the welcome redirect — are exercised here too and
+            not only in production. */}
+        <PortalShell>
           <ProfilePage />
-        </div>
+        </PortalShell>
       </MessagesProvider>
     </PortalDataProvider>
   );

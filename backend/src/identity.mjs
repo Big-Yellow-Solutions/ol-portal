@@ -12,7 +12,7 @@
    the person key in `cognito:username` and the role in `cognito:groups`, while
    WorkOS carries neither and has to be read differently — see below. */
 
-import { get } from "./util.mjs";
+import { get, listType } from "./util.mjs";
 
 export const ROLE_OF_GROUP = { Admin: "Admin", LabLeader: "Lab Leader", Contributor: "Contributor" };
 
@@ -93,9 +93,70 @@ export const perms = (role, myLabs, myKey) => ({
    Returns { ctx } or { error: { status, message } } rather than an HTTP
    response, because the two callers frame their errors differently (JSON body
    vs. a stream event). */
+/* An address is only ever logged as `l***@optimisticlabs.com`: enough to tell
+   two accounts apart in CloudWatch, not enough to be a mailing list. */
+const masked = address => {
+  const [local = "", domain = ""] = String(address).split("@");
+  return `${local.slice(0, 1)}***@${domain}`;
+};
+
+const log = (message, detail) =>
+  console.log(JSON.stringify({ level: "info", message, ...detail }));
+
+/* Resolve the caller's PERSON record.
+
+   The sort key IS the sign-in identity, and the WorkOS cutover changed what
+   that identity is: Cognito's key was the pool Username (`liz`, `aliza`),
+   WorkOS's is the lowercased email. Records written since the cutover are
+   keyed by email and carry an `email` attribute; the seven written before it
+   are keyed by a first name and carry neither. A single get() on the email
+   therefore misses every pre-cutover account, and its owner is told they have
+   no portal profile despite signing in successfully.
+
+   So a miss falls back to matching the verified email claim against the
+   `email` attribute of the legacy records. The record keeps its original sort
+   key — every deal owner, proposal author and invoice requester still points
+   at `liz` — so this links an account to its profile without re-keying
+   anything or creating a second record.
+
+   Two records claiming one address is ambiguous, not a reason to guess: it
+   fails closed. The match is exact and case-normalised against a claim the
+   authorizer has already verified, so it grants nothing a correctly-keyed
+   record would not have granted. Rows with no email never match, because an
+   absent claim is rejected before this runs. */
+async function resolvePerson(username) {
+  const direct = await get("PERSON", username);
+  if (direct) return { person: direct };
+
+  const matches = (await listType("PERSON")).filter(
+    p => String(p.email || "").trim().toLowerCase() === username
+  );
+
+  if (matches.length === 1) {
+    log("identity.linked-by-email", {
+      email: masked(username),
+      personKey: matches[0].sk
+    });
+    return { person: matches[0] };
+  }
+
+  if (matches.length > 1) {
+    log("identity.ambiguous-email", {
+      email: masked(username),
+      personKeys: matches.map(p => p.sk)
+    });
+    return { ambiguous: true };
+  }
+
+  log("identity.no-person", { email: masked(username) });
+  return {};
+}
+
 export async function buildContext({ username, role, actAsTarget, meta = {}, query = {} }) {
   if (!username) return { error: { status: 403, message: "No portal profile for this user" } };
-  const me = await get("PERSON", username);
+  const { person: me, ambiguous } = await resolvePerson(username);
+  if (ambiguous)
+    return { error: { status: 403, message: "More than one portal profile uses this email address. An Admin needs to merge them." } };
   if (!me) return { error: { status: 403, message: "No portal profile for this user" } };
 
   /* The PERSON record is the source of truth for role; the token's claim is
