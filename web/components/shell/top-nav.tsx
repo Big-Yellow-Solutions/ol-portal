@@ -232,6 +232,16 @@ export function TopNav() {
               <DropdownMenuItem onSelect={() => router.push("/profile")}>
                 Your profile
               </DropdownMenuItem>
+              {/* The one nav entry /admin has ever had. It is gated on the
+                  role the rest of the chrome already reads, so an Admin who is
+                  acting as someone else sees it disappear along with the
+                  access it would grant — the page enforces the same rule
+                  server-side either way. */}
+              {role === "Admin" && (
+                <DropdownMenuItem onSelect={() => router.push("/admin")}>
+                  Admin
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => logout()}>
                 Sign out
               </DropdownMenuItem>
