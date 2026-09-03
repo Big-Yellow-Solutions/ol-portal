@@ -4,6 +4,16 @@ import { notFound } from "next/navigation";
 import PipelinePage from "@/app/(portal)/pipeline/page";
 import { MessagesProvider } from "@/lib/messages";
 import { PortalDataProvider } from "@/lib/portal-data";
+import { registerTokenSource } from "@/lib/session";
+
+/* The WorkOS cutover put api() behind a registered token source, and these
+   harness pages mount outside <AuthProvider>, so they now have to supply one.
+   Null is the correct token here, not a stand-in: dev-api.mjs injects the
+   identity the authorizer would have, and expects no Authorization header. */
+registerTokenSource({
+  getToken: async () => null,
+  endSession: async () => {},
+});
 
 /*
  Click-test harness for Pipeline — the board, the Companies/People tables and

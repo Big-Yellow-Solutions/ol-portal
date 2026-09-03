@@ -2,7 +2,129 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* HeroUI v3, for the select only (components/ui/select.tsx).
+
+   Deliberately NOT `@heroui/styles/css`: that entry re-imports Tailwind and
+   `themes/shared/theme.css`, whose @theme block redefines --radius-sm…4xl and
+   six --color-* mappings this app already owns — every rounded-lg in the
+   portal would change. Only the token vocabulary the select's own CSS reads is
+   pulled in, plus the four component structures it renders.
+
+   The seven variables HeroUI and this file both define (--background,
+   --foreground, --border, --accent, --accent-foreground, --muted, --radius)
+   resolve to OURS: those live in the unlayered :root below, and unlayered
+   declarations outrank anything in @layer base. So the control is HeroUI's
+   structure and behaviour wearing the portal's palette, which is the point. */
+@import "@heroui/styles/themes/default/variables.css";
+@import "@heroui/styles/utilities";
+@import "@heroui/styles/components/label.css" layer(components);
+@import "@heroui/styles/components/popover.css" layer(components);
+@import "@heroui/styles/components/list-box.css" layer(components);
+@import "@heroui/styles/components/list-box-item.css" layer(components);
+@import "@heroui/styles/components/select.css" layer(components);
+
 @custom-variant dark (&:is(.dark *));
+
+/* The Tailwind names HeroUI's stylesheets @apply — colours, shadows, easings,
+   keyframe animations — mapped to the tokens its variables.css defines. Lifted
+   from themes/shared/theme.css, which is NOT imported wholesale because it
+   also redefines --radius-sm…4xl and would restyle every rounded corner in the
+   portal.
+
+   Anything this app already defines is skipped, so --radius-*, --color-border,
+   --color-background, --color-foreground, --color-muted and --color-accent*
+   stay ours. HeroUI's components read them happily: that is what makes the
+   select wear the portal's palette rather than HeroUI's. */
+@theme inline {
+  --color-surface: var(--surface);
+  --color-surface-foreground: var(--surface-foreground);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-secondary: var(--surface-secondary);
+  --color-surface-secondary-foreground: var(--surface-secondary-foreground);
+  --color-surface-tertiary: var(--surface-tertiary);
+  --color-surface-tertiary-foreground: var(--surface-tertiary-foreground);
+  --color-overlay: var(--overlay);
+  --color-overlay-foreground: var(--overlay-foreground);
+  --color-segment: var(--segment);
+  --color-segment-foreground: var(--segment-foreground);
+  --color-separator: var(--separator);
+  --color-focus: var(--focus);
+  --color-link: var(--link);
+  --color-default: var(--default);
+  --color-default-foreground: var(--default-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-backdrop: var(--backdrop);
+  --shadow-surface: var(--surface-shadow);
+  --shadow-overlay: var(--overlay-shadow);
+  --shadow-field: var(--field-shadow);
+  --color-field: var(--field-background, var(--default));
+  --color-field-hover: var(--field-hover);
+  --color-field-foreground: var(--field-foreground, var(--foreground));
+  --color-field-placeholder: var(--field-placeholder, var(--muted));
+  --color-field-border: var(--field-border, var(--border));
+  --radius-field: var(--field-radius, calc(var(--radius) * 1.5));
+  --border-width-field: var(--field-border-width, var(--border-width));
+  --color-background-secondary: var(--background-secondary);
+  --color-background-tertiary: var(--background-tertiary);
+  --color-background-inverse: var(--background-inverse);
+  --color-default-hover: var(--default-hover);
+  --color-accent-hover: var(--accent-hover);
+  --color-success-hover: var(--success-hover);
+  --color-warning-hover: var(--warning-hover);
+  --color-danger-hover: var(--danger-hover);
+  --color-field-focus: var(--field-focus);
+  --color-field-border-hover: var(--field-border-hover);
+  --color-field-border-focus: var(--field-border-focus);
+  --color-default-soft: var(--default-soft);
+  --color-default-soft-foreground: var(--default-soft-foreground);
+  --color-default-soft-hover: var(--default-soft-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-soft-foreground: var(--accent-soft-foreground);
+  --color-accent-soft-hover: var(--accent-soft-hover);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-soft-foreground: var(--danger-soft-foreground);
+  --color-danger-soft-hover: var(--danger-soft-hover);
+  --color-warning-soft: var(--warning-soft);
+  --color-warning-soft-foreground: var(--warning-soft-foreground);
+  --color-warning-soft-hover: var(--warning-soft-hover);
+  --color-success-soft: var(--success-soft);
+  --color-success-soft-foreground: var(--success-soft-foreground);
+  --color-success-soft-hover: var(--success-soft-hover);
+  --color-separator-secondary: var(--separator-secondary);
+  --color-separator-tertiary: var(--separator-tertiary);
+  --color-border-secondary: var(--border-secondary);
+  --color-border-tertiary: var(--border-tertiary);
+  --radius-xs: calc(var(--radius) * 0.25);
+  --ease-smooth: ease;
+  --ease-in-quad: cubic-bezier(0.55, 0.085, 0.68, 0.53);
+  --ease-in-cubic: cubic-bezier(0.55, 0.055, 0.675, 0.19);
+  --ease-in-quart: cubic-bezier(0.895, 0.03, 0.685, 0.22);
+  --ease-in-quint: cubic-bezier(0.755, 0.05, 0.855, 0.06);
+  --ease-in-expo: cubic-bezier(0.95, 0.05, 0.795, 0.035);
+  --ease-in-circ: cubic-bezier(0.6, 0.04, 0.98, 0.335);
+  --ease-out-quad: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  --ease-out-cubic: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-out-quint: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
+  --ease-out-circ: cubic-bezier(0.075, 0.82, 0.165, 1);
+  --ease-out-fluid: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in-out-quad: cubic-bezier(0.455, 0.03, 0.515, 0.955);
+  --ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1);
+  --ease-in-out-quart: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-in-out-quint: cubic-bezier(0.86, 0, 0.07, 1);
+  --ease-in-out-expo: cubic-bezier(1, 0, 0, 1);
+  --ease-in-out-circ: cubic-bezier(0.785, 0.135, 0.15, 0.86);
+  --ease-linear: linear;
+  --animate-spin-fast: spin 0.75s linear infinite;
+  --animate-skeleton: skeleton 2s linear infinite;
+  --animate-caret-blink: caret-blink 1.2s ease-out infinite;
+}
 
 @theme inline {
   --color-background: var(--background);
