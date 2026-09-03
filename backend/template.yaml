@@ -238,6 +238,21 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
 
+  # SAM does not emit an invoke permission for an HTTP API Lambda authorizer
+  # declared with FunctionArn — it does for every route it wires itself, which
+  # is why the other functions in this stack have one and this one did not.
+  # Without it API Gateway's call is refused and every authenticated request
+  # fails as a 500 before the authorizer ever runs. The authorizer id is not
+  # knowable here (it would be circular), so the source is the api's whole
+  # authorizer namespace.
+  AuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt AuthorizerFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${PortalApi}/authorizers/*
+
   PortalApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -255,7 +270,7 @@ Resources:
         # time and rejects an intrinsic here — so the switch is deliberately
         # two coordinated edits rather than one, and Cognito stays untouched
         # until both are made.
-        DefaultAuthorizer: CognitoJwt
+        DefaultAuthorizer: WorkosLambda
         Authorizers:
           CognitoJwt:
             JwtConfiguration:
