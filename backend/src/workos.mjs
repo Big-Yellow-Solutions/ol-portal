@@ -135,6 +135,14 @@ export async function findUserByEmail(email) {
    someone able to sign in and land in an empty lobby, and to keep doing so. */
 export const deleteUser = id => call("DELETE", `/user_management/users/${id}`);
 
+/* ---------- invitations ---------- */
+
+/* An invited person is not a user until they accept: WorkOS holds a pending
+   invitation and /user_management/users stays empty. Listing both is the only
+   way to tell "nobody was ever invited" from "the invite is still unopened",
+   which look identical from the users endpoint alone. */
+export const listInvitations = () => all("/user_management/invitations");
+
 /* ---------- organizations ---------- */
 
 export const listOrganizations = () => all("/organizations");
