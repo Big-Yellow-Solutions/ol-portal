@@ -2,6 +2,7 @@
 
 import { notFound } from "next/navigation";
 import ProfilePage from "@/app/(portal)/profile/page";
+import { useAuth } from "@/lib/auth";
 import { MessagesProvider } from "@/lib/messages";
 import { PortalDataProvider } from "@/lib/portal-data";
 
@@ -23,7 +24,18 @@ import { PortalDataProvider } from "@/lib/portal-data";
  other harnesses use.
 */
 export default function DevProfilePage() {
+  const { status } = useAuth();
   if (process.env.NODE_ENV === "production") notFound();
+
+  /* Mirrors app/(portal)/layout.tsx, and it is load-bearing rather than
+     cosmetic: AuthProvider registers api()'s token source in its own effect,
+     and effects run child-first, so a PortalDataProvider mounted in the same
+     commit fetches before that source exists and the whole harness dies with
+     "No auth token source registered". The real portal never hits this
+     because its layout holds children until auth has settled. */
+  if (status === "loading") {
+    return <p className="p-8 text-sm text-ink-mute">Starting…</p>;
+  }
 
   return (
     <PortalDataProvider>

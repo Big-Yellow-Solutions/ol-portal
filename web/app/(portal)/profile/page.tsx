@@ -1,9 +1,8 @@
 "use client";
 
-import { Suspense, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
@@ -33,24 +32,28 @@ import { cn } from "@/lib/utils";
    the server refuses anyone else, so the page hides the controls for a
    non-admin rather than offering a button that will 403. It follows the
    app's `?param` pattern (Community's `?tab=`, Resources' `?r=`) because the
-   static export cannot serve a dynamic `/profile/[username]` route. */
+   static export cannot serve a dynamic `/profile/[username]` route.
+
+   That parameter is read from `window.location` after mount rather than with
+   `useSearchParams()`. The hook has to sit inside a Suspense boundary on a
+   statically exported route, and a boundary that never resolves shows an
+   indefinite "Loading…" with the shell drawn around it and no way out — which
+   is exactly what this page shipped as. Your own profile needs no query
+   string at all, so the common case should not depend on one. */
 
 export default function ProfilePage() {
-  return (
-    <Suspense fallback={<p className="text-sm text-ink-mute">Loading…</p>}>
-      <Profile />
-    </Suspense>
-  );
-}
-
-function Profile() {
-  const params = useSearchParams();
   const { people, labs, me, role, refresh } = usePortalData();
+  /* Empty in the prerendered HTML, the real value from hydration onward.
+     Only the `?u=` branch waits for it; the default view is your own profile,
+     which `me` already answers. */
+  const search = useSyncExternalStore(subscribeToLocation, clientSearch, () => "");
+  const requested = new URLSearchParams(search).get("u")?.toLowerCase() || null;
   const { openWith } = useMessages();
   const { logout } = useAuth();
 
-  const requested = params.get("u")?.toLowerCase() || null;
-  const username = requested && people[requested] ? requested : me;
+  /* An unknown `?u=` is a dead link, not a reason to quietly show you your
+     own profile — the message below names it. */
+  const username = requested ? (people[requested] ? requested : null) : me;
   const person = username ? people[username] : undefined;
   const mine = !!username && username === me;
   const canEdit = mine || role === "Admin";
@@ -70,11 +73,35 @@ function Profile() {
     [person, username, labs]
   );
 
+  /* `me` and `people` both arrive in the same bootstrap, and the shell holds
+     this page behind that load, so reaching here means the record genuinely
+     is not there — never that it is still on its way. Say so plainly and
+     leave a way onward: an indefinite "Loading…" is the one thing this must
+     not render. */
   if (!person || !username) {
     return (
-      <p className="text-sm text-ink-mute">
-        {requested ? "No one in the portal has that username." : "Loading…"}
-      </p>
+      <div className="flex flex-col items-start gap-3">
+        <p className="m-0 text-[15px] text-ink-soft">
+          {requested
+            ? "No one in the portal has that username."
+            : "We could not find your profile record. An Admin can check your account under Admin & invites."}
+        </p>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <Link
+            href="/bench"
+            className="rounded-full border border-hair-strong bg-white px-[15px] py-[7px] text-xs font-semibold text-violet-deep transition-colors hover:bg-violet-pale"
+          >
+            Go to the Directory
+          </Link>
+          <button
+            type="button"
+            onClick={() => refresh()}
+            className="cursor-pointer rounded-full border border-hair-strong bg-white px-[15px] py-[7px] text-xs font-medium text-ink-soft transition-colors hover:bg-violet-pale hover:text-violet-deep"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
     );
   }
 
@@ -382,6 +409,18 @@ function Profile() {
       )}
     </>
   );
+}
+
+/* location.search as an external store: no effect, no cascading render, and a
+   server snapshot the prerender can use. Back/forward is the only way the
+   query can change without remounting this page. */
+function subscribeToLocation(onChange: () => void) {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
+function clientSearch() {
+  return window.location.search;
 }
 
 function CardHead({
