@@ -4,14 +4,6 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -32,23 +24,14 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
-import { LabLeaderFeeSplitEditor } from "@/components/pipeline/fee-split-editor";
 import { fullName } from "@/lib/data";
-import { billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE } from "@/lib/pipeline";
+import { assignmentState, billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE, CLOSED_WON } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
-import { STAGES, SOURCES } from "@/lib/types";
-import type {
-  AssignmentNotice,
-  AssignmentNoticeLabLeader,
-  Deal,
-  Outcome,
-  Source,
-  Stage,
-} from "@/lib/types";
+import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
+import type { Deal, Source, Stage } from "@/lib/types";
 import { BillingEntityPanel } from "@/components/pipeline/billing-entity-panel";
 import { DocumentUploadPanel } from "@/components/pipeline/document-upload-panel";
-
-const OL_SIGNER_KEY = "ol";
+import { AssignmentTab } from "@/components/pipeline/assignment-tab";
 
 /* Pipeline v2 (design handoff): the deal drawer. The design draws one panel
    that both views and edits a deal — no separate read-only mode — so this
@@ -58,11 +41,12 @@ const OL_SIGNER_KEY = "ol";
    so fixing the blocker (billing entity / proposal / contract) and hitting
    Save also completes the move, mirroring the prototype's openDeal + setState
    pattern. */
-type DrawerTab = "details" | "documents";
+type DrawerTab = "details" | "documents" | "assignment";
 
 const DRAWER_TABS: { key: DrawerTab; label: string }[] = [
   { key: "details", label: "Details" },
   { key: "documents", label: "Documents" },
+  { key: "assignment", label: "Assignment" },
 ];
 
 export function DealDrawer({
@@ -72,6 +56,7 @@ export function DealDrawer({
   initialTab = "details",
   onClose,
   onSaved,
+  onDealUpdated,
   onDeleted,
   onOpenRecord,
 }: {
@@ -83,6 +68,9 @@ export function DealDrawer({
   initialTab?: DrawerTab;
   onClose: () => void;
   onSaved: (deal: Deal) => void;
+  /* Filing or approving an assignment updates the deal without leaving it —
+     unlike Save, which closes the drawer. */
+  onDealUpdated: (deal: Deal) => void;
   onDeleted: (id: string) => void;
   onOpenRecord: (type: "company" | "contact", id: string) => void;
 }) {
@@ -92,16 +80,17 @@ export function DealDrawer({
   const editable = existing ? can.editDeal(existing, role!, myLabs, me) : can.addDeal(role!, myLabs);
 
   const [tab, setTab] = useState<DrawerTab>(initialTab);
+  /* Filing an assignment returns the whole updated deal; keeping it here lets
+     the tab flip straight to its receipt without closing and reopening. */
+  const [liveDeal, setLiveDeal] = useState<Deal | null>(existing);
+  const assignment = liveDeal ? assignmentState(liveDeal) : "locked";
   /* A new deal has no tabs, so it always shows the details form. */
   const showDetails = isNew || tab === "details";
   const showDocuments = !isNew && tab === "documents";
+  const showAssignmentTab = !isNew && tab === "assignment";
 
   const leaders = useMemo(
     () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
-    [people]
-  );
-  const labLeaderOptions = useMemo(
-    () => Object.entries(people).filter(([, p]) => p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
   );
 
@@ -126,19 +115,6 @@ export function DealDrawer({
   const [deleting, setDeleting] = useState(false);
   const [pausing, setPausing] = useState(false);
 
-  const [showAssignment, setShowAssignment] = useState(false);
-  const existingNotice = existing?.assignmentNotice;
-  const noticeLocked = !!existingNotice && Object.keys(existingNotice.signatures || {}).length > 0;
-  const [noticeLabLeaders, setNoticeLabLeaders] = useState<{ key: string; feeSharePct: string }[]>(
-    existingNotice?.labLeaders.length
-      ? existingNotice.labLeaders.map((l) => ({ key: l.key, feeSharePct: String(l.feeSharePct) }))
-      : [{ key: dealOwner || owner || "", feeSharePct: "100" }]
-  );
-  const [noticeSubcontractorCosts, setNoticeSubcontractorCosts] = useState(String(existingNotice?.subcontractorCosts ?? 0));
-  const [noticeHardCosts, setNoticeHardCosts] = useState(String(existingNotice?.hardCosts ?? 0));
-  const [pendingOutcome, setPendingOutcome] = useState<Outcome>(existing?.outcome ?? "Won");
-  const [signing, setSigning] = useState<string | null>(null);
-  const [signatureText, setSignatureText] = useState("");
 
   /* Proposals are written outside the portal and uploaded onto the deal, so
      an uploaded proposal document is what clears the stage gate. A proposal
@@ -188,24 +164,7 @@ export function DealDrawer({
               ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
               : "Ready to save";
 
-  const buildNotice = (): AssignmentNotice | null => {
-    const labLeadersOut: AssignmentNoticeLabLeader[] = [];
-    for (const row of noticeLabLeaders) {
-      const pct = Number(row.feeSharePct);
-      if (!row.key || !Number.isFinite(pct) || pct < 0) return null;
-      labLeadersOut.push({ key: row.key, feeSharePct: pct });
-    }
-    if (!labLeadersOut.length) return null;
-    const pctSum = labLeadersOut.reduce((sum, l) => sum + l.feeSharePct, 0);
-    if (Math.abs(pctSum - 100) > 0.01) return null;
-    const subcontractorCosts = Number(noticeSubcontractorCosts);
-    const hardCosts = Number(noticeHardCosts);
-    if (!Number.isFinite(subcontractorCosts) || subcontractorCosts < 0) return null;
-    if (!Number.isFinite(hardCosts) || hardCosts < 0) return null;
-    return { labLeaders: labLeadersOut, subcontractorCosts, hardCosts, signatures: existingNotice?.signatures ?? {} };
-  };
-
-  const buildBody = (assignmentNotice?: AssignmentNotice) => ({
+  const buildBody = () => ({
     client: title,
     lab,
     owner,
@@ -217,14 +176,12 @@ export function DealDrawer({
     recurring,
     companyId,
     contactId,
-    ...(stage === "Closed" ? { outcome: pendingOutcome } : {}),
-    ...(assignmentNotice ? { assignmentNotice } : {}),
   });
 
-  const submit = async (assignmentNotice?: AssignmentNotice) => {
+  const submit = async () => {
     setSaving(true);
     try {
-      const body = buildBody(assignmentNotice);
+      const body = buildBody();
       const saved = isNew
         ? await api<Deal>("/deals", { method: "POST", body: JSON.stringify(body) })
         : await api<Deal>(`/deals/${existing!.id}`, { method: "PATCH", body: JSON.stringify(body) });
@@ -239,51 +196,9 @@ export function DealDrawer({
 
   const handleSave = async () => {
     if (!canSave) return;
-    const closing = stage === "Closed" && existing?.stage !== "Closed";
-    if (closing && !existing?.assignmentNotice) {
-      setShowAssignment(true);
-      return;
-    }
-    const notice = stage === "Closed" && !noticeLocked ? buildNotice() : existingNotice;
-    if (stage === "Closed" && !noticeLocked && !notice) {
-      toast.error("Assignment Notice fee shares must add up to 100%.");
-      return;
-    }
-    await submit(notice ?? undefined);
+    await submit();
   };
 
-  const confirmAssignmentAndSave = async () => {
-    const notice = buildNotice();
-    if (!notice) {
-      toast.error("Add at least one Lab Leader with fee shares summing to 100%.");
-      return;
-    }
-    await submit(notice);
-    setShowAssignment(false);
-  };
-
-  const sign = async (signerKey: string) => {
-    if (!existing || !signatureText.trim()) return;
-    setSigning(signerKey);
-    try {
-      const saved = await api<Deal>(`/deals/${existing.id}/assignment-notice/sign`, {
-        method: "POST",
-        body: JSON.stringify({ signerKey, signatureText: signatureText.trim() }),
-      });
-      toast.success("Signed");
-      onSaved(saved);
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not record this signature.");
-    } finally {
-      setSigning(null);
-      setSignatureText("");
-    }
-  };
-
-  /* Pausing recurring billing used to live in the drawer's Invoices section,
-     which is now an upload box for invoice documents. The control moved to
-     sit with the recurring flag it acts on; it PATCHes immediately rather
-     than waiting on Save, exactly as it did before. */
   const togglePause = async () => {
     if (!existing) return;
     setPausing(true);
@@ -316,51 +231,6 @@ export function DealDrawer({
     }
   };
 
-  if (showAssignment) {
-    return (
-      <Dialog open={open} onOpenChange={() => {}}>
-        <DialogContent showCloseButton={false} onInteractOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle>Assignment notice required</DialogTitle>
-            <DialogDescription>
-              Closing this deal requires naming which Lab Leader(s) are delivering the work and their fee split, plus any
-              subcontractor and hard costs.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="pv2-outcome">Outcome</Label>
-              <Select value={pendingOutcome} onValueChange={(v) => setPendingOutcome(v as Outcome)}>
-                <SelectTrigger id="pv2-outcome"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Won">Won</SelectItem>
-                  <SelectItem value="Lost">Lost</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <LabLeaderFeeSplitEditor rows={noticeLabLeaders} setRows={setNoticeLabLeaders} options={labLeaderOptions} />
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="pv2-subcontractor-costs">Subcontractor costs</Label>
-                <Input id="pv2-subcontractor-costs" type="number" min={0} value={noticeSubcontractorCosts} onChange={(e) => setNoticeSubcontractorCosts(e.target.value)} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor="pv2-hard-costs">Hard costs</Label>
-                <Input id="pv2-hard-costs" type="number" min={0} value={noticeHardCosts} onChange={(e) => setNoticeHardCosts(e.target.value)} />
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAssignment(false)} disabled={saving}>Cancel</Button>
-            <Button disabled={saving} onClick={confirmAssignmentAndSave}>{saving ? "Saving…" : "Confirm & close deal"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
       <SheetContent
@@ -386,6 +256,9 @@ export function DealDrawer({
           <div className="flex flex-none items-end gap-0.5 border-b border-hair px-4">
             {DRAWER_TABS.map((t) => {
               const on = tab === t.key;
+              // The Assignment tab reads amber while one is owed, so the deal
+              // says what it needs without anyone opening the tab to find out.
+              const owed = t.key === "assignment" && assignment === "needed";
               return (
                 <button
                   key={t.key}
@@ -396,10 +269,13 @@ export function DealDrawer({
                     "-mb-px cursor-pointer rounded-t-[10px] px-3.5 pt-2.5 pb-2 text-sm whitespace-nowrap transition-colors",
                     on
                       ? "border-b-2 border-violet-deep bg-violet-pale font-semibold text-violet-deep"
-                      : "font-medium text-ink-soft hover:bg-[#F1EEFE] hover:text-violet-deep"
+                      : owed
+                        ? "bg-amber-pale font-semibold text-amber"
+                        : "font-medium text-ink-soft hover:bg-[#F1EEFE] hover:text-violet-deep"
                   )}
                 >
                   {t.label}
+                  {owed && <span className="ml-1.5 text-[11px] font-semibold">Needs you</span>}
                 </button>
               );
             })}
@@ -410,6 +286,44 @@ export function DealDrawer({
           <div className="flex flex-col gap-4">
             {showDetails && (
               <>
+                {/* Only a won deal owes an assignment. A lost one never does,
+                    which is why the lost stage exists at all. */}
+                {liveDeal && assignment === "needed" && (
+                  <div className="rounded-2xl border border-amber/30 bg-amber-pale p-4">
+                    <p className="text-[11px] font-semibold tracking-wide text-amber uppercase">
+                      Lab Leader Assignment needed
+                    </p>
+                    <p className="mt-1 text-xs leading-relaxed text-amber">
+                      {!hasContract
+                        ? "Add the signed contract and close date first, then the assignment form unlocks the payout schedule."
+                        : !close
+                          ? "Set the close date, then fill out the assignment form — finance needs it before any payment is released."
+                          : "Finance needs this completed before work begins and payments are released."}
+                    </p>
+                    {hasContract && !!close && (
+                      <Button size="sm" className="mt-3 rounded-full bg-amber text-white hover:bg-amber/90" onClick={() => setTab("assignment")}>
+                        Go to the assignment form →
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {liveDeal && (assignment === "filed" || assignment === "approved") && (
+                  <div className="flex items-center gap-3 rounded-2xl border border-green/30 bg-green-pale/50 p-3.5">
+                    <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-green-pale text-green">✓</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[13px] font-semibold text-ink">Assignment form on file</span>
+                      <span className="block truncate text-xs text-ink-mute">
+                        {assignment === "approved" ? "Approved" : "Awaiting approval"}
+                        {liveDeal.assignment?.leaders.length
+                          ? ` · ${liveDeal.assignment.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ")}`
+                          : ""}
+                      </span>
+                    </span>
+                    <button type="button" className="shrink-0 text-xs font-semibold text-violet-deep hover:text-violet" onClick={() => setTab("assignment")}>
+                      View
+                    </button>
+                  </div>
+                )}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="pv2-title">Deal name</Label>
               <Input id="pv2-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Grace Network — cohort two" disabled={!editable} />
@@ -441,14 +355,14 @@ export function DealDrawer({
                   value={stage}
                   onValueChange={(v) => {
                     const next = v as Stage;
-                    if (next === "Closed" && stage !== "Closed") setClose("");
+                    if (next === CLOSED_WON && stage !== CLOSED_WON) setClose("");
                     setStage(next);
                   }}
                   disabled={!editable}
                 >
                   <SelectTrigger id="pv2-stage"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {STAGES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                    {STAGES.map((s) => <SelectItem key={s} value={s}>{STAGE_LABELS[s]}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -560,50 +474,18 @@ export function DealDrawer({
               </div>
             )}
 
-            {existing?.stage === "Closed" && existingNotice && (
-              <div className="flex flex-col gap-4 border-t border-hair pt-4">
-                <h3 className="text-sm font-medium text-ink">Assignment Notice</h3>
-                <LabLeaderFeeSplitEditor rows={noticeLabLeaders} setRows={setNoticeLabLeaders} options={labLeaderOptions} disabled={!editable || noticeLocked} />
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="pv2-subcontractor-costs-2">Subcontractor costs</Label>
-                    <Input id="pv2-subcontractor-costs-2" type="number" min={0} value={noticeSubcontractorCosts} onChange={(e) => setNoticeSubcontractorCosts(e.target.value)} disabled={!editable || noticeLocked} />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="pv2-hard-costs-2">Hard costs</Label>
-                    <Input id="pv2-hard-costs-2" type="number" min={0} value={noticeHardCosts} onChange={(e) => setNoticeHardCosts(e.target.value)} disabled={!editable || noticeLocked} />
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2" role="group" aria-labelledby="pv2-signatures-label">
-                  <Label id="pv2-signatures-label">Signatures</Label>
-                  {[...existingNotice.labLeaders.map((l) => l.key), OL_SIGNER_KEY].map((key) => {
-                    const sig = existingNotice.signatures[key];
-                    const label = key === OL_SIGNER_KEY ? "Optimistic Labs" : fullName(people[key]) || key;
-                    const canSign = !sig && (role === "Admin" || (key !== OL_SIGNER_KEY && me === key));
-                    return (
-                      <div key={key} className="flex items-center justify-between gap-2 text-sm">
-                        <span className="text-ink">{label}</span>
-                        {sig ? (
-                          <span className="text-xs text-ink-mute">Signed &ldquo;{sig.name}&rdquo; by {sig.verifiedName || sig.by}</span>
-                        ) : canSign ? (
-                          signing === key ? (
-                            <div className="flex items-center gap-2">
-                              <Input autoFocus placeholder="Type your name" value={signatureText} onChange={(e) => setSignatureText(e.target.value)} className="h-8 w-40" />
-                              <Button size="sm" onClick={() => sign(key)} disabled={!signatureText.trim()}>Sign</Button>
-                            </div>
-                          ) : (
-                            <Button size="sm" variant="outline" onClick={() => setSigning(key)}>Sign</Button>
-                          )
-                        ) : (
-                          <span className="text-xs text-ink-mute">Not signed</span>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
               </>
+            )}
+
+            {showAssignmentTab && liveDeal && (
+              <AssignmentTab
+                deal={liveDeal}
+                editable={editable}
+                onSaved={(saved) => {
+                  setLiveDeal(saved);
+                  onDealUpdated(saved);
+                }}
+              />
             )}
           </div>
         </div>

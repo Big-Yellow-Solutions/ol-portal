@@ -24,6 +24,7 @@ import { networkId, useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { fmtCompact, fullName, initials } from "@/lib/data";
 import { STAGES, type Deal, type Stage } from "@/lib/types";
+import { isClosedStage } from "@/lib/pipeline";
 
 /* Home, rebuilt from the Claude Design artboard "Portal Dashboard".
  *
@@ -49,7 +50,7 @@ import { STAGES, type Deal, type Stage } from "@/lib/types";
 const PRESENCE_ROWS = 4;
 
 const OPEN_STAGES = STAGES.filter(
-  (s): s is Exclude<Stage, "Closed"> => s !== "Closed"
+  (s): s is Exclude<Stage, "Closed" | "Closed Lost"> => !isClosedStage(s)
 );
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -102,7 +103,7 @@ export default function DashboardPage() {
   const { openWith } = useMessages();
 
   const openDeals = useMemo(
-    () => deals.filter((d) => d.stage !== "Closed"),
+    () => deals.filter((d) => !isClosedStage(d.stage)),
     [deals]
   );
 

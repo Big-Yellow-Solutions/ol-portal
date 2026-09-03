@@ -64,7 +64,7 @@ const TOOLS = [
       type: "object",
       properties: {
         query: { type: "string", description: "Free text matched against client name, lab, stage and owner. Omit to list everything in scope." },
-        stage: { type: "string", enum: ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"], description: "Restrict to one stage." },
+        stage: { type: "string", enum: ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed", "Closed Lost"], description: "Restrict to one stage. \"Closed\" is Closed Won." },
         includeClosed: { type: "boolean", description: "Include closed deals. Defaults to false, so results are open opportunities." }
       },
       additionalProperties: false
@@ -76,7 +76,7 @@ const TOOLS = [
         .filter(d => ctx.can.seesLab(d.lab) || ctx.can.leadsDeal(d))
         .filter(d => inScope(scope, d.lab))
         .filter(d => (stage ? d.stage === stage : true))
-        .filter(d => (includeClosed || stage === "Closed" ? true : d.stage !== "Closed"))
+        .filter(d => (includeClosed || (stage || "").startsWith("Closed") ? true : !(d.stage || "").startsWith("Closed")))
         .filter(d => matches(query, d.client, names[d.lab], d.lab, d.stage, d.owner, d.source));
       visible.sort((a, b) => String(a.close || "").localeCompare(String(b.close || "")));
       return {

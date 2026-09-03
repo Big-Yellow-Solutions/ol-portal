@@ -33,6 +33,7 @@ import { CONTRACT_VARIANT, PROPOSAL_VARIANT, fmtDollars, fullName } from "@/lib/
 import { pricingTotal } from "@/lib/pricing";
 import { usePortalData } from "@/lib/portal-data";
 import type { Contract, Deal, Proposal } from "@/lib/types";
+import { isClosedStage } from "@/lib/pipeline";
 
 interface Row {
   deal: Deal;
@@ -81,7 +82,7 @@ export default function DealFlowPage() {
   );
 
   const counts = {
-    live: rows.filter((r) => r.deal.stage !== "Closed").length,
+    live: rows.filter((r) => !isClosedStage(r.deal.stage)).length,
     outForSignature: rows.filter((r) => r.contract?.status === "Out for Signature").length,
     signed: rows.filter((r) => r.contract?.status === "Signed").length,
     stalled: rows.filter((r) => r.stalled).length,
@@ -227,7 +228,7 @@ function waitingOn(
 ): { waitingOn: string; stalled: boolean } {
   if (contract?.status === "Signed") {
     if (deal.stage !== "Closed")
-      return { waitingOn: "Signed — needs an Assignment Notice to close", stalled: true };
+      return { waitingOn: "Signed — not marked Closed Won yet", stalled: true };
     return { waitingOn: "Done", stalled: false };
   }
   if (contract?.status === "Out for Signature") {

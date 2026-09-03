@@ -1,9 +1,20 @@
 export type Role = "Admin" | "Lab Leader" | "Contributor";
 
-// Mirrors backend/src/app.mjs's STAGES exactly. "Closed" deals carry a
-// separate `outcome` field ("Won" | "Lost") rather than being split into
-// two stages.
-export type Stage = "Lead" | "Discovery" | "Proposal Sent" | "Negotiating" | "Closed";
+// Mirrors backend/src/app.mjs's STAGES exactly. Pipeline v3 splits the final
+// column: "Closed" is Closed Won — its stored value is unchanged, because
+// every rule and report that reads it already means won — and "Closed Lost"
+// is its own stage. `outcome` is still on the record but is now derived from
+// the stage server-side rather than chosen separately, so the two cannot
+// disagree.
+export type Stage =
+  | "Lead"
+  | "Discovery"
+  | "Proposal Sent"
+  | "Negotiating"
+  | "Closed"
+  | "Closed Lost";
+/** Derived from the stage server-side since Pipeline v3 — "Closed" is Won and
+ *  "Closed Lost" is Lost — and kept on the record because reports read it. */
 export type Outcome = "Won" | "Lost";
 // "Network" and "Event" added for Pipeline v2 (backend/src/app.mjs's SOURCES).
 export type Source = "Referral" | "Inbound" | "Network" | "Event" | "Outbound";
@@ -194,27 +205,53 @@ export interface Lab {
   color?: string;
 }
 
-// Mirrors backend/src/app.mjs's sanitizeAssignmentNotice/isValidAssignmentNotice
-// exactly. `labLeaders` fee shares must sum to 100; each named Lab Leader (plus
-// the Admin-only "ol" / Optimistic Labs line) signs in-portal by typing their
-// name while authenticated — that's what lands in `signatures`.
-export interface AssignmentNoticeSignature {
-  by: string;
-  verifiedName?: string;
-  name: string;
-  at: string;
-}
-
-export interface AssignmentNoticeLabLeader {
+// Pipeline v3's Lab Leader Assignment. Mirrors backend/src/assignments.mjs:
+// the money fields are computed server-side on every write and echoed back, so
+// nothing here is a client-side estimate that could drift from what finance
+// pays against.
+export interface AssignmentLeader {
   key: string;
-  feeSharePct: number;
+  /** Share of the lab-leader pool. Shares across all leaders total 100. */
+  pct: number;
 }
 
-export interface AssignmentNotice {
-  labLeaders: AssignmentNoticeLabLeader[];
+export interface AssignmentPayout extends AssignmentLeader {
+  payout: number;
+}
+
+export interface Assignment {
+  agreementRef: string;
+  clientName: string;
+  contractValue: number;
+  issued: string;
+  cadence: string;
+  hardCosts: number;
+  subcontractorCosts: number;
+  leaders: AssignmentLeader[];
+  notes?: string;
+  /** Server-computed. */
+  softReserve: number;
+  net: number;
+  pool: number;
+  poolPct: number;
+  payouts: AssignmentPayout[];
+  filedBy: string;
+  filedAt: string;
+  updatedAt?: string;
+  approved: boolean;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  reopenedAt?: string;
+}
+
+/** The v2 Assignment Notice, which v3 replaced. Still readable so a deal that
+ *  carried one keeps its leaders and costs as a seed for the new form — the
+ *  numbers were somebody's work, even though the record was never filed in the
+ *  v3 sense. Nothing writes this shape any more. */
+export interface LegacyAssignmentNotice {
+  labLeaders: { key: string; feeSharePct: number }[];
   subcontractorCosts: number;
   hardCosts: number;
-  signatures: Record<string, AssignmentNoticeSignature>;
 }
 
 // Pipeline v2 (design handoff): the deal's billing entity. Deliberately named
@@ -257,7 +294,9 @@ export interface Deal {
   source: Source;
   recurring: boolean;
   outcome?: Outcome;
-  assignmentNotice?: AssignmentNotice;
+  assignment?: Assignment;
+  /** @deprecated superseded by `assignment`; read only to seed the new form. */
+  assignmentNotice?: LegacyAssignmentNotice;
   recurPaused?: boolean;
   autoInvoice?: boolean;
   recurEnd?: string;
@@ -698,6 +737,18 @@ export const STAGES: Stage[] = [
   "Proposal Sent",
   "Negotiating",
   "Closed",
+  "Closed Lost",
 ];
+
+/** What the board and the stage selects call "Closed" — the stored value stays
+ *  "Closed" so nothing downstream has to be migrated to keep meaning won. */
+export const STAGE_LABELS: Record<Stage, string> = {
+  Lead: "Lead",
+  Discovery: "Discovery",
+  "Proposal Sent": "Proposal Sent",
+  Negotiating: "Negotiating",
+  Closed: "Closed Won",
+  "Closed Lost": "Closed Lost",
+};
 
 export const SOURCES: Source[] = ["Referral", "Inbound", "Network", "Event", "Outbound"];

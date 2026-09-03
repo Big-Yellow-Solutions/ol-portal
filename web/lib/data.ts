@@ -23,6 +23,7 @@ export const STAGE_VARIANT: Record<Stage, BadgeVariant> = {
   "Proposal Sent": "warning",
   Negotiating: "warning",
   Closed: "success",
+  "Closed Lost": "outline",
 };
 
 export const PROPOSAL_VARIANT: Record<ProposalStatus, BadgeVariant> = {

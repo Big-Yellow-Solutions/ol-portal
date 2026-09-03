@@ -43,24 +43,22 @@ export async function generateExecutedPdf(c) {
   return payload;
 }
 
-/* FR18. The pipeline refuses to close a deal without a valid Assignment Notice
-   (fee splits summing to 100%), and that gate predates this flow and still has
-   to hold. So execution closes the deal when the notice is already on file, and
-   otherwise flags it as ready to close so the pipeline can prompt for the
-   notice instead of silently stalling. */
+/* FR18. An executed contract closes the deal. Until Pipeline v3 this had to
+   wait on an Assignment Notice — the deal was parked at "ready to close" until
+   somebody filled one in — but closing no longer depends on the assignment
+   (assignments.mjs): a won deal is won, and the assignment is chased after the
+   fact by the drawer's Assignment tab. */
 export async function rollUpDeal(c) {
   if (!c.deal) return;
   const deal = await get("DEAL", c.deal);
   if (!deal) return;
-  const hasNotice = !!deal.assignmentNotice;
   await put({
     ...deal,
     contractSigned: true,
     contractSignedAt: c.executedAt,
     contract: c.sk,
-    ...(hasNotice
-      ? { stage: "Closed", outcome: "Won" }
-      : { readyToClose: true, stage: deal.stage === "Closed" ? deal.stage : "Negotiating" })
+    stage: "Closed",
+    outcome: "Won"
   });
 }
 

@@ -2,7 +2,7 @@
 
 import { Calendar, GripVertical, Repeat } from "lucide-react";
 import { fmtDollars } from "@/lib/data";
-import { billingOf, cadenceOf, SHOW_BILLING_ON_CARDS } from "@/lib/pipeline";
+import { assignmentState, billingOf, cadenceOf, SHOW_BILLING_ON_CARDS } from "@/lib/pipeline";
 import { cn } from "@/lib/utils";
 import type { Deal } from "@/lib/types";
 
@@ -69,6 +69,18 @@ export function DealCard({
         <span className="flex-1" />
         {deal.stage === "Closed" && deal.outcome === "Won" && (
           <span className="rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
+        )}
+        {deal.stage === "Closed Lost" && (
+          <span className="rounded-full bg-warm-panel px-2.5 py-0.5 text-[11px] font-semibold text-warm-gray">Lost</span>
+        )}
+        {/* Pipeline v3: a won deal with no assignment on file says so on the
+            board, so the work finance is waiting on is visible without
+            opening anything. */}
+        {assignmentState(deal) === "needed" && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-pale px-2.5 py-0.5 text-[11px] font-semibold text-amber">
+            <span aria-hidden className="size-1.5 rounded-full bg-amber" />
+            Assignment
+          </span>
         )}
         {deal.recurring && <Repeat size={14} className="shrink-0 text-violet" aria-label="Recurring deal" />}
       </div>

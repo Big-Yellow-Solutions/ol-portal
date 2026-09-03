@@ -17,6 +17,7 @@ import {
   PROPOSAL_VARIANT,
   docKindOf,
   fmtDollars,
+  fullName,
 } from "@/lib/data";
 import { billingOf } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
@@ -39,13 +40,14 @@ import type { Deal } from "@/lib/types";
 
 const PAGE_SIZE = 9;
 
-type Kind = "all" | "proposals" | "contracts" | "invoices";
+type Kind = "all" | "proposals" | "contracts" | "invoices" | "assignments";
 
 const KINDS: { key: Kind; label: string }[] = [
   { key: "all", label: "All documents" },
   { key: "proposals", label: "Proposals" },
   { key: "contracts", label: "Contracts" },
   { key: "invoices", label: "Invoices" },
+  { key: "assignments", label: "Assignments" },
 ];
 
 type Sort = "newest" | "oldest" | "amount" | "name";
@@ -99,7 +101,7 @@ export function DocumentsGrid({
   lab: string;
   onOpenDeal: (dealId: string) => void;
 }) {
-  const { deals, proposals, contracts, invoices, companies, contacts } =
+  const { deals, proposals, contracts, invoices, companies, contacts, people } =
     usePortalData();
   const [kind, setKind] = useState<Kind>("all");
   const [sort, setSort] = useState<Sort>("newest");
@@ -224,8 +226,34 @@ export function DocumentsGrid({
       });
     }
 
+    /* Pipeline v3: a filed assignment is a document of the pipeline too — it
+       is the thing finance pays against — so it belongs in this grid rather
+       than only inside the deal that produced it. It has no versions: the
+       record is replaced in place until it is approved, and locked after. */
+    for (const deal of deals) {
+      const a = deal.assignment;
+      if (!a) continue;
+      const leaders = a.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ");
+      out.push({
+        id: `assignment:${deal.id}`,
+        kind: "assignments",
+        tag: "Assignment",
+        name: `${deal.client} — lab leader assignment`,
+        client: a.clientName,
+        status: a.approved ? `Approved · ${leaders}` : `Filed · ${leaders}`,
+        variant: a.approved ? "success" : "warning",
+        when: `Issued ${shortDate(a.issued)}`,
+        at: a.issued || "",
+        amount: a.contractValue ?? 0,
+        sub: `${deal.client} · pool ${fmtDollars(a.pool)}`,
+        action: "Open deal — view assignment",
+        deal,
+        done: a.approved,
+      });
+    }
+
     return out;
-  }, [proposals, contracts, invoices, dealMap, companyMap, contactMap]);
+  }, [proposals, contracts, invoices, deals, people, dealMap, companyMap, contactMap]);
 
   const q = search.trim().toLowerCase();
 
@@ -250,6 +278,7 @@ export function DocumentsGrid({
       proposals: all.filter((d) => d.kind === "proposals").length,
       contracts: all.filter((d) => d.kind === "contracts").length,
       invoices: all.filter((d) => d.kind === "invoices").length,
+      assignments: all.filter((d) => d.kind === "assignments").length,
     }),
     [all]
   );
@@ -422,7 +451,7 @@ export function DocumentsGrid({
       )}
 
       <p className="text-xs text-ink-mute">
-        Every proposal, contract and invoice in the pipeline. Documents are
+        Every proposal, contract, invoice and assignment form in the pipeline. Documents are
         managed inside a deal — open one to send a version, request a contract,
         or move an invoice along.
       </p>

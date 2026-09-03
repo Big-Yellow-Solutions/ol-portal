@@ -14,6 +14,7 @@ import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
 import * as admin from "./admin.mjs";
 import * as proposals from "./proposals.mjs";
 import * as contacts from "./contacts.mjs";
+import * as assignments from "./assignments.mjs";
 import * as contracts from "./contracts.mjs";
 import * as contractsCreate from "./contracts-create.mjs";
 import * as recurring from "./recurring.mjs";
@@ -48,7 +49,17 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
 
-const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
+const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed", "Closed Lost"];
+/* Pipeline v3 splits the board's final column in two. The won stage keeps the
+   stored value "Closed": every rule and report that already reads it means
+   "won", so renaming would have churned thirty-odd call sites to say the same
+   thing. The lost stage is new, and skips every gate — a deal can be lost from
+   anywhere, and losing one needs no billing entity, no sent proposal, no
+   signed contract and no assignment. Outcome is derived from the stage now
+   rather than picked separately; the two can no longer disagree. */
+const CLOSED_WON = "Closed";
+const CLOSED_LOST = "Closed Lost";
+const outcomeOf = stage => (stage === CLOSED_WON ? "Won" : stage === CLOSED_LOST ? "Lost" : null);
 // "Network" and "Event" added for Pipeline v2 (design handoff) — additive, so
 // deals sourced before this change keep reading the same three values.
 const SOURCES = ["Referral", "Inbound", "Network", "Event", "Outbound"];
@@ -118,40 +129,6 @@ async function isValidDealOwner(key) {
   return !!p && (p.role === "Admin" || p.role === "Lab Leader");
 }
 
-function sanitizeAssignmentNotice(n, existingSignatures) {
-  if (!n) return null;
-  return {
-    labLeaders: Array.isArray(n.labLeaders)
-      ? n.labLeaders.map(l => ({ key: l && l.key, feeSharePct: l && l.feeSharePct }))
-      : [],
-    subcontractorCosts: n.subcontractorCosts,
-    hardCosts: n.hardCosts,
-    signatures: existingSignatures || {}
-  };
-}
-
-async function isValidAssignmentNotice(n) {
-  if (!n || !Array.isArray(n.labLeaders) || !n.labLeaders.length) return false;
-  const seen = new Set();
-  let pctSum = 0;
-  for (const ll of n.labLeaders) {
-    if (!ll || typeof ll.key !== "string" || !ll.key || seen.has(ll.key)) return false;
-    seen.add(ll.key);
-    if (!Number.isFinite(ll.feeSharePct) || ll.feeSharePct < 0) return false;
-    pctSum += ll.feeSharePct;
-    const p = await get("PERSON", ll.key);
-    if (!p || p.role !== "Lab Leader") return false;
-  }
-  if (Math.abs(pctSum - 100) > 0.01) return false;
-  if (!Number.isFinite(n.subcontractorCosts) || n.subcontractorCosts < 0) return false;
-  if (!Number.isFinite(n.hardCosts) || n.hardCosts < 0) return false;
-  return true;
-}
-
-const sameAssignmentTerms = (a, b) =>
-  JSON.stringify(a?.labLeaders) === JSON.stringify(b?.labLeaders) &&
-  a?.subcontractorCosts === b?.subcontractorCosts && a?.hardCosts === b?.hardCosts;
-
 async function createDeal(ctx, body) {
   if (!ctx.can.addDeal()) return resp(403, { error: "Not allowed to add deals" });
   const { client, lab, owner, dealOwner, stage, amount, close, source, recurring } = body || {};
@@ -175,14 +152,8 @@ async function createDeal(ctx, body) {
   const contactId = body.contactId || null;
   if (companyId && !(await get("COMPANY", companyId))) return resp(400, { error: "unknown company" });
   if (contactId && !(await get("CONTACT", contactId))) return resp(400, { error: "unknown contact" });
-  if (STAGES.indexOf(stage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !companyId && !contactId)
+  if (stage !== CLOSED_LOST && STAGES.indexOf(stage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !companyId && !contactId)
     return resp(400, { error: `A deal at ${stage} needs a billing entity — link a company or a contact` });
-  let assignmentNotice = null;
-  if (stage === "Closed") {
-    assignmentNotice = sanitizeAssignmentNotice(body.assignmentNotice, {});
-    if (!(await isValidAssignmentNotice(assignmentNotice)))
-      return resp(400, { error: "Assignment Notice is required when closing a deal" });
-  }
 
   const id = await nextId("DEAL", "D-");
   const stamp = today();
@@ -190,8 +161,7 @@ async function createDeal(ctx, body) {
     pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
     stage, amount, close, source, recurring: !!recurring, companyId, contactId,
     created: stamp, updated: stamp,
-    ...(stage === "Closed" && ["Won", "Lost"].includes(body.outcome) ? { outcome: body.outcome } : {}),
-    ...(stage === "Closed" ? { assignmentNotice } : {})
+    ...(outcomeOf(stage) ? { outcome: outcomeOf(stage) } : {})
   };
   await put(deal);
   const { pk, sk, ...rest } = deal;
@@ -204,7 +174,7 @@ async function updateDeal(ctx, id, body) {
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   const patch = {};
   const editable = ["client", "owner", "dealOwner", "stage", "amount", "close", "source", "recurring",
-    "outcome", "lab", "recurPaused", "autoInvoice", "recurEnd", "assignmentNotice",
+    "lab", "recurPaused", "autoInvoice", "recurEnd",
     "companyId", "contactId"];
   for (const k of editable) if (body && k in body) patch[k] = body[k];
   if ("recurPaused" in patch) patch.recurPaused = !!patch.recurPaused;
@@ -217,7 +187,6 @@ async function updateDeal(ctx, id, body) {
   }
   if ("stage" in patch && !STAGES.includes(patch.stage)) return resp(400, { error: "invalid stage" });
   if ("amount" in patch && (!Number.isFinite(patch.amount) || patch.amount < 0)) return resp(400, { error: "invalid amount" });
-  if ("outcome" in patch && !["Won", "Lost"].includes(patch.outcome)) return resp(400, { error: "invalid outcome" });
   if ("owner" in patch && !(await get("PERSON", patch.owner))) return resp(400, { error: "unknown owner" });
   if ("dealOwner" in patch && !(await isValidDealOwner(patch.dealOwner))) return resp(400, { error: "unknown deal owner" });
   if ("companyId" in patch && patch.companyId && !(await get("COMPANY", patch.companyId)))
@@ -225,25 +194,14 @@ async function updateDeal(ctx, id, body) {
   if ("contactId" in patch && patch.contactId && !(await get("CONTACT", patch.contactId)))
     return resp(400, { error: "unknown contact" });
 
-  let mergedNotice = deal.assignmentNotice;
-  if ("assignmentNotice" in patch) {
-    mergedNotice = sanitizeAssignmentNotice(patch.assignmentNotice, deal.assignmentNotice?.signatures);
-    const hasSignatures = Object.keys(deal.assignmentNotice?.signatures || {}).length > 0;
-    if (hasSignatures && !sameAssignmentTerms(deal.assignmentNotice, mergedNotice))
-      return resp(409, { error: "Assignment Notice terms are locked after a signature has been recorded" });
-  }
-  const noticeValid = await isValidAssignmentNotice(mergedNotice);
-  if ("assignmentNotice" in patch) {
-    if (!noticeValid) return resp(400, { error: "invalid assignment notice" });
-    patch.assignmentNotice = mergedNotice;
-  }
-  const closingNow = patch.stage === "Closed" && deal.stage !== "Closed";
-  if (closingNow && !noticeValid)
-    return resp(400, { error: "Assignment Notice is required when closing a deal" });
-  // Pipeline v2: a signed client contract on file, in addition to the
-  // Assignment Notice above — rollUpDeal (execution.mjs) already closes a deal
-  // automatically once both exist, so the only way to hit this is closing one
-  // by hand ahead of that. `contractSigned` isn't in `editable`, so it always
+  /* Winning a deal still needs the signed contract; v3 dropped the Assignment
+     Notice half of this gate, so an assignment is chased after the close
+     rather than blocking it (see assignments.mjs). Losing a deal is not a
+     close in this sense and is never gated. */
+  const closingNow = patch.stage === CLOSED_WON && deal.stage !== CLOSED_WON;
+  // rollUpDeal (execution.mjs) already closes a deal automatically once the
+  // contract is executed, so the only way to hit this is closing one by hand
+  // ahead of that. `contractSigned` isn't in `editable`, so it always
   // reflects what rollUpDeal itself set, never a client-supplied value.
   //
   // A contract uploaded onto the deal clears this too, the same way an
@@ -264,10 +222,11 @@ async function updateDeal(ctx, id, body) {
     const nextStage = patch.stage ?? deal.stage;
     const nextCompany = "companyId" in patch ? patch.companyId : deal.companyId;
     const nextContact = "contactId" in patch ? patch.contactId : deal.contactId;
-    if (STAGES.indexOf(nextStage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !nextCompany && !nextContact)
+    if (nextStage !== CLOSED_LOST && STAGES.indexOf(nextStage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !nextCompany && !nextContact)
       return resp(400, { error: `A deal at ${nextStage} needs a billing entity — link a company or a contact` });
   }
-  if ("stage" in patch && STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
+  if ("stage" in patch && patch.stage !== CLOSED_LOST &&
+      STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
       STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
     // Proposals are written outside the portal and uploaded onto the deal, so
     // an uploaded proposal file is what clears this gate. The older check —
@@ -280,42 +239,8 @@ async function updateDeal(ctx, id, body) {
   }
 
   const next = { ...deal, ...patch, updated: today() };
-  if (next.stage !== "Closed") delete next.outcome;
-  await put(next);
-  const { pk, sk, ...rest } = next;
-  return resp(200, { id: sk, ...rest });
-}
-
-/* In-portal e-signature for Assignment Notices: the signer types their name
-   while authenticated as themselves, so the "signature" is that typed text
-   plus the verified account it came from (who + when, server-stamped). This
-   is a lighter-weight scheme than a certified e-signature vendor (no drawn
-   signature, no external audit trail) but it's captured directly in the
-   portal instead of the manual "assume it's signed outside the system" model
-   contracts still use (PRD 3.7). "ol" is the Optimistic Labs line, Admin-only. */
-async function signAssignmentNotice(ctx, id, body) {
-  const deal = await get("DEAL", id);
-  if (!deal) return resp(404, { error: "deal not found" });
-  if (!ctx.can.seesLab(deal.lab) && !ctx.can.leadsDeal(deal)) return resp(403, { error: "Not allowed to access this deal" });
-  if (deal.stage !== "Closed" || !deal.assignmentNotice)
-    return resp(400, { error: "This deal has no Assignment Notice to sign" });
-  const signerKey = body?.signerKey;
-  const signatureText = typeof body?.signatureText === "string" ? body.signatureText.trim() : "";
-  if (!signatureText) return resp(400, { error: "Type your name to sign" });
-  if (signatureText.length > 120) return resp(400, { error: "Signature is too long" });
-  const isLabLeaderLine = deal.assignmentNotice.labLeaders.some(l => l.key === signerKey);
-  if (signerKey !== "ol" && !isLabLeaderLine) return resp(400, { error: "unknown signer" });
-  if (signerKey === "ol") {
-    if (ctx.role !== "Admin") return resp(403, { error: "Only an Admin can sign for Optimistic Labs" });
-  } else if (ctx.me.sk !== signerKey && ctx.role !== "Admin") {
-    return resp(403, { error: "You can only sign your own line" });
-  }
-  const signatures = { ...(deal.assignmentNotice.signatures || {}) };
-  if (signatures[signerKey]) return resp(409, { error: "This line is already signed" });
-  signatures[signerKey] = {
-    by: ctx.me.sk, verifiedName: fullName(ctx.me), name: signatureText, at: new Date().toISOString()
-  };
-  const next = { ...deal, assignmentNotice: { ...deal.assignmentNotice, signatures } };
+  const outcome = outcomeOf(next.stage);
+  if (outcome) next.outcome = outcome; else delete next.outcome;
   await put(next);
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
@@ -516,8 +441,12 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/deals") return await createDeal(ctx, body);
   if (method === "PATCH" && seg[0] === "deals" && seg[1]) return await updateDeal(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "deals" && seg[1]) return await deleteDeal(ctx, seg[1]);
-  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "assignment-notice" && seg[3] === "sign")
-    return await signAssignmentNotice(ctx, seg[1], body);
+  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "assignment" && !seg[3])
+    return await assignments.fileAssignment(ctx, seg[1], body);
+  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "assignment" && seg[3] === "approve")
+    return await assignments.approveAssignment(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "assignment" && seg[3] === "reopen")
+    return await assignments.reopenAssignment(ctx, seg[1]);
   if (method === "GET" && path === "/files") return await listFiles(ctx);
   if (method === "POST" && path === "/files") return await createFile(ctx, body);
   if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);

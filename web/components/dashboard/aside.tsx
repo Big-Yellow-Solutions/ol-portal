@@ -46,7 +46,7 @@ function CardFoot({ children }: { children: React.ReactNode }) {
    the ramp's three violets; the Portal's pipeline opens a stage earlier, so
    Lead takes a tint mixed from the ramp's own light end rather than a fourth
    colour invented for it. */
-const STAGE_FILL: Record<Exclude<Stage, "Closed">, string> = {
+const STAGE_FILL: Record<Exclude<Stage, "Closed" | "Closed Lost">, string> = {
   Lead: "color-mix(in oklab, var(--color-violet-light) 58%, var(--color-violet-pale))",
   Discovery: "var(--color-violet-light)",
   "Proposal Sent": "var(--color-violet)",
@@ -54,7 +54,7 @@ const STAGE_FILL: Record<Exclude<Stage, "Closed">, string> = {
 };
 
 export interface StageTotal {
-  stage: Exclude<Stage, "Closed">;
+  stage: Exclude<Stage, "Closed" | "Closed Lost">;
   amount: number;
 }
 

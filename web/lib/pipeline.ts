@@ -1,4 +1,4 @@
-import type { Company, Contact, Deal, Stage } from "@/lib/types";
+import type { Assignment, Company, Contact, Deal, Stage } from "@/lib/types";
 import { STAGES } from "@/lib/types";
 
 /* Pipeline v2 (design handoff): shared domain logic for the billing-entity
@@ -18,11 +18,22 @@ export const SHOW_COLUMN_TOTALS = true;
 
 const stageIndex = (s: Stage) => STAGES.indexOf(s);
 
+/* Pipeline v3's second closed column. A deal can be lost from anywhere, so
+   losing one is gated on nothing — no billing entity, no sent proposal, no
+   signed contract, no assignment. Every gate below therefore asks "is this the
+   lost stage?" before it asks where the stage sits in the order, because by
+   index alone Closed Lost sits past every gate there is. Mirrors the same
+   carve-out in backend/src/app.mjs. */
+export const CLOSED_WON: Stage = "Closed";
+export const CLOSED_LOST: Stage = "Closed Lost";
+export const isLost = (stage: Stage): boolean => stage === CLOSED_LOST;
+export const isClosedStage = (stage: Stage): boolean => stage === CLOSED_WON || stage === CLOSED_LOST;
+
 export const billingRequiredAt = (stage: Stage): boolean =>
-  stageIndex(stage) >= stageIndex(BILLING_GATE_STAGE);
+  !isLost(stage) && stageIndex(stage) >= stageIndex(BILLING_GATE_STAGE);
 
 export const proposalRequiredAt = (stage: Stage): boolean =>
-  stageIndex(stage) >= stageIndex("Proposal Sent");
+  !isLost(stage) && stageIndex(stage) >= stageIndex("Proposal Sent");
 
 /** Design's `initials()` for a freeform name — distinct from lib/data.ts's
  *  `initials()`, which reads a staff Person's firstName/lastName. */
@@ -119,3 +130,82 @@ export function companyForContact(
   }
   return { company: undefined, viaDeal: false };
 }
+
+
+/* ---------- Lab Leader Assignment (Pipeline v3) ----------
+
+   Mirrors backend/src/assignments.mjs. The server recomputes and stores these
+   figures on every write — this exists so the form can show the pool moving as
+   somebody types, before anything is filed. */
+
+/* Who may approve a filed assignment. Mirrors ASSIGNMENT_APPROVER in
+   backend/src/assignments.mjs, which is the authority — this only decides
+   whether the button is drawn. A person rather than a role on purpose: there
+   are two Admins and only one of them approves. */
+export const ASSIGNMENT_APPROVER = "liz";
+
+export const POOL_PCT = 70;
+export const SOFT_RESERVE_PCT = 5;
+
+export const CADENCES = [
+  "On signature",
+  "Monthly",
+  "Quarterly",
+  "Annually",
+  "On milestones",
+  "50% up front, 50% on delivery",
+] as const;
+
+export interface PoolMath {
+  softReserve: number;
+  net: number;
+  pool: number;
+  payouts: { key: string; pct: number; payout: number }[];
+}
+
+export function assignmentMath(input: {
+  contractValue: number;
+  hardCosts: number;
+  subcontractorCosts: number;
+  leaders: { key: string; pct: number }[];
+}): PoolMath {
+  const gross = Math.max(input.contractValue || 0, 0);
+  const softReserve = Math.round((gross * SOFT_RESERVE_PCT) / 100);
+  const net = Math.max(gross - (input.hardCosts || 0) - (input.subcontractorCosts || 0) - softReserve, 0);
+  const pool = Math.round((net * POOL_PCT) / 100);
+  return {
+    softReserve,
+    net,
+    pool,
+    payouts: input.leaders.map((l) => ({ key: l.key, pct: l.pct, payout: Math.round((pool * l.pct) / 100) })),
+  };
+}
+
+/** Even split with the remainder going to the earliest leaders, so the shares
+ *  always total exactly 100 rather than 99 with a rounding crumb lost. */
+export function splitEvenly(keys: string[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!keys.length) return out;
+  const base = Math.floor(100 / keys.length);
+  let remainder = 100 - base * keys.length;
+  for (const key of keys) {
+    out[key] = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) remainder -= 1;
+  }
+  return out;
+}
+
+export type AssignmentState = "locked" | "needed" | "filed" | "approved";
+
+/** Which of the Assignment tab's three faces a deal should show. A lost deal
+ *  never needs one, which is the whole reason the stage exists. */
+export function assignmentState(deal: Pick<Deal, "stage" | "assignment">): AssignmentState {
+  if (deal.stage !== CLOSED_WON) return "locked";
+  const a = deal.assignment;
+  if (!a) return "needed";
+  return a.approved ? "approved" : "filed";
+}
+
+/** The leader line as the receipt renders it: "Marcus Bell — 60%, Aliza Roth — 40%". */
+export const leadersLine = (a: Assignment, nameOf: (key: string) => string): string =>
+  a.leaders.map((l) => `${nameOf(l.key)} — ${l.pct}%`).join(", ");

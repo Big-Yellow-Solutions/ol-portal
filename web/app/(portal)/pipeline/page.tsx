@@ -23,9 +23,10 @@ import {
   billingOf,
   billingRequiredAt,
   proposalRequiredAt,
+  CLOSED_WON,
   SHOW_COLUMN_TOTALS,
 } from "@/lib/pipeline";
-import { STAGES } from "@/lib/types";
+import { STAGES, STAGE_LABELS } from "@/lib/types";
 import type { Deal, Stage } from "@/lib/types";
 import { DealDrawer } from "@/components/pipeline/deal-drawer";
 import { RecordDrawer } from "@/components/pipeline/record-drawer";
@@ -121,6 +122,11 @@ function PipelineBoard() {
     [files]
   );
 
+  const dealsWithContractFile = useMemo(
+    () => new Set(files.filter((f) => f.kind === "contract" && f.deal).map((f) => f.deal!)),
+    [files]
+  );
+
   const leaders = useMemo(
     () => Object.entries(people).filter(([, p]) => p.role === "Admin" || p.role === "Lab Leader").map(([username, p]) => ({ username, name: fullName(p) || username })),
     [people]
@@ -142,11 +148,16 @@ function PipelineBoard() {
     () => deals.filter((d) => !d.companyId && !d.contactId && billingRequiredAt(d.stage)).length,
     [deals]
   );
-  /* One card per deal's proposal, plus every contract and invoice — the same
-     arithmetic DocumentsGrid does, so the tab count and the grid agree. */
+  /* One card per deal's proposal, plus every contract, invoice and filed
+     assignment — the same arithmetic DocumentsGrid does, so the tab count and
+     the grid agree. */
   const documentCount = useMemo(
-    () => new Set(proposals.map((p) => p.deal).filter(Boolean)).size + contracts.length + invoices.length,
-    [proposals, contracts, invoices]
+    () =>
+      new Set(proposals.map((p) => p.deal).filter(Boolean)).size +
+      contracts.length +
+      invoices.length +
+      deals.filter((d) => d.assignment).length,
+    [proposals, contracts, invoices, deals]
   );
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
@@ -162,7 +173,7 @@ function PipelineBoard() {
       return;
     }
     if (billingRequiredAt(targetStage) && !deal.companyId && !deal.contactId) {
-      toast.info(`${targetStage} needs a billing entity — opening ${deal.client}`);
+      toast.info(`${STAGE_LABELS[targetStage]} needs a billing entity — opening ${deal.client}`);
       openDeal(deal, targetStage);
       return;
     }
@@ -172,23 +183,41 @@ function PipelineBoard() {
       const cleared =
         dealsWithProposalFile.has(deal.id) || !!latestProposalFor.get(deal.id)?.sentAt;
       if (!cleared) {
-        toast.info(`${targetStage} needs a proposal — upload one on this deal`);
+        toast.info(`${STAGE_LABELS[targetStage]} needs a proposal — upload one on this deal`);
         openDeal(deal, targetStage, "documents");
         return;
       }
     }
-    if (targetStage === "Closed") {
-      toast.info("Set the close date and add the signed contract.");
-      openDeal(deal, "Closed", "documents");
-      return;
+    /* Winning still needs the paperwork: no signed contract, no close. The
+       assignment does NOT block it — a won deal is won, and the form is
+       chased afterwards, which is the change v3 makes. */
+    if (targetStage === CLOSED_WON) {
+      const hasContract = !!deal.contractSigned || dealsWithContractFile.has(deal.id);
+      if (!hasContract) {
+        toast.info("Set the close date and add the signed contract.");
+        openDeal(deal, CLOSED_WON, "documents");
+        return;
+      }
+      if (!deal.assignment) {
+        // A nudge, not a gate: the move goes through, then the drawer opens
+        // on the deal so the form is one click away.
+        await moveTo(deal, targetStage, "Closed Won — a Lab Leader Assignment form is needed");
+        openDeal({ ...deal, stage: targetStage }, undefined, "details");
+        return;
+      }
     }
 
+    await moveTo(deal, targetStage);
+  }
+
+  async function moveTo(deal: Deal, targetStage: Stage, note?: string) {
     const previous = deal.stage;
     setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage: targetStage } : d)));
     try {
       const saved = await api<Deal>(`/deals/${deal.id}`, { method: "PATCH", body: JSON.stringify({ stage: targetStage }) });
       setDeals((prev) => prev.map((d) => (d.id === saved.id ? saved : d)));
-      toast.success(`${deal.client} moved to ${targetStage}`);
+      if (note) toast.info(note);
+      else toast.success(`${deal.client} moved to ${STAGE_LABELS[targetStage]}`);
     } catch (err) {
       setDeals((prev) => prev.map((d) => (d.id === deal.id ? { ...d, stage: previous } : d)));
       toast.error(err instanceof ApiError ? err.message : "Could not move this deal.");
@@ -204,7 +233,7 @@ function PipelineBoard() {
       : view === "people"
         ? "Individuals across the pipeline — some belong to a company, some are billed directly. Open one to see their deals."
         : view === "documents"
-          ? "Every proposal, signed contract, and invoice across the pipeline, with its current version."
+          ? "Every proposal, signed contract, invoice, and assignment form across the pipeline, with its current version."
           : "All of your deals by stage. Drag a card to move it forward and add the necessary documents at each stage to get to Closed.";
 
   const searchPlaceholder =
@@ -296,6 +325,7 @@ function PipelineBoard() {
       {view === "board" && (
         <div className="flex items-start gap-2 overflow-x-auto pb-3">
           {STAGES.map((stage) => {
+            const stageLabel = STAGE_LABELS[stage];
             const stageDeals = filtered.filter((d) => d.stage === stage);
             const total = stageDeals.reduce((sum, d) => sum + (d.amount || 0), 0);
             const isDropTarget = !!draggingDeal && dragOverStage === stage && draggingDeal.stage !== stage;
@@ -323,7 +353,7 @@ function PipelineBoard() {
                 className={cn("min-w-[240px] flex-1 rounded-2xl p-1.5 transition-colors", isDropTarget && "bg-violet-pale ring-2 ring-violet-light/60")}
               >
                 <div className="flex items-center gap-2 px-1 pb-3">
-                  <h3 className="text-[15px] font-bold tracking-[-0.01em] text-ink">{stage}</h3>
+                  <h3 className="text-[15px] font-bold tracking-[-0.01em] whitespace-nowrap text-ink">{stageLabel}</h3>
                   <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">{stageDeals.length}</span>
                   <span className="flex-1" />
                   {SHOW_COLUMN_TOTALS && stageDeals.length > 0 && (
@@ -377,6 +407,7 @@ function PipelineBoard() {
 
       {activeDrawer && (
         <DealDrawer
+          key={activeDrawer.deal === "new" ? "new" : activeDrawer.deal.id}
           deal={activeDrawer.deal}
           pendingStage={activeDrawer.pendingStage}
           initialTab={activeDrawer.tab}
@@ -385,6 +416,9 @@ function PipelineBoard() {
           onSaved={(saved) => {
             setDeals((prev) => (prev.some((d) => d.id === saved.id) ? prev.map((d) => (d.id === saved.id ? saved : d)) : [saved, ...prev]));
             closeDealDrawer();
+          }}
+          onDealUpdated={(saved) => {
+            setDeals((prev) => prev.map((d) => (d.id === saved.id ? saved : d)));
           }}
           onDeleted={(id) => {
             setDeals((prev) => prev.filter((d) => d.id !== id));

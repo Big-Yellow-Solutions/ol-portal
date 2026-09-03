@@ -358,7 +358,7 @@ async function advanceDeal(dealId, stage) {
   try {
     if (!dealId) return;
     const deal = await get("DEAL", dealId);
-    if (!deal || deal.stage === "Closed") return;
+    if (!deal || deal.stage === "Closed" || deal.stage === "Closed Lost") return;
     if (STAGE_ORDER.indexOf(deal.stage) >= STAGE_ORDER.indexOf(stage)) return;
     await put({ ...deal, stage });
   } catch (err) {
