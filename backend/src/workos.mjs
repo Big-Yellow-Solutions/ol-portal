@@ -26,7 +26,9 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 
 const API = "https://api.workos.com";
-const sm = new SecretsManagerClient({});
+/* Exported so a test can stand in for Secrets Manager the way community.test
+   stands in for the table; nothing else should touch it. */
+export const sm = new SecretsManagerClient({});
 
 const SECRET_ID = () => process.env.WORKOS_SECRET_ID || "WorkOs";
 const SECRET_KEY = () => process.env.WORKOS_SECRET_KEY || "WorkOS";
@@ -135,6 +137,28 @@ export async function findUserByEmail(email) {
    someone able to sign in and land in an empty lobby, and to keep doing so. */
 export const deleteUser = id => call("DELETE", `/user_management/users/${id}`);
 
+/* Changing `email` makes WorkOS drop email_verified, so it is re-asserted in
+   the same call: an admin changing an address on someone's behalf is the
+   verification, the same way Cognito's AdminUpdateUserAttributes was. */
+export const updateUser = (id, { email, firstName, lastName } = {}) =>
+  call("PUT", `/user_management/users/${id}`, {
+    ...(email !== undefined ? { email, email_verified: true } : {}),
+    ...(firstName !== undefined ? { first_name: firstName } : {}),
+    ...(lastName !== undefined ? { last_name: lastName } : {})
+  });
+
+/* ---------- authentication factors (PRD 2.5 lost-device reset) ----------
+
+   Factors are listed under the user but deleted at the MFA API's own path:
+   there is no DELETE under /user_management, and the factor ids are the same
+   objects. Deleting every factor is the whole reset — WorkOS asks the person
+   to enrol again at their next sign-in — which retires the delete-and-recreate
+   workaround Cognito forced. */
+
+export const listAuthFactors = userId => all(`/user_management/users/${userId}/auth_factors`);
+
+export const deleteAuthFactor = id => call("DELETE", `/auth/factors/${id}`);
+
 /* ---------- invitations ---------- */
 
 /* An invited person is not a user until they accept: WorkOS holds a pending
@@ -142,6 +166,31 @@ export const deleteUser = id => call("DELETE", `/user_management/users/${id}`);
    way to tell "nobody was ever invited" from "the invite is still unopened",
    which look identical from the users endpoint alone. */
 export const listInvitations = () => all("/user_management/invitations");
+
+/* The one that is still open for an address, if any. WorkOS keeps accepted,
+   expired and revoked invitations on the list too, so "an invitation exists"
+   is not the question — "one is still pending" is. */
+export async function findPendingInvitation(email) {
+  const hits = await all("/user_management/invitations", {
+    email: String(email).trim().toLowerCase()
+  });
+  return hits.find(i => i.state === "pending") || null;
+}
+
+/* Sends the email. No organization_id and no role_slug on purpose: the
+   portal's role and labs live on the PERSON record and buildContext reads
+   them from there, so WorkOS RBAC would be a second copy to keep true. Seven
+   days matches the temp-password window Cognito gave (and the copy on the
+   Invite form). */
+export const sendInvitation = (email, { expiresInDays = 7 } = {}) =>
+  call("POST", "/user_management/invitations", {
+    email: String(email).trim().toLowerCase(),
+    expires_in_days: expiresInDays
+  });
+
+export const resendInvitation = id => call("POST", `/user_management/invitations/${id}/resend`);
+
+export const revokeInvitation = id => call("POST", `/user_management/invitations/${id}/revoke`);
 
 /* ---------- organizations ---------- */
 
@@ -153,11 +202,14 @@ export const listOrganizations = () => all("/organizations");
    without revealing the key. Pair with environment() for which WorkOS
    environment that is. */
 export async function status() {
-  const [users, organizations] = await Promise.all([listUsers(), listOrganizations()]);
+  const [users, organizations, invitations] = await Promise.all([
+    listUsers(), listOrganizations(), listInvitations()
+  ]);
   return {
     reachable: true,
     users: users.length,
     organizations: organizations.map(o => ({ id: o.id, name: o.name })),
-    signedIn: users.filter(u => u.last_sign_in_at).length
+    signedIn: users.filter(u => u.last_sign_in_at).length,
+    pendingInvitations: invitations.filter(i => i.state === "pending").length
   };
 }

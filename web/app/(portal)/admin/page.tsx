@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { usePortalData } from "@/lib/portal-data";
 import { api, ApiError } from "@/lib/api";
+import { CONFIG } from "@/lib/config";
 import { startActingAs } from "@/lib/act-as";
 import type { Role } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
@@ -78,9 +79,44 @@ interface KbEntry {
 
 const INVITE_ROLES: Role[] = ["Lab Leader", "Contributor", "Admin"];
 
+/* What each directory does on invite and on reset, in the words the admin
+   sees. The mechanics differ (a temporary password vs. an invitation link; a
+   recreated account vs. a removed authenticator) and the copy must not
+   promise one while the backend does the other. */
+const WORKOS = CONFIG.authProvider === "workos";
+const COPY = WORKOS
+  ? {
+      invited: (email: string) => `Invite sent to ${email} — the link is valid for 7 days.`,
+      inviteNote:
+        "WorkOS emails an invitation link valid for 7 days. The person sets their own password (12+ chars, breach-checked) on the way in.",
+      resetConfirm: (u: string) =>
+        `Reset two-factor for "${u}"? Verify their identity out-of-band first (call or known email thread). Their authenticator is removed and they enroll a new one at next sign-in. Their password and portal data are untouched.`,
+      resetDone: (u: string) => `Two-factor reset for ${u}. They re-enroll at next sign-in.`,
+      resetLabel: "Reset 2FA",
+      emailNote: (u: string) =>
+        `New sign-in email for ${u}. They sign in with the new address from now on, and their portal profile moves with it.`,
+    }
+  : {
+      invited: (email: string) => `Invite sent to ${email} — temp password valid 7 days.`,
+      inviteNote:
+        "Cognito emails a temporary password valid for 7 days. First sign-in forces a new password (12+ chars, breach-checked) and two-factor enrollment.",
+      resetConfirm: (u: string) =>
+        `Reset access for "${u}"? Verify their identity out-of-band first (call or known email thread). They get a new emailed temporary password and re-enroll two-factor at next sign-in. Their portal data is untouched.`,
+      resetDone: (u: string) => `Access reset for ${u}. A new temporary password was emailed.`,
+      resetLabel: "Reset access",
+      emailNote: (u: string) =>
+        `New contact email for ${u}. Their sign-in username stays ${u} — Cognito usernames can\u2019t be renamed.`,
+    };
+
+/* Cognito's vocabulary, kept under WorkOS too: directory.mjs maps a pending
+   invitation onto FORCE_CHANGE_PASSWORD and a user onto CONFIRMED, so this
+   page reads one contract whichever directory is behind it. NO_ACCOUNT is a
+   portal profile with nothing to sign in with — the state the re-seeded
+   roster sits in until each person is invited. */
 const STATUS_BADGE: Record<string, [BadgeVariant, string]> = {
   CONFIRMED: ["success", "Active"],
   FORCE_CHANGE_PASSWORD: ["warning", "Invite pending"],
+  NO_ACCOUNT: ["outline", "No account"],
   RESET_REQUIRED: ["destructive", "Reset required"],
 };
 
@@ -181,7 +217,7 @@ function AdminConsole({
           labs: [...invLabs],
         }),
       });
-      toast.success(`Invite sent to ${invEmail.trim()} — temp password valid 7 days.`);
+      toast.success(COPY.invited(invEmail.trim()));
       setInvFirstName("");
       setInvLastName("");
       setInvEmail("");
@@ -223,16 +259,11 @@ function AdminConsole({
   };
 
   const resetMfa = async (username: string) => {
-    if (
-      !confirm(
-        `Reset access for "${username}"? Verify their identity out-of-band first (call or known email thread). They get a new emailed temporary password and re-enroll two-factor at next sign-in. Their portal data is untouched.`
-      )
-    )
-      return;
+    if (!confirm(COPY.resetConfirm(username))) return;
     setBusyUser(username);
     try {
       await api(`/admin/users/${username}/reset-mfa`, { method: "POST" });
-      toast.success(`Access reset for ${username}. A new temporary password was emailed.`);
+      toast.success(COPY.resetDone(username));
       await loadUsers();
     } catch (e) {
       toast.error(errMsg(e));
@@ -464,10 +495,8 @@ function AdminConsole({
               </form>
 
               <p className="mt-4 text-xs text-ink-mute">
-                Cognito emails a temporary password valid for 7 days. First sign-in forces a
-                new password (12+ chars, breach-checked) and two-factor enrollment.
-                Lab-Leader-initiated Contributor invites stay admin-only until contract
-                automation exists (PRD 2.2).
+                {COPY.inviteNote} Lab-Leader-initiated Contributor invites stay admin-only
+                until contract automation exists (PRD 2.2).
               </p>
             </CardContent>
           </Card>
@@ -508,6 +537,7 @@ function AdminConsole({
                         u.status,
                       ];
                       const pending = u.status === "FORCE_CHANGE_PASSWORD";
+                      const hasAccount = u.status !== "NO_ACCOUNT";
                       const self = u.username === myUsername;
                       const busy = busyUser === u.username;
                       return (
@@ -564,14 +594,14 @@ function AdminConsole({
                                   </Button>
                                 </>
                               )}
-                              {!pending && !self && (
+                              {!pending && hasAccount && !self && (
                                 <Button
                                   variant="outline"
                                   size="sm"
                                   disabled={busy}
                                   onClick={() => resetMfa(u.username)}
                                 >
-                                  Reset access
+                                  {COPY.resetLabel}
                                 </Button>
                               )}
                               {!pending && !self && u.role !== "Admin" && (
@@ -712,12 +742,7 @@ function AdminConsole({
           <DialogHeader>
             <DialogTitle>Change contact email</DialogTitle>
             <DialogDescription>
-              {emailDialogUser && (
-                <>
-                  New contact email for {emailDialogUser.username}. Their sign-in username
-                  stays {emailDialogUser.username} — Cognito usernames can&rsquo;t be renamed.
-                </>
-              )}
+              {emailDialogUser && COPY.emailNote(emailDialogUser.username)}
             </DialogDescription>
           </DialogHeader>
           <Input

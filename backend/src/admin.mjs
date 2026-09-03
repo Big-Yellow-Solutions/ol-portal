@@ -1,28 +1,20 @@
 /* OL Portal · admin auth routes (PRD 2.2 invites, 2.5 2FA reset, 2.6 audit log).
    All routes here are admin-only. Lab-Leader-initiated Contributor invites stay
-   locked until contract automation exists (PRD 2.2 open question). */
+   locked until contract automation exists (PRD 2.2 open question).
 
-import {
-  CognitoIdentityProviderClient, AdminCreateUserCommand, AdminDeleteUserCommand,
-  AdminAddUserToGroupCommand, AdminGetUserCommand, AdminUpdateUserAttributesCommand,
-  ListUsersCommand
-} from "@aws-sdk/client-cognito-identity-provider";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import {
-  DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand
-} from "@aws-sdk/lib-dynamodb";
-import { fullName, writeAudit } from "./util.mjs";
+   The sign-in side of every account — the Cognito pool or the WorkOS
+   directory, chosen by AUTH_PROVIDER — lives in directory.mjs. This module
+   owns the portal side: the PERSON record, the audit row, and who may invite
+   whom. The two are written together or not at all, because a sign-in with no
+   PERSON record gets in and then 403s on everything. */
+
+import { GetCommand, PutCommand, DeleteCommand, QueryCommand } from "@aws-sdk/lib-dynamodb";
+import { doc, TABLE, fullName, writeAudit } from "./util.mjs";
+import { directory, PROVIDER } from "./directory.mjs";
 
 /* Re-exported so the modules that have always imported writeAudit from here
    keep working; it now lives in util.mjs. */
 export { writeAudit };
-
-const TABLE = process.env.TABLE_NAME;
-const POOL = process.env.USER_POOL_ID;
-const idp = new CognitoIdentityProviderClient({});
-const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
-  marshallOptions: { removeUndefinedValues: true }
-});
 
 const resp = (status, body) => ({
   statusCode: status,
@@ -30,43 +22,53 @@ const resp = (status, body) => ({
   body: JSON.stringify(body)
 });
 
-const GROUP_OF_ROLE = { "Admin": "Admin", "Lab Leader": "LabLeader", "Contributor": "Contributor" };
+const ROLES = ["Admin", "Lab Leader", "Contributor"];
 
 const isAdmin = ctx => ctx.role === "Admin";
 const forbidden = () => resp(403, { error: "Admin only" });
 
-/* ---------- users: Cognito accounts merged with PERSON records ---------- */
+const getPerson = async sk =>
+  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk: "PERSON", sk } }))).Item;
+
+/* ---------- users: sign-in accounts merged with PERSON records ----------
+   Under WorkOS the merge runs both ways: a PERSON record with nothing to sign
+   in with is listed too, as NO_ACCOUNT, because that is exactly the state the
+   re-seeded roster sits in until each person is invited — and the only way an
+   admin can see who still needs one. */
 export async function listPortalUsers(ctx) {
   if (!isAdmin(ctx)) return forbidden();
-  const { Users } = await idp.send(new ListUsersCommand({ UserPoolId: POOL, Limit: 60 }));
-  const users = await Promise.all((Users || []).map(async u => {
-    const attr = n => u.Attributes?.find(a => a.Name === n)?.Value;
-    const person = (await doc.send(new GetCommand({
-      TableName: TABLE, Key: { pk: "PERSON", sk: u.Username }
-    }))).Item;
-    let mfaEnrolled = false;
-    try {
-      const detail = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: u.Username }));
-      mfaEnrolled = (detail.UserMFASettingList || []).includes("SOFTWARE_TOKEN_MFA");
-    } catch { /* user may be mid-delete; show as not enrolled */ }
-    return {
-      username: u.Username,
-      email: attr("email") || "",
-      status: u.UserStatus,
-      created: (u.UserCreateDate || new Date(0)).toISOString().slice(0, 10),
-      mfaEnrolled,
-      firstName: person?.firstName || "",
-      lastName: person?.lastName || "",
-      name: fullName(person) || u.Username,
-      role: person?.role || "",
-      labs: person?.labs || []
-    };
+  const accounts = await directory.listAccounts();
+  const users = await Promise.all(accounts.map(async a => {
+    const person = await getPerson(a.username);
+    return withProfile(a, person);
   }));
+  if (PROVIDER === "workos") {
+    const seen = new Set(users.map(u => u.username));
+    const people = await doc.send(new QueryCommand({
+      TableName: TABLE, KeyConditionExpression: "pk = :p",
+      ExpressionAttributeValues: { ":p": "PERSON" }
+    }));
+    for (const p of people.Items || []) {
+      if (seen.has(p.sk)) continue;
+      users.push(withProfile({
+        username: p.sk, email: p.email || "", status: "NO_ACCOUNT", created: "", mfaEnrolled: false
+      }, p));
+    }
+  }
   users.sort((a, b) => a.username.localeCompare(b.username));
   return resp(200, users);
 }
 
-/* ---------- invites (PRD 2.2): Cognito emails the temp credentials ----------
+const withProfile = (account, person) => ({
+  ...account,
+  firstName: person?.firstName || "",
+  lastName: person?.lastName || "",
+  name: fullName(person) || account.username,
+  role: person?.role || "",
+  labs: person?.labs || []
+});
+
+/* ---------- invites (PRD 2.2) ----------
    Admins invite anyone. Lab Leaders may invite a Contributor only when a
    Signed contract in one of their labs names that email (PRD 2.2 gate,
    unlocked by PRD 3.6 contract signing). */
@@ -92,7 +94,7 @@ export async function createInvite(ctx, body) {
   if (typeof firstName !== "string" || !firstName.trim()) return resp(400, { error: "first name is required" });
   if (typeof lastName !== "string" || !lastName.trim()) return resp(400, { error: "last name is required" });
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) return resp(400, { error: "valid email is required" });
-  if (!GROUP_OF_ROLE[role]) return resp(400, { error: "role must be Admin, Lab Leader, or Contributor" });
+  if (!ROLES.includes(role)) return resp(400, { error: "role must be Admin, Lab Leader, or Contributor" });
   const labList = Array.isArray(labs) ? labs : [];
   if (!isAdmin(ctx) && labList.some(l => !(ctx.me.labs || []).includes(l)))
     return resp(403, { error: "You can only assign labs you lead" });
@@ -107,8 +109,8 @@ export async function createInvite(ctx, body) {
   });
   if (result.existing)
     return resp(409, {
-      error: result.existing === "cognito"
-        ? "that email already exists in Cognito"
+      error: result.existing === "account"
+        ? "that email already has a sign-in account or a pending invite"
         : "that email already has a portal profile"
     });
   return resp(201, { invited: result.username });
@@ -123,30 +125,15 @@ export async function createInvite(ctx, body) {
    want different things from "this email already exists": the route reports it
    as a conflict, execution treats it as the expected case and moves on. */
 async function provisionAccount({ actor, email, firstName, lastName, role, labs }) {
-  // Username = email (lowercased, matching Cognito's case-insensitive Username
-  // config) so people sign in with the address they already know.
+  // Username = email (lowercased) so people sign in with the address they
+  // already know. It matches Cognito's case-insensitive Username config and is
+  // the only key WorkOS has.
   const username = String(email).trim().toLowerCase();
-  const existing = (await doc.send(new GetCommand({
-    TableName: TABLE, Key: { pk: "PERSON", sk: username }
-  }))).Item;
-  if (existing) return { username, existing: "person" };
+  if (await getPerson(username)) return { username, existing: "person" };
 
-  try {
-    await idp.send(new AdminCreateUserCommand({
-      UserPoolId: POOL, Username: username,
-      UserAttributes: [
-        { Name: "email", Value: String(email).trim() },
-        { Name: "email_verified", Value: "true" }
-      ],
-      DesiredDeliveryMediums: ["EMAIL"]
-    }));
-  } catch (err) {
-    if (err.name === "UsernameExistsException") return { username, existing: "cognito" };
-    throw err;
-  }
-  await idp.send(new AdminAddUserToGroupCommand({
-    UserPoolId: POOL, Username: username, GroupName: GROUP_OF_ROLE[role]
-  }));
+  const account = await directory.createAccount({ username, email: String(email).trim(), role });
+  if (account.existing) return { username, existing: "account" };
+
   await doc.send(new PutCommand({
     TableName: TABLE,
     Item: {
@@ -195,86 +182,57 @@ export async function inviteContributor({ actor, email, name, labs = [] }) {
 
 export async function resendInvite(ctx, username) {
   if (!isAdmin(ctx)) return forbidden();
-  const user = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: username }))
-    .catch(() => null);
-  if (!user) return resp(404, { error: "no such user" });
-  if (user.UserStatus !== "FORCE_CHANGE_PASSWORD")
-    return resp(409, { error: "invite already accepted; nothing to resend" });
-  const email = user.UserAttributes?.find(a => a.Name === "email")?.Value;
-  await idp.send(new AdminCreateUserCommand({
-    UserPoolId: POOL, Username: username,
-    MessageAction: "RESEND", DesiredDeliveryMediums: ["EMAIL"]
-  }));
-  await writeAudit(ctx.me.sk, "invite.resent", `${username} → ${email}`);
+  const r = await directory.resendInvite(username);
+  if (r.notFound) return resp(404, { error: "no such user" });
+  if (r.accepted) return resp(409, { error: "invite already accepted; nothing to resend" });
+  await writeAudit(ctx.me.sk, "invite.resent", `${username} → ${r.email}`);
   return resp(200, { resent: username });
 }
 
 export async function revokeInvite(ctx, username) {
   if (!isAdmin(ctx)) return forbidden();
   if (username === ctx.me.sk) return resp(400, { error: "you can't revoke yourself" });
-  const user = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: username }))
-    .catch(() => null);
-  if (!user) return resp(404, { error: "no such user" });
-  if (user.UserStatus !== "FORCE_CHANGE_PASSWORD")
-    return resp(409, { error: "invite already accepted; ask an admin to offboard instead" });
-  await idp.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: username }));
+  const r = await directory.revokeInvite(username);
+  if (r.notFound) return resp(404, { error: "no such user" });
+  if (r.accepted) return resp(409, { error: "invite already accepted; ask an admin to offboard instead" });
   await doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk: "PERSON", sk: username } }));
   await writeAudit(ctx.me.sk, "invite.revoked", username);
   return resp(200, { revoked: username });
 }
 
-/* ---------- account upkeep ---------- */
+/* ---------- account upkeep ----------
+   Under Cognito the username survives an email change; under WorkOS the email
+   is the username, so the PERSON record moves to the new key. Records that
+   point at the old key by value (deal owners, audit actors) are left as they
+   are — the same history-stays-put rule the rest of the portal follows. */
 export async function updateUserEmail(ctx, username, body) {
   if (!isAdmin(ctx)) return forbidden();
   const { email } = body || {};
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || "")) return resp(400, { error: "valid email is required" });
-  await idp.send(new AdminUpdateUserAttributesCommand({
-    UserPoolId: POOL, Username: username,
-    UserAttributes: [
-      { Name: "email", Value: email },
-      { Name: "email_verified", Value: "true" }
-    ]
-  }));
-  const person = (await doc.send(new GetCommand({
-    TableName: TABLE, Key: { pk: "PERSON", sk: username }
-  }))).Item;
-  if (person) await doc.send(new PutCommand({ TableName: TABLE, Item: { ...person, email } }));
+  const r = await directory.updateEmail(username, email);
+  if (r.notFound) return resp(404, { error: "no such user" });
+  const person = await getPerson(username);
+  if (person) {
+    await doc.send(new PutCommand({ TableName: TABLE, Item: { ...person, sk: r.username, email } }));
+    if (r.username !== username)
+      await doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk: "PERSON", sk: username } }));
+  }
   await writeAudit(ctx.me.sk, "user.email-changed", `${username} → ${email}`);
-  return resp(200, { username, email });
+  return resp(200, { username: r.username, email });
 }
 
-/* PRD 2.5 lost-device recovery: admin resets access after out-of-band identity
-   check. Cognito has no admin API to detach a verified software token while
-   pool MFA is ON (AdminSetUserMFAPreference leaves the old token challenging),
-   so the reliable reset is delete + recreate: the user gets a fresh emailed
-   temp password and re-enrolls TOTP. The portal profile (PERSON record) is
-   keyed by username and survives untouched. */
+/* PRD 2.5 lost-device recovery: admin resets access after an out-of-band
+   identity check. What "reset" does is the directory's business (see
+   directory.mjs); the portal profile is untouched either way. */
 export async function resetUserMfa(ctx, username) {
   if (!isAdmin(ctx)) return forbidden();
   if (username === ctx.me.sk) return resp(400, { error: "you can't reset your own access" });
-  const user = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: username }))
-    .catch(() => null);
-  if (!user) return resp(404, { error: "no such user" });
-  const email = user.UserAttributes?.find(a => a.Name === "email")?.Value;
-  if (!email) return resp(409, { error: "user has no email on file; set one first" });
-  const person = (await doc.send(new GetCommand({
-    TableName: TABLE, Key: { pk: "PERSON", sk: username }
-  }))).Item;
-  const group = GROUP_OF_ROLE[person?.role] || "Contributor";
-
-  await idp.send(new AdminDeleteUserCommand({ UserPoolId: POOL, Username: username }));
-  await idp.send(new AdminCreateUserCommand({
-    UserPoolId: POOL, Username: username,
-    UserAttributes: [
-      { Name: "email", Value: email },
-      { Name: "email_verified", Value: "true" }
-    ],
-    DesiredDeliveryMediums: ["EMAIL"]
-  }));
-  await idp.send(new AdminAddUserToGroupCommand({
-    UserPoolId: POOL, Username: username, GroupName: group
-  }));
-  await writeAudit(ctx.me.sk, "user.access-reset", `${username} → new temp password + 2FA re-enrollment`);
+  const person = await getPerson(username);
+  const r = await directory.resetMfa(username, person?.role);
+  if (r.notFound) return resp(404, { error: "no such user" });
+  if (r.noEmail) return resp(409, { error: "user has no email on file; set one first" });
+  if (r.nothingToReset) return resp(409, { error: "no authenticator is enrolled; nothing to reset" });
+  await writeAudit(ctx.me.sk, "user.access-reset", `${username} → ${r.detail}`);
   return resp(200, { mfaReset: username });
 }
 
@@ -287,9 +245,7 @@ export async function startActingAs(ctx, body) {
   if (ctx.realRole !== "Admin") return forbidden();
   const { target } = body || {};
   if (target === ctx.realMe.sk) return resp(400, { error: "You're already you" });
-  const person = target && (await doc.send(new GetCommand({
-    TableName: TABLE, Key: { pk: "PERSON", sk: target }
-  }))).Item;
+  const person = target && await getPerson(target);
   if (!person) return resp(404, { error: "no such user" });
   if (person.role === "Admin") return resp(403, { error: "Can't act as another Admin" });
   await writeAudit(ctx.realMe.sk, "admin.act-as-start", `${target} (${person.role})`);

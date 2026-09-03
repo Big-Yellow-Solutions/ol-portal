@@ -24,7 +24,7 @@ if (!(await isConfigured())) {
 try {
   console.log(`Key addresses the ${await environment()} environment.`);
   const s = await status();
-  console.log(`WorkOS reachable · ${s.users} user(s), ${s.signedIn} of them have signed in at least once`);
+  console.log(`WorkOS reachable · ${s.users} user(s), ${s.signedIn} of them have signed in at least once, ${s.pendingInvitations} invitation(s) pending`);
   console.log(`Organizations: ${s.organizations.length ? s.organizations.map(o => `${o.name} (${o.id})`).join(", ") : "none"}`);
 
   if (s.users) {
