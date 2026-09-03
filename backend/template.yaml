@@ -1,6 +1,37 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: OL Portal backend — DynamoDB data layer, Lambda API, Cognito auth.
+Description: OL Portal backend — DynamoDB data layer, Lambda API, Cognito or WorkOS auth.
+
+Parameters:
+  AuthProvider:
+    Type: String
+    Default: cognito
+    AllowedValues: [cognito, workos]
+    Description: >-
+      Which claim shape the API and The Optimist expect. Set to workos together
+      with flipping PortalApi's DefaultAuthorizer to WorkosLambda; the two must
+      move as a pair. The Cognito pool is kept either way so the switch can be
+      reversed by putting both back.
+  WorkosClientId:
+    Type: String
+    Default: ""
+    Description: >-
+      WorkOS AuthKit client id. Required when AuthProvider=workos; it is also
+      the JWKS path segment. Not a secret. Staging is
+      client_01M10FCE1QJW4DH3XRNDG6EEFZ.
+  WorkosSecretId:
+    Type: String
+    Default: WorkOs
+    Description: >-
+      Secrets Manager secret holding the WorkOS API key (a JSON object keyed
+      "WorkOS", or a bare string). Environment-scoped by WorkOS, so the staging
+      and production stacks point at different secrets.
+  WorkosTokenIssuer:
+    Type: String
+    Default: ""
+    Description: >-
+      Overrides the expected `iss` claim. Leave empty unless the environment
+      uses a WorkOS custom auth domain, which changes the issuer.
 
 Globals:
   Function:
@@ -182,6 +213,31 @@ Resources:
       GroupName: Contributor
       UserPoolId: !Ref UserPool
 
+  # Verifies WorkOS access tokens in front of every API route. Created
+  # unconditionally so a switch to workos is a parameter change rather than a
+  # new resource; it is simply unreferenced while Cognito is the authorizer.
+  AuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-authorizer
+      CodeUri: src/
+      Handler: authorizer.handler
+      Architectures: [arm64]
+      # Runs in front of every request: keep it small and quick. The JWKS is
+      # cached in the container after the first verification.
+      Timeout: 5
+      MemorySize: 256
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+          WORKOS_CLIENT_ID: !Ref WorkosClientId
+          WORKOS_TOKEN_ISSUER: !Ref WorkosTokenIssuer
+      Policies:
+        # Writes the PRD 2.6 sign-in audit row, which WorkOS has no
+        # PostAuthentication trigger to produce.
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+
   PortalApi:
     Type: AWS::Serverless::HttpApi
     Properties:
@@ -193,6 +249,12 @@ Resources:
         AllowMethods: [GET, POST, PATCH, DELETE, OPTIONS]
         AllowHeaders: [Authorization, Content-Type, X-Act-As]
       Auth:
+        # THE CUTOVER LINE. Change to WorkosLambda and redeploy with
+        # AuthProvider=workos; change back to revert. It cannot be driven by
+        # the AuthProvider parameter directly — SAM resolves this at transform
+        # time and rejects an intrinsic here — so the switch is deliberately
+        # two coordinated edits rather than one, and Cognito stays untouched
+        # until both are made.
         DefaultAuthorizer: CognitoJwt
         Authorizers:
           CognitoJwt:
@@ -201,6 +263,21 @@ Resources:
               audience:
                 - !Ref UserPoolClient
             IdentitySource: $request.header.Authorization
+          # WorkOS cannot use the JWT authorizer above: that one resolves keys
+          # through OIDC discovery, and api.workos.com serves no discovery
+          # document (404). See backend/src/authz.mjs.
+          WorkosLambda:
+            FunctionArn: !GetAtt AuthorizerFunction.Arn
+            AuthorizerPayloadFormatVersion: 2.0
+            EnableSimpleResponses: true
+            Identity:
+              Headers:
+                - Authorization
+              # No result caching. Caching keys on the token, so an expired
+              # token would keep being accepted for the cache window; a
+              # verification against an already-warm JWKS is cheap enough that
+              # correctness is the better trade for a seven-person tool.
+              ReauthorizeEvery: 0
 
   # Daily generator for recurring deal instances + opt-in auto invoice requests (PRD 3.9/3.10)
   RecurringFunction:
@@ -297,6 +374,11 @@ Resources:
           ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
           USER_POOL_ID: !Ref UserPool
           USER_POOL_CLIENT_ID: !Ref UserPoolClient
+          # A Function URL has no authorizer, so this function verifies the
+          # token itself under whichever provider is live.
+          AUTH_PROVIDER: !Ref AuthProvider
+          WORKOS_CLIENT_ID: !Ref WorkosClientId
+          WORKOS_TOKEN_ISSUER: !Ref WorkosTokenIssuer
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
@@ -350,11 +432,20 @@ Resources:
           # circular — the PDF function depends only on the API *gateway*, not
           # on this function.
           PDF_FUNCTION_NAME: !Ref ContractPdfFunction
+          # Tells identity.mjs which claim shape the authorizer handed over.
+          AUTH_PROVIDER: !Ref AuthProvider
+          # The WorkOS *API key* — a secret, unlike the client id. Held in
+          # Secrets Manager and read at runtime, never built into anything.
+          # (Secrets Manager rather than the SSM SecureString the other
+          # integrations use, because that is where this key lives.)
+          WORKOS_SECRET_ID: !Ref WorkosSecretId
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
         - S3CrudPolicy:
             BucketName: !Sub ol-portal-files-${AWS::AccountId}
+        - AWSSecretsManagerGetSecretValuePolicy:
+            SecretArn: !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${WorkosSecretId}-*"
         - SSMParameterReadPolicy:
             ParameterName: ol-portal/qbo-credentials
         - SSMParameterReadPolicy:

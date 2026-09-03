@@ -1,0 +1,23 @@
+[
+  {
+    "email": "someone@optimisticlabs.com",
+    "firstName": "Some",
+    "lastName": "One",
+    "role": "Admin",
+    "labs": []
+  },
+  {
+    "email": "another@optimisticlabs.com",
+    "firstName": "An",
+    "lastName": "Other",
+    "role": "Lab Leader",
+    "labs": ["impact"]
+  },
+  {
+    "email": "contractor@example.com",
+    "firstName": "A",
+    "lastName": "Contractor",
+    "role": "Contributor",
+    "labs": []
+  }
+]

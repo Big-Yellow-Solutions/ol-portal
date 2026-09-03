@@ -103,7 +103,12 @@ async function nextId(pk, prefix) {
 /* Identity and the permission matrix moved to identity.mjs when The Optimist
    became a second Lambda: both functions have to resolve the same person to
    the same permissions, and two copies is how that stops being true. */
-const identity = event => identityFromClaims(event.requestContext?.authorizer?.jwt?.claims || {});
+const identity = event => {
+  const auth = event.requestContext?.authorizer || {};
+  /* Cognito's built-in JWT authorizer nests parsed claims under `jwt.claims`;
+     the WorkOS Lambda authorizer returns a flat context under `lambda`. */
+  return identityFromClaims(auth.lambda || auth.jwt?.claims || {});
+};
 
 /* ---------- route handlers ---------- */
 async function bootstrap(ctx) {

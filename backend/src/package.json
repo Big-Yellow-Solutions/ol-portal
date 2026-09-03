@@ -6,7 +6,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.111.0",
     "@aws-sdk/client-lambda": "^3.0.0",
+    "@aws-sdk/client-secrets-manager": "^3.1123.0",
     "aws-jwt-verify": "^5.2.1",
+    "jose": "^6.2.10",
     "jsonwebtoken": "^9.0.3"
   }
 }

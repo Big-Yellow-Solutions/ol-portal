@@ -30,13 +30,19 @@
    error event on an otherwise successful response. */
 
 import { CognitoJwtVerifier } from "aws-jwt-verify";
+import { verifyWorkosToken } from "./authz.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 import { runOptimist } from "./optimist.mjs";
 
-/* Cached across invocations: the verifier holds the pool's JWKS, and refetching
-   it per request would add a round trip to every message. */
+/* A Function URL has no authorizer of any kind, so unlike the API routes this
+   function always verifies the token itself — under either provider.
+
+   Cached across invocations: the verifier holds the JWKS, and refetching it
+   per request would add a round trip to every message. */
+const PROVIDER = process.env.AUTH_PROVIDER === "workos" ? "workos" : "cognito";
+
 let verifier;
-function jwtVerifier() {
+function cognitoVerifier() {
   if (!verifier) {
     verifier = CognitoJwtVerifier.create({
       userPoolId: process.env.USER_POOL_ID,
@@ -46,6 +52,9 @@ function jwtVerifier() {
   }
   return verifier;
 }
+
+const verifyToken = token =>
+  PROVIDER === "workos" ? verifyWorkosToken(token) : cognitoVerifier().verify(token);
 
 const MAX_BODY_BYTES = 6_000_000; // an attachment at the 4MB cap, base64'd
 
@@ -79,7 +88,7 @@ async function validate(event) {
 
   let claims;
   try {
-    claims = await jwtVerifier().verify(token);
+    claims = await verifyToken(token);
   } catch {
     // Deliberately opaque: expired, wrong pool, wrong audience and forged all
     // read the same from here, and the client's only useful move is the same

@@ -11,7 +11,11 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand
 } from "@aws-sdk/lib-dynamodb";
-import { fullName } from "./util.mjs";
+import { fullName, writeAudit } from "./util.mjs";
+
+/* Re-exported so the modules that have always imported writeAudit from here
+   keep working; it now lives in util.mjs. */
+export { writeAudit };
 
 const TABLE = process.env.TABLE_NAME;
 const POOL = process.env.USER_POOL_ID;
@@ -27,20 +31,6 @@ const resp = (status, body) => ({
 });
 
 const GROUP_OF_ROLE = { "Admin": "Admin", "Lab Leader": "LabLeader", "Contributor": "Contributor" };
-const AUDIT_TTL_DAYS = 90;
-
-export async function writeAudit(actor, action, detail) {
-  const now = new Date();
-  await doc.send(new PutCommand({
-    TableName: TABLE,
-    Item: {
-      pk: "AUDIT",
-      sk: now.toISOString() + "#" + Math.random().toString(36).slice(2, 6),
-      actor, action, detail,
-      ttl: Math.floor(now.getTime() / 1000) + AUDIT_TTL_DAYS * 86400
-    }
-  }));
-}
 
 const isAdmin = ctx => ctx.role === "Admin";
 const forbidden = () => resp(403, { error: "Admin only" });

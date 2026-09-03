@@ -48,6 +48,25 @@ export const listType = async pk => {
 export const put = item => doc.send(new PutCommand({ TableName: TABLE, Item: item }));
 export const del = (pk, sk) => doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk, sk } }));
 
+/* PRD 2.6 audit log. This lived in admin.mjs until the WorkOS authorizer
+   needed it too: admin.mjs pulls in the Cognito IdP SDK, which has no business
+   loading on the authorizer's path in front of every request. admin.mjs
+   re-exports it, so its eighteen importers are unaffected. */
+export const AUDIT_TTL_DAYS = 90;
+
+export async function writeAudit(actor, action, detail) {
+  const now = new Date();
+  await doc.send(new PutCommand({
+    TableName: TABLE,
+    Item: {
+      pk: "AUDIT",
+      sk: now.toISOString() + "#" + Math.random().toString(36).slice(2, 6),
+      actor, action, detail,
+      ttl: Math.floor(now.getTime() / 1000) + AUDIT_TTL_DAYS * 86400
+    }
+  }));
+}
+
 /* `match` narrows which existing items the counter looks at. Several kinds of
    agreement share pk="CONTRACT" (see DOC_KINDS below), and without a filter a
    new MSA would take its number from the highest contract — the sequences
