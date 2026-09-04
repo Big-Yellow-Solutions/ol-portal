@@ -76,10 +76,16 @@ export const perms = (role, myLabs, myKey) => ({
   reviewInvoices: () => role === "Admin",
   editProposal: p => role === "Admin" || (role === "Lab Leader" && (myLabs.includes(p.lab) || p.owner === myKey)),
   approveProposal: () => role === "Admin",
-  // Companies/Contacts (Pipeline v2 billing entities) aren't lab-scoped — any
-  // deal, in any lab, can bill to any of them — so this is a flat role check
-  // rather than a per-record one, same shape as addDeal.
-  manageContacts: () => role === "Admin" || role === "Lab Leader"
+  // Companies/Contacts (Pipeline v2 billing entities) carry no lab of their
+  // own — any deal, in any lab, can bill to any of them — so *whether* a role
+  // may touch them at all is a flat check, same shape as addDeal.
+  manageContacts: () => role === "Admin" || role === "Lab Leader",
+  // ...and *which* of them a Lab Leader may touch is derived instead, from the
+  // deals they can already see (contacts.mjs's labScope). An Admin's view is
+  // not derived at all: they see every client record there is, which is what
+  // this answers. Lives here rather than as a bare `role === "Admin"` at the
+  // call site so the matrix stays the one place a role is read.
+  seesEveryClientRecord: () => role === "Admin"
 });
 
 /* Admin "act as" (god-mode view/edit as another user): the caller's own JWT

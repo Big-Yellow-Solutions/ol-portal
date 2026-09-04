@@ -51,7 +51,11 @@ doc.send = async cmd => {
 
 test.beforeEach(() => rows.clear());
 
-const admin = { can: perms("Admin", [], "teddy") };
+/* The real ctx buildContext hands a handler: the resolved PERSON record and
+   role alongside the matrix. Both are read now that client records are
+   lab-scoped — `me.sk` stamps createdBy, and the matrix answers who sees
+   every record. */
+const admin = { role: "Admin", me: { sk: "teddy" }, can: perms("Admin", [], "teddy") };
 const body = res => JSON.parse(res.body);
 
 test("a person record needs at least 10 digits in its phone number", async () => {
@@ -157,7 +161,7 @@ test("a person no deal points at is deleted, and stops being a company's primary
 });
 
 test("deleting a person is refused for a Contributor and for one who is not there", async () => {
-  const contributor = { can: perms("Contributor", ["sports"], "cass") };
+  const contributor = { role: "Contributor", me: { sk: "cass" }, can: perms("Contributor", ["sports"], "cass") };
   const adam = body(await createContact(admin, { name: "Adam Brandon" }));
   assert.equal((await deleteContact(contributor, adam.id)).statusCode, 403);
   assert.equal((await deleteContact(admin, "CT-999")).statusCode, 404);

@@ -155,8 +155,15 @@ async function createDeal(ctx, body) {
   // returns), so those two gates only apply on later transitions (updateDeal).
   const companyId = body.companyId || null;
   const contactId = body.contactId || null;
-  if (companyId && !(await get("COMPANY", companyId))) return resp(400, { error: "unknown company" });
-  if (contactId && !(await get("CONTACT", contactId))) return resp(400, { error: "unknown contact" });
+  /* A billing entity outside the caller's own pipeline is "unknown" to them.
+     Without this a Lab Leader could name any company id on a deal of their
+     own and read the record straight back out of the next /companies —
+     the tenant boundary undone by a write rather than a read. */
+  const scope = companyId || contactId ? await contacts.labScope(ctx) : null;
+  if (companyId && (!(await get("COMPANY", companyId)) || !contacts.inScope(scope, "companies", companyId)))
+    return resp(400, { error: "unknown company" });
+  if (contactId && (!(await get("CONTACT", contactId)) || !contacts.inScope(scope, "contacts", contactId)))
+    return resp(400, { error: "unknown contact" });
   if (stage !== CLOSED_LOST && STAGES.indexOf(stage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !companyId && !contactId)
     return resp(400, { error: `A deal at ${stage} needs a billing entity — link a company or a contact` });
 
@@ -194,9 +201,14 @@ async function updateDeal(ctx, id, body) {
   if ("amount" in patch && (!Number.isFinite(patch.amount) || patch.amount < 0)) return resp(400, { error: "invalid amount" });
   if ("owner" in patch && !(await get("PERSON", patch.owner))) return resp(400, { error: "unknown owner" });
   if ("dealOwner" in patch && !(await isValidDealOwner(patch.dealOwner))) return resp(400, { error: "unknown deal owner" });
-  if ("companyId" in patch && patch.companyId && !(await get("COMPANY", patch.companyId)))
+  // Same scope gate as createDeal: an entity the caller's pipeline does not
+  // reach cannot be attached to a deal, however the deal got there.
+  const entityScope = patch.companyId || patch.contactId ? await contacts.labScope(ctx) : null;
+  if ("companyId" in patch && patch.companyId &&
+      (!(await get("COMPANY", patch.companyId)) || !contacts.inScope(entityScope, "companies", patch.companyId)))
     return resp(400, { error: "unknown company" });
-  if ("contactId" in patch && patch.contactId && !(await get("CONTACT", patch.contactId)))
+  if ("contactId" in patch && patch.contactId &&
+      (!(await get("CONTACT", patch.contactId)) || !contacts.inScope(entityScope, "contacts", patch.contactId)))
     return resp(400, { error: "unknown contact" });
 
   /* Winning a deal still needs the signed contract; v3 dropped the Assignment

@@ -1,10 +1,14 @@
 /* OL Portal · Companies and Contacts (Pipeline v2 billing entities).
 
    These are the organizations and individuals a deal bills to — separate from
-   PERSON, which is OL's own staff directory. Not lab-scoped: any deal in any
-   lab can bill to any company or contact, so visibility is a flat role check
-   (ctx.can.manageContacts) rather than a per-record one. A Contributor has no
-   pipeline visibility at all and never sees these either.
+   PERSON, which is OL's own staff directory. A Contributor has no pipeline
+   visibility at all and never sees these.
+
+   A billing entity carries no `lab` of its own — any deal, in any lab, can
+   bill to any of them — so a Lab Leader's slice of them cannot be a stored
+   field and is derived instead: see labScope below. That derivation is the
+   whole tenant boundary for these two record types, so every read and every
+   write goes through it, including the deal-attach validation in app.mjs.
 
    Companies have no delete endpoint: the design never exposes one (only
    "remove from this deal", which just clears the deal's companyId). A contact
@@ -37,11 +41,66 @@ function cleanPhone(v) {
   return { value: phone };
 }
 
+/* ---------- lab scope ----------
+
+   Which client records a caller's pipeline reaches.
+
+   The seed is every deal the caller can see, using the SAME predicate
+   app.mjs's /deals uses — ctx.can.seesLab, plus PRD 3.3's "a deal you lead in
+   another lab" — so the Companies/People tabs and the board can never disagree
+   about whose deals these are.
+
+   One hop out from that seed, and no further: a visible company's primary
+   contact, and the company a visible contact works at. Both are rendered
+   (the Companies table's "Primary contact" column, billingOf's "· Acme Corp"
+   subtitle, the record drawer), and an id that resolves to nothing reads as a
+   broken record rather than as a hidden one.
+
+   Plus whatever the caller created that no deal points at yet. The billing
+   entity panel creates a company before it links one, so without this a
+   just-typed client would vanish on the next refresh. Records written before
+   `createdBy` existed carry none and are reachable only through a deal, which
+   is the safe direction to fail.
+
+   Returns `null` for a caller who sees every client record (an Admin) —
+   meaning no filter at all, not an empty one. */
+export async function labScope(ctx) {
+  if (ctx.can.seesEveryClientRecord()) return null;
+
+  const [deals, companies, contacts] = await Promise.all([
+    listType("DEAL"), listType("COMPANY"), listType("CONTACT")
+  ]);
+  const mine = deals.filter(d => ctx.can.seesLab(d.lab) || ctx.can.leadsDeal(d));
+
+  const companyIds = new Set(mine.map(d => d.companyId).filter(Boolean));
+  const contactIds = new Set(mine.map(d => d.contactId).filter(Boolean));
+  for (const c of companies) if (companyIds.has(c.sk) && c.contactId) contactIds.add(c.contactId);
+  for (const c of contacts) if (contactIds.has(c.sk) && c.companyId) companyIds.add(c.companyId);
+  for (const c of companies) if (c.createdBy && c.createdBy === ctx.me.sk) companyIds.add(c.sk);
+  for (const c of contacts) if (c.createdBy && c.createdBy === ctx.me.sk) contactIds.add(c.sk);
+
+  return { companies: companyIds, contacts: contactIds };
+}
+
+/** Whether `id` is inside a scope from labScope. A null scope contains
+ *  everything. Exported because app.mjs asks it about a deal's companyId and
+ *  contactId — attaching an out-of-scope entity to a deal you own would
+ *  otherwise pull that entity into your scope, which is the same leak by a
+ *  slower route. */
+export const inScope = (scope, kind, id) => !scope || scope[kind].has(id);
+
+/* An out-of-scope record answers exactly as a missing one does. A 403 would
+   confirm that the id names something real, which is the one fact this
+   boundary exists to withhold. */
+const NO_COMPANY = { error: "company not found" };
+const NO_CONTACT = { error: "contact not found" };
+
 /* ---------- companies ---------- */
 
 export async function listCompanies(ctx) {
   if (!ctx.can.manageContacts()) return resp(200, []);
-  const items = await listType("COMPANY");
+  const scope = await labScope(ctx);
+  const items = (await listType("COMPANY")).filter(c => inScope(scope, "companies", c.sk));
   items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return resp(200, items.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }
@@ -53,7 +112,10 @@ export async function createCompany(ctx, body) {
   if (!name) return resp(400, { error: "name is required" });
   const email = cleanEmail(b.email);
   if (email.error) return resp(400, { error: email.error });
-  if (b.contactId && !(await get("CONTACT", b.contactId)))
+  const scope = await labScope(ctx);
+  // A contact outside the caller's scope is "unknown", not "forbidden" —
+  // naming one must not confirm it exists.
+  if (b.contactId && (!(await get("CONTACT", b.contactId)) || !inScope(scope, "contacts", b.contactId)))
     return resp(400, { error: "unknown contact" });
 
   const id = await nextId("COMPANY", "CO-");
@@ -62,6 +124,9 @@ export async function createCompany(ctx, body) {
     pk: "COMPANY", sk: id, name, kind: str(b.kind, 200),
     phone: str(b.phone, 40), email: email.value,
     contactId: b.contactId || null,
+    // What keeps a just-created record in its author's scope until a deal
+    // points at it — see labScope.
+    createdBy: ctx.me.sk,
     created: stamp, updated: stamp
   };
   await put(company);
@@ -72,7 +137,9 @@ export async function createCompany(ctx, body) {
 export async function updateCompany(ctx, id, body) {
   if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to edit companies" });
   const c = await get("COMPANY", id);
-  if (!c) return resp(404, { error: "company not found" });
+  if (!c) return resp(404, NO_COMPANY);
+  const scope = await labScope(ctx);
+  if (!inScope(scope, "companies", id)) return resp(404, NO_COMPANY);
   const b = body || {};
   const patch = {};
   if ("name" in b) {
@@ -88,7 +155,7 @@ export async function updateCompany(ctx, id, body) {
     patch.email = email.value;
   }
   if ("contactId" in b) {
-    if (b.contactId && !(await get("CONTACT", b.contactId)))
+    if (b.contactId && (!(await get("CONTACT", b.contactId)) || !inScope(scope, "contacts", b.contactId)))
       return resp(400, { error: "unknown contact" });
     patch.contactId = b.contactId || null;
   }
@@ -102,7 +169,8 @@ export async function updateCompany(ctx, id, body) {
 
 export async function listContacts(ctx) {
   if (!ctx.can.manageContacts()) return resp(200, []);
-  const items = await listType("CONTACT");
+  const scope = await labScope(ctx);
+  const items = (await listType("CONTACT")).filter(c => inScope(scope, "contacts", c.sk));
   items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   return resp(200, items.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }
@@ -116,7 +184,8 @@ export async function createContact(ctx, body) {
   if (email.error) return resp(400, { error: email.error });
   const phone = cleanPhone(b.phone);
   if (phone.error) return resp(400, { error: phone.error });
-  if (b.companyId && !(await get("COMPANY", b.companyId)))
+  const scope = await labScope(ctx);
+  if (b.companyId && (!(await get("COMPANY", b.companyId)) || !inScope(scope, "companies", b.companyId)))
     return resp(400, { error: "unknown company" });
 
   const id = await nextId("CONTACT", "CT-");
@@ -125,6 +194,7 @@ export async function createContact(ctx, body) {
     pk: "CONTACT", sk: id, name, title: str(b.title, 120),
     companyId: b.companyId || null,
     phone: phone.value, email: email.value,
+    createdBy: ctx.me.sk,
     created: stamp, updated: stamp
   };
   await put(contact);
@@ -141,7 +211,9 @@ export async function createContact(ctx, body) {
 export async function updateContact(ctx, id, body) {
   if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to edit contacts" });
   const c = await get("CONTACT", id);
-  if (!c) return resp(404, { error: "contact not found" });
+  if (!c) return resp(404, NO_CONTACT);
+  const scope = await labScope(ctx);
+  if (!inScope(scope, "contacts", id)) return resp(404, NO_CONTACT);
   const b = body || {};
   const patch = {};
   if ("name" in b) {
@@ -161,7 +233,7 @@ export async function updateContact(ctx, id, body) {
     patch.email = email.value;
   }
   if ("companyId" in b) {
-    if (b.companyId && !(await get("COMPANY", b.companyId)))
+    if (b.companyId && (!(await get("COMPANY", b.companyId)) || !inScope(scope, "companies", b.companyId)))
       return resp(400, { error: "unknown company" });
     patch.companyId = b.companyId || null;
   }
@@ -180,16 +252,24 @@ export async function updateContact(ctx, id, body) {
 export async function deleteContact(ctx, id) {
   if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to delete contacts" });
   const c = await get("CONTACT", id);
-  if (!c) return resp(404, { error: "contact not found" });
+  if (!c) return resp(404, NO_CONTACT);
+  const scope = await labScope(ctx);
+  if (!inScope(scope, "contacts", id)) return resp(404, NO_CONTACT);
 
   const onDeals = (await listType("DEAL")).filter(d => d.contactId === id);
   if (onDeals.length) {
     const n = onDeals.length;
+    /* The count is every deal, so a deal in a lab the caller cannot see still
+       blocks the delete — the refusal has to be right about the data, not
+       about the caller. The list is only the deals they can see, because it
+       names clients: "on 2 deals" with one listed says go look, without
+       saying whose the other one is. */
+    const namable = onDeals.filter(d => ctx.can.seesLab(d.lab) || ctx.can.leadsDeal(d));
     return resp(409, {
       error: `${c.name} is the person on ${n} ${n === 1 ? "deal" : "deals"} and can't be deleted — ` +
         `${n === 1 ? "it" : "they"} would be left without a person. ` +
         `Remove ${c.name} from ${n === 1 ? "that deal" : "those deals"} first.`,
-      deals: onDeals.map(d => ({ id: d.sk, client: d.client }))
+      deals: namable.map(d => ({ id: d.sk, client: d.client }))
     });
   }
 
