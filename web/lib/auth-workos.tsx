@@ -81,6 +81,18 @@ export function WorkosAuthProvider({
       onRedirectCallback={({ state }) => {
         routerRef.current.replace(safeReturnPath(state));
       }}
+      onRefreshFailure={({ signIn }) => {
+        /* The refresh token is dead, so getAccessToken() now resolves to null
+           and every later request leaves without an Authorization header —
+           which the API answers with a 401 before the authorizer even runs.
+           Re-establish the session here instead of waiting for that: if the
+           hosted AuthKit session is still alive this is an invisible round
+           trip back to the same page, and if it is not the user lands on
+           sign-in. Either way nobody is left on a page whose every request
+           can only fail. */
+        const { pathname, search } = window.location;
+        void signIn({ state: { returnTo: `${pathname}${search}` } });
+      }}
     >
       <WorkosAuthBridge>{children}</WorkosAuthBridge>
     </AuthKitProvider>
@@ -113,15 +125,30 @@ function WorkosAuthBridge({ children }: { children: React.ReactNode }) {
     [getAccessToken]
   );
 
-  useEffect(() => {
-    registerTokenSource({
-      getToken: token,
+  /* Get the user to a signed-out surface whatever state AuthKit is in.
+
+     signOut() reads the access token out of authkit-js's in-memory store and
+     throws NoSessionError when it is not there — which is exactly the case
+     after a failed refresh, the most common reason anything wants to end a
+     session at all. Uncaught, it escapes api()'s 401 branch in place of the
+     ApiError, so the caller reports "SignOut() called without an active
+     session" and the user is stranded on a page that can no longer load
+     anything. Nothing about the WorkOS session needs ending in that case; it
+     is already gone. Only the navigation is still owed. */
+  const leave = useCallback(() => {
+    try {
       /* signOut navigates on its own. returnTo must be a Sign-out URI
          registered in the WorkOS dashboard; the origin lands on "/", which
          bounces to /login for a signed-out visitor. */
-      endSession: async () => signOut({ returnTo: window.location.origin }),
-    });
-  }, [token, signOut]);
+      signOut({ returnTo: window.location.origin });
+    } catch {
+      window.location.assign(window.location.origin);
+    }
+  }, [signOut]);
+
+  useEffect(() => {
+    registerTokenSource({ getToken: token, endSession: async () => leave() });
+  }, [token, leave]);
 
   const hostedSignIn = useCallback(
     async (returnTo?: string) => {
@@ -131,8 +158,8 @@ function WorkosAuthBridge({ children }: { children: React.ReactNode }) {
   );
 
   const logout = useCallback(async () => {
-    signOut({ returnTo: window.location.origin });
-  }, [signOut]);
+    leave();
+  }, [leave]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

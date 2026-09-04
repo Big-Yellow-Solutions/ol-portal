@@ -37,11 +37,22 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const token = await getAuthToken();
 
+  /* No token means the session is gone: a refresh that cannot be renewed
+     resolves to null rather than throwing. Sending the request anyway is not
+     harmless — the Authorization header is the API's declared identity
+     source, so API Gateway rejects a request without one with a 401 before
+     the authorizer ever runs, and the 401 branch below then does exactly what
+     this does, one pointless round trip later. */
+  if (!token) {
+    await endSession();
+    throw new ApiError("Unauthorized", 401);
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(opts.headers as Record<string, string> | undefined),
   };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  headers.Authorization = `Bearer ${token}`;
   const target = opts.skipActAs ? null : actingAsTarget();
   if (target) headers["x-act-as"] = target;
 
