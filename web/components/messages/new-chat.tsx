@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckIcon, CloseIcon } from "@/components/community/icons";
+import { CloseIcon } from "@/components/community/icons";
+import { AnimatedCheckIcon } from "@/components/ui/animated-state-icons";
 import { FIELD } from "@/components/community/primitives";
 import { useMessages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
@@ -90,7 +91,7 @@ export function NewChat() {
                       : "border-[rgba(124,109,245,0.45)] bg-white"
                   )}
                 >
-                  {on && <CheckIcon size={11} width={3.4} />}
+                  <AnimatedCheckIcon on={on} size={11} width={3.4} />
                 </span>
                 <span className="flex size-8 flex-none items-center justify-center rounded-full bg-violet-pale text-xs font-semibold text-violet-deep">
                   {p.initials}

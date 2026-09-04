@@ -4,6 +4,7 @@ import { PillButton } from "@/components/resources/chrome";
 import { AdminPanel, DetailPanel } from "@/components/resources/panels";
 import { PERMISSION_LABELS, RESOURCE_TYPE_LABELS } from "@/lib/types";
 import type { CourseDetail, ResourceItem } from "@/lib/types";
+import { AnimatedCheckIcon } from "@/components/ui/animated-state-icons";
 import { cn } from "@/lib/utils";
 
 const CTA: Record<ResourceItem["type"], string> = {
@@ -11,24 +12,6 @@ const CTA: Record<ResourceItem["type"], string> = {
   post: "Read",
   file: "Open",
 };
-
-function CheckIcon() {
-  return (
-    <svg
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={3.4}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 12.5 9.5 18 20 6.5" />
-    </svg>
-  );
-}
 
 export function CourseScreen({
   course,
@@ -118,7 +101,7 @@ export function CourseScreen({
                     open ? "cursor-pointer" : "cursor-not-allowed opacity-50"
                   )}
                 >
-                  {done && <CheckIcon />}
+                  <AnimatedCheckIcon on={done} size={12} width={3.4} />
                 </button>
 
                 <div className="min-w-0 flex-1">

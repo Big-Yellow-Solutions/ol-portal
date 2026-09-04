@@ -1,6 +1,7 @@
 "use client";
 
-import { CommentIcon, HeartIcon } from "@/components/community/icons";
+import { CommentIcon } from "@/components/community/icons";
+import { AnimatedHeartIcon } from "@/components/ui/animated-state-icons";
 import {
   AvatarWithPresence,
   KindChip,
@@ -105,7 +106,7 @@ export function PostCard({
 
       <div className="flex flex-wrap items-center gap-2 border-t border-hair-soft pt-3">
         <TogglePill on={liked} onClick={onLike} aria-label="Like this post">
-          <HeartIcon filled={liked} />
+          <AnimatedHeartIcon filled={liked} />
           {likeLabel(likes, liked)}
         </TogglePill>
         <TogglePill onClick={onOpen} aria-label="Open post and comments">

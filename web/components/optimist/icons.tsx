@@ -43,27 +43,14 @@ export function PaperclipIcon({ size = 15, className }: IconProps) {
   );
 }
 
+/* Send, copy and the copy-confirmation tick now live in
+   components/ui/animated-state-icons.tsx — they carry state transitions, so
+   they animate rather than swap. The paths came from here unchanged. */
+
 export function PlusIcon({ size = 14, className }: IconProps) {
   return (
     <Icon size={size} width={2.1} className={className}>
       <path d="M12 5v14M5 12h14" />
-    </Icon>
-  );
-}
-
-export function ArrowUpIcon({ size = 17, className }: IconProps) {
-  return (
-    <Icon size={size} width={2.2} className={className}>
-      <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />
-    </Icon>
-  );
-}
-
-export function CopyIcon({ size = 12, className }: IconProps) {
-  return (
-    <Icon size={size} width={2} className={className}>
-      <rect x="9" y="9" width="12" height="12" rx="2.5" />
-      <path d="M5 15V5a2 2 0 0 1 2-2h10" />
     </Icon>
   );
 }
@@ -81,14 +68,6 @@ export function ChatIcon({ size = 12, className }: IconProps) {
   return (
     <Icon size={size} width={2} className={className}>
       <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.9 9.9 0 0 1-3.2-.5L3 21l1.6-4.6A8.4 8.4 0 0 1 12 3.1a8.4 8.4 0 0 1 9 8.4z" />
-    </Icon>
-  );
-}
-
-export function CheckIcon({ size = 12, className }: IconProps) {
-  return (
-    <Icon size={size} width={2} className={className}>
-      <path d="m4.5 12.5 5 5 10-11" />
     </Icon>
   );
 }

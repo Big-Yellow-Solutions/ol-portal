@@ -3,12 +3,8 @@
 import { useEffect, useState } from "react";
 import { useMessages } from "@/lib/messages";
 import { RippleMark } from "@/components/optimist/mark";
-import {
-  ChatIcon,
-  CheckIcon,
-  CopyIcon,
-  RetryIcon,
-} from "@/components/optimist/icons";
+import { ChatIcon, RetryIcon } from "@/components/optimist/icons";
+import { AnimatedCopiedIcon } from "@/components/ui/animated-state-icons";
 
 /* One exchange, in the two shapes the design draws.
 
@@ -100,7 +96,7 @@ export function BotTurn({
           {done && (
             <div className="mt-[14px] flex items-center gap-2">
               <ActionPill onClick={copy}>
-                {copied ? <CheckIcon /> : <CopyIcon />}
+                <AnimatedCopiedIcon copied={copied} />
                 {copied ? "Copied" : "Copy"}
               </ActionPill>
               <ActionPill onClick={onRetry}>

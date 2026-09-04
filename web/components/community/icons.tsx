@@ -34,30 +34,8 @@ function Stroke({
   );
 }
 
-/* Filled when the signed-in person has liked the post, hollow otherwise —
-   the design swaps `fill` while keeping the stroke violet either way. */
-export function HeartIcon({
-  size = 15,
-  filled = false,
-  className,
-}: IconProps & { filled?: boolean }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={className}
-    >
-      <path d="M20.8 5.6a5 5 0 0 0-7.1 0L12 7.3l-1.7-1.7a5 5 0 0 0-7.1 7.1l8.8 8.8 8.8-8.8a5 5 0 0 0 0-7.1z" />
-    </svg>
-  );
-}
+/* The like heart moved to components/ui/animated-state-icons.tsx, where the
+   fill is a transition rather than a swap. Its path is unchanged. */
 
 export function CommentIcon(props: IconProps) {
   return (

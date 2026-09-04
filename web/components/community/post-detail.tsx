@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { HeartIcon } from "@/components/community/icons";
+import { AnimatedHeartIcon } from "@/components/ui/animated-state-icons";
 import {
   AvatarWithPresence,
   FIELD,
@@ -89,7 +89,7 @@ export function PostDetail({
 
       <div className="flex items-center gap-2 border-b border-hair-soft pb-1">
         <TogglePill on={liked} onClick={onLike} aria-label="Like this post">
-          <HeartIcon filled={liked} />
+          <AnimatedHeartIcon filled={liked} />
           {likeLabel(likes, liked)}
         </TogglePill>
         <span className="text-[13px] text-warm-gray">

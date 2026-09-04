@@ -8,7 +8,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { ArrowUpIcon, PaperclipIcon, PlusIcon } from "@/components/optimist/icons";
+import { PaperclipIcon, PlusIcon } from "@/components/optimist/icons";
+import { AnimatedSendIcon } from "@/components/ui/animated-state-icons";
 import {
   ATTACHMENT_ACCEPT,
   MAX_ATTACHMENT_BYTES,
@@ -254,7 +255,7 @@ export function Composer({
                 : "cursor-default bg-violet-pale text-violet-light"
             )}
           >
-            <ArrowUpIcon size={landing ? 17 : 16} />
+            <AnimatedSendIcon sending={busy} size={landing ? 17 : 16} />
           </button>
         </div>
       </div>
