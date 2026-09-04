@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, FlaskConical } from "lucide-react";
 import { fmtDollars, fullName, isActive } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
@@ -60,9 +60,29 @@ function PipelineBoard() {
   const viewParam = searchParams.get("view");
   const view: ViewKey = VIEWS.some((v) => v.key === viewParam) ? (viewParam as ViewKey) : "board";
   const [search, setSearch] = useState("");
-  const [labFilter, setLabFilter] = useState("all");
-  const [ownerFilter, setOwnerFilter] = useState("all");
+  const [labChoice, setLabChoice] = useState("all");
+  const [ownerChoice, setOwnerChoice] = useState("all");
   const [onlyUnlinked, setOnlyUnlinked] = useState(false);
+
+  /* Who this pipeline belongs to.
+
+     `role` and `myLabs` both come from /bootstrap, which resolves them from
+     the PERSON record behind the caller's verified token — never from a query
+     param, and never named here. Nothing on this page says "Sports Lab": it
+     says whichever lab the caller's own record names.
+
+     The lab and owner pickers are an Admin's tools. An Admin is the only role
+     with more than one lab's pipeline to switch between, and the only one
+     whose board carries other people's deals. For everyone else the two
+     controls are not rendered, and the values read "all" regardless of the
+     state behind them — so a stale choice cannot outlive a role change, and
+     hiding a control is not the only thing keeping the filter honest. The
+     scope that matters is the server's: /deals, /companies, /contacts,
+     /proposals, /contracts and /invoices each return a Lab Leader only their
+     own lab's records, whatever this page asks for. */
+  const isAdmin = role === "Admin";
+  const labFilter = isAdmin ? labChoice : "all";
+  const ownerFilter = isAdmin ? ownerChoice : "all";
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
 
@@ -101,6 +121,12 @@ function PipelineBoard() {
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     }
   }
+
+  /* The lab record(s) behind `myLabs`. A Lab Leader normally has one; the
+     shape has always been a list, so two are joined rather than truncated. */
+  const myLabRecords = useMemo(() => labs.filter((l) => myLabs.includes(l.id)), [labs, myLabs]);
+  const scopeName = myLabRecords.map((l) => l.name).join(" & ");
+  const scoped = role === "Lab Leader" && !!scopeName;
 
   const companyMap = useMemo(() => Object.fromEntries(companies.map((c) => [c.id, c])), [companies]);
   const contactMap = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
@@ -227,14 +253,47 @@ function PipelineBoard() {
   if (loading) return <p className="text-sm text-ink-mute">Loading…</p>;
   if (error) return <p className="text-sm text-red">{error}</p>;
 
+  /* A Lab Leader whose account names no lab — never given one, or given one
+     the directory no longer has — has no pipeline. Falling through would draw
+     a board under a global heading with whatever the API happened to return,
+     which is the one outcome this page must not have, so it says so instead. */
+  if (role === "Lab Leader" && myLabRecords.length === 0)
+    return (
+      <div className="flex flex-col gap-5">
+        <h1 className="font-serif text-[32px] leading-[1.06] font-normal tracking-[-0.015em] text-ink italic md:text-[40px]">
+          Pipeline
+        </h1>
+        <div className="flex max-w-[640px] items-start gap-3 rounded-2xl border border-red/30 bg-white p-5">
+          <AlertCircle size={18} className="mt-0.5 shrink-0 text-red" />
+          <div>
+            <p className="text-[15px] font-semibold text-ink">No lab is assigned to your account</p>
+            <p className="mt-1.5 text-sm leading-[1.6] text-ink-soft">
+              A Lab Leader&rsquo;s pipeline is their lab&rsquo;s pipeline, so there is nothing
+              to show here until yours is set. Ask an Admin to add your lab to your account,
+              and this page will fill in.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+
+  const heading = scoped ? `${scopeName} Pipeline` : "Pipeline";
+  const where = scoped ? `in the ${scopeName}` : "across the pipeline";
+  /* PRD 3.3 lets an Admin put a Lab Leader on a deal in another lab — it is
+     theirs to run, so it is on their board and the copy has to admit it.
+     Said only when one is actually there, rather than hedging for everyone. */
+  const alsoLeadsElsewhere = scoped && deals.some((d) => !myLabs.includes(d.lab));
+
   const blurb =
     view === "companies"
-      ? "Customer organizations across the pipeline. Open one to see its deals and primary contact."
+      ? `Customer organizations ${where}. Open one to see its deals and primary contact.`
       : view === "people"
-        ? "Individuals across the pipeline — some belong to a company, some are billed directly. Open one to see their deals."
+        ? `Individuals ${where} — some belong to a company, some are billed directly. Open one to see their deals.`
         : view === "documents"
-          ? "Every proposal, signed contract, invoice, and assignment form across the pipeline, with its current version."
-          : "All of your deals by stage. Drag a card to move it forward and add the necessary documents at each stage to get to Closed.";
+          ? `Every proposal, signed contract, invoice, and assignment form ${where}, with its current version.`
+          : scoped
+            ? `Every ${scopeName} deal by stage${alsoLeadsElsewhere ? ", plus any deal you lead in another lab" : ""}. Drag a card to move it forward and add the necessary documents at each stage to get to Closed.`
+            : "All of your deals by stage. Drag a card to move it forward and add the necessary documents at each stage to get to Closed.";
 
   const searchPlaceholder =
     view === "companies" ? "Search companies…" : view === "people" ? "Search people…" : view === "documents" ? "Search documents…" : "Search deals, companies, or people…";
@@ -244,7 +303,7 @@ function PipelineBoard() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="max-w-[640px]">
           <h1 className="font-serif text-[32px] leading-[1.06] font-normal tracking-[-0.015em] text-ink italic md:text-[40px]">
-            Pipeline
+            {heading}
           </h1>
           <p className="mt-2.5 text-[17px] leading-[1.6] text-ink-soft">{blurb}</p>
         </div>
@@ -289,8 +348,8 @@ function PipelineBoard() {
             onChange={(e) => setSearch(e.target.value)}
             className="w-[240px]"
           />
-          {view !== "companies" && view !== "people" && (
-            <Select value={labFilter} onValueChange={setLabFilter}>
+          {isAdmin && view !== "companies" && view !== "people" && (
+            <Select value={labFilter} onValueChange={setLabChoice}>
               <SelectTrigger className="w-40"><SelectValue placeholder="All labs" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All labs</SelectItem>
@@ -298,14 +357,23 @@ function PipelineBoard() {
               </SelectContent>
             </Select>
           )}
-          {view === "board" && (
-            <Select value={ownerFilter} onValueChange={setOwnerFilter}>
+          {isAdmin && view === "board" && (
+            <Select value={ownerFilter} onValueChange={setOwnerChoice}>
               <SelectTrigger className="w-44"><SelectValue placeholder="All owners" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All owners</SelectItem>
                 {leaders.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
               </SelectContent>
             </Select>
+          )}
+          {/* What the pickers would have said, for a reader who has nothing to
+              pick: the scope stated next to the search box, which is where the
+              question "what am I searching?" gets asked. */}
+          {scoped && (
+            <span className="flex items-center gap-1.5 rounded-full bg-violet-pale px-3 py-1.5 text-[13px] font-semibold whitespace-nowrap text-violet-deep">
+              <FlaskConical size={14} aria-hidden />
+              {scopeName}
+            </span>
           )}
           {view === "board" && nUnlinked > 0 && (
             <button
