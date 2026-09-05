@@ -18,7 +18,8 @@
    has been approved. Money is recomputed here on every write rather than
    trusted from the client. */
 
-import { resp, today, get, put } from "./util.mjs";
+import { resp, today, get, put, fullName } from "./util.mjs";
+import { notify } from "./notifications.mjs";
 
 /* Config, per the handoff's "tweakable props — surface as config, not UI". */
 export const POOL_PCT = 70;
@@ -137,6 +138,30 @@ export async function fileAssignment(ctx, dealId, body) {
   };
   const next = { ...deal, assignment, updated: today() };
   await put(next);
+
+  /* Two different facts to two different audiences: the leaders learn their
+     share is on the record, the approver learns something is queued. Sending
+     both as one notification would mean one of them reads the wrong verb. */
+  await notify({
+    to: value.leaders.map(l => l.key),
+    kind: "assignment",
+    actor: ctx.me.sk,
+    actorName: fullName(ctx.me) || ctx.me.sk,
+    verb: `filed an assignment naming you on ${deal.client}`,
+    snippet: "Waiting on approval before it is locked.",
+    meta: "Pipeline",
+    href: "/pipeline"
+  });
+  await notify({
+    to: [APPROVER_KEY],
+    kind: "approval",
+    actor: ctx.me.sk,
+    actorName: fullName(ctx.me) || ctx.me.sk,
+    verb: `filed an assignment on ${deal.client} for your approval`,
+    meta: "Pipeline",
+    href: "/pipeline"
+  });
+
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
 }
@@ -164,6 +189,18 @@ export async function approveAssignment(ctx, dealId) {
     updated: today()
   };
   await put(next);
+
+  await notify({
+    to: [deal.assignment.filedBy, ...(deal.assignment.leaders || []).map(l => l.key)],
+    kind: "approval",
+    actor: ctx.me.sk,
+    actorName: fullName(ctx.me) || ctx.me.sk,
+    verb: `approved the assignment on ${deal.client}`,
+    snippet: "It is locked now — reopening it takes the approver.",
+    meta: "Pipeline",
+    href: "/pipeline"
+  });
+
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
 }

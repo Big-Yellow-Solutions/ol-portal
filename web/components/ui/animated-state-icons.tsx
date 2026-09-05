@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion, type Variants } from "framer-motion";
 
 /* Animated state icons, from 21st.dev's "Animated State Icons" set
    (@dev.yadhakim). Two things changed on the way in, and both matter:
@@ -213,5 +213,84 @@ export function AnimatedCheckIcon({
         transition={{ duration: still ? 0.1 : 0.25, ease: [0.32, 0.72, 0, 1] }}
       />
     </svg>
+  );
+}
+
+/* ---------- the notification bell ----------
+
+   From AnimateIcons / Hugeicons — "notification" by Avijit Dey (@avijit07x),
+   MIT, https://github.com/Avijit07x/animateicons. Adapted on the way in the
+   same way the icons above were:
+
+   1. The source ships its own LazyMotion, forwardRef handle, hover handlers
+      and useAnimation controls so it can animate itself in a catalog page.
+      None of that survives here: variants live at module scope like every
+      other icon in this file, and the surrounding control drives them by
+      declaring `whileHover="animate"` on a motion parent — framer propagates
+      the variant name down. One less imperative controller, and the shake
+      fires from anywhere on the 36px button rather than only from the 19px
+      glyph.
+   2. The source imports from "motion/react"; the portal is on framer-motion,
+      which is the same API under its older name.
+
+   The silhouette and the timing are the author's, unchanged: eight rotate
+   stops over 1.3s on the same `times` curve, with the clapper trailing the
+   body by 0.08s. */
+
+const BELL: Variants = {
+  normal: { rotate: 0 },
+  animate: {
+    rotate: [0, 7, -18, 14, -9, 5, -2, 0],
+    transition: {
+      duration: 1.3,
+      ease: "easeInOut",
+      times: [0, 0.09, 0.26, 0.45, 0.62, 0.78, 0.9, 1],
+    },
+  },
+};
+
+const BELL_CLAPPER: Variants = {
+  normal: { x: 0 },
+  animate: {
+    x: [0, 1.5, -5, 4, -2.5, 1.5, -1, 0],
+    transition: {
+      duration: 1.3,
+      ease: "easeInOut",
+      times: [0, 0.09, 0.26, 0.45, 0.62, 0.78, 0.9, 1],
+      delay: 0.08,
+    },
+  },
+};
+
+/* Decorative, like the rest of this file: the button that holds it owns the
+   accessible name, and that name carries the unread count.
+
+   Under prefers-reduced-motion the variants are simply not attached, so the
+   parent's whileHover finds nothing to propagate to and the bell holds still
+   — the same "the state still reads, it just arrives without travel" rule the
+   other icons here follow. */
+export function AnimatedBellIcon({ size = 19, className }: IconProps) {
+  const still = useReducedMotion();
+  return (
+    <motion.svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+      variants={still ? undefined : BELL}
+      style={{ originX: 0.5, originY: 0.12 }}
+    >
+      <motion.path
+        d="M15.5 18C15.5 19.933 13.933 21.5 12 21.5C10.067 21.5 8.5 19.933 8.5 18"
+        variants={still ? undefined : BELL_CLAPPER}
+      />
+      <path d="M19.2311 18H4.76887C3.79195 18 3 17.208 3 16.2311C3 15.762 3.18636 15.3121 3.51809 14.9803L4.12132 14.3771C4.68393 13.8145 5 13.0514 5 12.2558V9.5C5 5.63401 8.13401 2.5 12 2.5C15.866 2.5 19 5.634 19 9.5V12.2558C19 13.0514 19.3161 13.8145 19.8787 14.3771L20.4819 14.9803C20.8136 15.3121 21 15.762 21 16.2311C21 17.208 20.208 18 19.2311 18Z" />
+    </motion.svg>
   );
 }

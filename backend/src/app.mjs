@@ -26,6 +26,7 @@ import * as resources from "./resources.mjs";
 import * as courses from "./courses.mjs";
 import * as guides from "./guides.mjs";
 import * as community from "./community.mjs";
+import * as notifications from "./notifications.mjs";
 import { fullName } from "./util.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
@@ -518,6 +519,13 @@ async function route(ctx, method, path, seg, body) {
   if (method === "GET" && seg[0] === "posts" && seg[1]) return await community.getPost(ctx, seg[1]);
   if (method === "PATCH" && seg[0] === "posts" && seg[1]) return await community.updatePost(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "posts" && seg[1]) return await community.deletePost(ctx, seg[1]);
+  /* Notifications. Read-only plus a read-receipt: there is deliberately no
+     create route — every record is written server-side by the handler for the
+     thing that happened (see notifications.mjs), so the bell cannot be forged
+     by whoever is holding a token. Both routes derive the partition from the
+     resolved identity, so neither takes a person to read as a parameter. */
+  if (method === "GET" && path === "/notifications") return await notifications.listNotifications(ctx);
+  if (method === "POST" && path === "/notifications/read") return await notifications.markRead(ctx, body);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
   if (method === "GET" && path === "/kb") return await kb.listKb(ctx);

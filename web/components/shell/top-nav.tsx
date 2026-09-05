@@ -9,6 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { NotificationButton } from "@/components/shell/notification-button";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
@@ -103,24 +104,6 @@ function MessageIcon() {
   );
 }
 
-function BellIcon() {
-  return (
-    <svg
-      width="19"
-      height="19"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.8}
-      strokeLinecap="round"
-      aria-hidden="true"
-    >
-      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" />
-      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-    </svg>
-  );
-}
-
 const PILL =
   "flex-none rounded-full px-[15px] py-[9px] text-sm whitespace-nowrap transition-colors";
 
@@ -195,13 +178,11 @@ export function TopNav() {
             />
           </button>
 
-          <span className="relative hidden items-center text-ink sm:flex">
-            <BellIcon />
-            <span
-              aria-hidden="true"
-              className="absolute -top-0.5 -right-[3px] size-[7px] rounded-full bg-violet-deep"
-            />
-          </span>
+          {/* Was a <span> with a permanent dot and no handler: it claimed
+              something had happened, always, and led nowhere. It is a real
+              control now, and unlike the old one it is visible on a phone —
+              on a narrow screen it is the only way into the list. */}
+          <NotificationButton current={owns(pathname, "/notifications")} />
 
           <DropdownMenu>
             <DropdownMenuTrigger className="flex items-center gap-2.5 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">

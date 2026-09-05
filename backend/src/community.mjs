@@ -39,6 +39,7 @@
 
 import { resp, get, put, del, listType, nextId, fullName } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
+import { notify, mentionKeys } from "./notifications.mjs";
 
 /* The chips the design draws on a card. "Update" is what an ordinary post is,
    and is what the composer sends when it says nothing else. */
@@ -155,6 +156,54 @@ async function applyFields(ctx, item, b, isCreate) {
   return { item: next };
 }
 
+/* ---------- mentions ----------
+
+   "@Teddy" in a post is the one thing in Community that is addressed at a
+   person rather than at a room, so it is the one thing that rings a bell.
+   Resolution is notifications.mjs's, which mirrors the browser's rule in
+   web/lib/messages.tsx — the composer's autocomplete and this have to agree
+   on what counts as a name or people get told about mentions they cannot see
+   and miss ones they can.
+
+   Scoped, and quietly: a lab-scoped post can only notify people who could
+   have read it anyway, so @-ing someone into a lab they are not in tells them
+   nothing. Best-effort throughout — a post that saved is a post that saved,
+   whatever the bell did. */
+async function tellMentioned(ctx, post, text, previousText) {
+  try {
+    const people = await listType("PERSON");
+    const named = mentionKeys(text, people);
+    if (!named.length) return;
+
+    const already = previousText ? mentionKeys(previousText, people) : [];
+    const fresh = named.filter(k => !already.includes(k));
+    if (!fresh.length) return;
+
+    /* canSee() reads ctx.role and ctx.me.{sk,labs}, which is exactly the shape
+       a PERSON record already has — so the recipient is checked against the
+       same rule the list route enforces, rather than a second copy of it. */
+    const byKey = Object.fromEntries(people.map(p => [p.sk, p]));
+    const allowed = fresh.filter(k =>
+      byKey[k] && canSee({ role: byKey[k].role, me: byKey[k] }, post));
+
+    const lab = post.lab ? await get("LAB", post.lab) : null;
+    await notify({
+      to: allowed,
+      kind: "mention",
+      actor: ctx.me.sk,
+      actorName: fullName(ctx.me) || ctx.me.sk,
+      verb: "mentioned you in a post",
+      snippet: post.text,
+      meta: [lab?.name || "All labs", "Community"].join(" · "),
+      href: `/community?post=${post.sk}`
+    });
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: "warn", message: "mention notify failed", post: post.sk, detail: err.message
+    }));
+  }
+}
+
 /* ---------- routes ---------- */
 
 /* Newest first, which is the only order a feed has. Scoping happens here, so
@@ -209,6 +258,7 @@ export async function createPost(ctx, body) {
     lab: applied.item.lab || "all", chars: applied.item.text.length
   });
   metric("PostCreated");
+  await tellMentioned(ctx, applied.item, applied.item.text);
   return resp(201, publicView(applied.item));
 }
 
@@ -223,6 +273,10 @@ export async function updatePost(ctx, id, body) {
   await put(applied.item);
   log("community.post.updated", { actor: ctx.me.sk, post: id });
   metric("PostUpdated");
+  /* Only names the edit ADDED. Re-notifying everyone on every typo fix is how
+     a mention becomes noise, and the people already told have already read
+     the row that pointed here. */
+  await tellMentioned(ctx, applied.item, applied.item.text, p.text);
   return resp(200, publicView(applied.item));
 }
 

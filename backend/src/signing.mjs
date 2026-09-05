@@ -38,6 +38,7 @@ import { sendClientEmail } from "./email.mjs";
 import { deviationsOf } from "./contracts.mjs";
 import { mergeClauses, templateVars } from "./templates.mjs";
 import { generateExecutedPdf, rollUpDeal, deliverCopies, inviteOnExecution } from "./execution.mjs";
+import { notify, personByEmail } from "./notifications.mjs";
 import { pricingTotal } from "./pricing.mjs";
 import * as docusign from "./docusign.mjs";
 
@@ -181,6 +182,12 @@ export async function sendForSignature(ctx, id, body) {
   await writeAudit(ctx.me.sk, "contract.sent-for-signature",
     `${id} (${c.client}) → ${c.clientSignerEmail} · countersigner ${signatory.sk} · sha256 ${sent.documentHash.slice(0, 12)} · via ${sent.signMethod}`);
 
+  /* A contributor signs paper about themselves and has a portal login, so the
+     bell can carry it. A client signer does not have one — the emailed link IS
+     their portal — so contributorEmail is checked first and a client-only
+     contract simply notifies nobody. */
+  await tellSigner(ctx, sent);
+
   const url = signUrl(sent.signToken);
   const senderName = fullName(ctx.me);
   const { subject, intro } = requestCopy(c, senderName);
@@ -202,6 +209,30 @@ export async function sendForSignature(ctx, id, body) {
 
   const { pk, sk, ...rest } = sent;
   return resp(200, { id: sk, ...rest, url, emailSent, emailError });
+}
+
+/* The in-portal half of the signature request. Best-effort and after the
+   audit write, so a bell that fails cannot un-send a contract. */
+async function tellSigner(ctx, c) {
+  try {
+    const person = await personByEmail(c.contributorEmail);
+    if (!person) return;
+    const meta = docMeta(c);
+    await notify({
+      to: [person.sk],
+      kind: "signature",
+      actor: ctx.me.sk,
+      actorName: fullName(ctx.me) || ctx.me.sk,
+      verb: `sent you ${meta.label} ${c.sk} to sign`,
+      snippet: meta.title,
+      meta: "Contracts",
+      href: "/contracts"
+    });
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: "warn", message: "signer notification failed", contract: c.sk, detail: err.message
+    }));
+  }
 }
 
 /* Per-kind wording for the signature request. A Contributor asked to sign an
@@ -348,6 +379,19 @@ async function notifyCountersigner(c, clientSig) {
     if (!signatory?.email) return;
     const url = `${process.env.FRONTEND_URL}/contracts.html`;
     const line = `${clientSig.name} signed the ${docMeta(c).title} for ${c.client} (${c.sk}). It needs your countersignature.`;
+
+    /* The same fact, in the portal. The email is the one that reaches someone
+       who is not looking at the Portal; this is the one that is still there
+       when they are. */
+    await notify({
+      to: [signatory.sk],
+      kind: "signature",
+      actorName: clientSig.name,
+      verb: `signed ${docMeta(c).label} ${c.sk} — your countersignature is due`,
+      snippet: `${docMeta(c).title} · ${c.client}`,
+      meta: "Contracts",
+      href: "/contracts"
+    });
     await sendClientEmail({
       sender: { name: "Optimistic Labs", email: null },
       subject: `[OL Portal] Countersignature needed: ${docMeta(c).label} · ${c.client}`,
@@ -414,6 +458,20 @@ export async function countersign(ctx, id, body, meta = {}) {
   });
   await rollUpDeal(next).catch(err =>
     console.error(JSON.stringify({ level: "warn", message: "deal roll-up failed", detail: err.message })));
+  /* Execution is the outcome the owner has been waiting on, and the one they
+     did not do themselves — notify() drops the countersigner if they are also
+     the owner, so an Admin signing their own contract is not told about it. */
+  await notify({
+    to: [next.owner],
+    kind: "executed",
+    actor: ctx.me.sk,
+    actorName: fullName(ctx.me) || ctx.me.sk,
+    verb: `countersigned ${docMeta(next).label} ${id} — it is fully executed`,
+    snippet: `${docMeta(next).title} · ${next.client}`,
+    meta: "Contracts",
+    href: "/contracts"
+  }).catch(err =>
+    console.error(JSON.stringify({ level: "warn", message: "executed notification failed", detail: err.message })));
   await deliverCopies(next, pdf).catch(err =>
     console.error(JSON.stringify({ level: "warn", message: "copy delivery failed", detail: err.message })));
   await inviteOnExecution(next).catch(err =>
