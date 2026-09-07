@@ -6,6 +6,7 @@
  */
 
 import { fmtBytes, fmtDuration } from "@/components/resource-viewer";
+import { RESOURCE_TYPE_LABELS } from "@/lib/types";
 import type { Course, ProgressMap, ResourceItem } from "@/lib/types";
 
 /** "PDF" / "DOCX" — the square badge on a file's detail screen. */
@@ -14,6 +15,12 @@ export function fileExt(r: ResourceItem): string {
   const dot = name.lastIndexOf(".");
   if (dot > -1 && dot < name.length - 1) return name.slice(dot + 1).toUpperCase();
   return (r.mime?.split("/")[1] ?? "FILE").slice(0, 4).toUpperCase();
+}
+
+/** What fills a card whose cover image is unset. A file says which format it
+ *  is; the other two say what they are. */
+export function coverLabel(r: ResourceItem): string {
+  return r.type === "file" ? fileExt(r) : RESOURCE_TYPE_LABELS[r.type];
 }
 
 export function resourceMeta(r: ResourceItem): string {

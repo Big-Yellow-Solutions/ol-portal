@@ -1,15 +1,10 @@
 "use client";
 
-/* Admin authoring for a single Resource Item (PRD 4.1). One dialog covers
-   every type because they share every field that matters — audience, lab,
-   tags, visibility — and differ only in their payload.
-
-   The library takes uploads, not documents written here: a resource arrives as
-   a file from someone's device, or as a video (uploaded or linked). The post
-   composer that used to live in this dialog is gone, and with it the only way
-   to author a document body in the portal. Posts saved before that still open
-   here so their metadata stays editable, but their body is read-only — the
-   backend ignores an incoming `body` too (backend/src/resources.mjs).
+/* Admin authoring for a single Resource Item (PRD 4.1). One dialog covers all
+   three types because they share every field that matters — audience, lab,
+   tags, cover, visibility — and differ only in their payload: a file, a video
+   (uploaded or linked), or a post written here in markdown. A post is the one
+   type that needs nothing from the author's device.
 
    Uploads are two steps by design: the API mints the record and hands back a
    presigned PUT, and the browser sends the bytes straight to S3. That keeps
@@ -38,14 +33,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { readPhoto } from "@/lib/photo";
+import { readCover } from "@/lib/photo";
+import { Markdown } from "@/lib/markdown";
 import { usePortalData } from "@/lib/portal-data";
-import { PERMISSION_LABELS } from "@/lib/types";
+import {
+  MAX_DESCRIPTION_CHARS,
+  MAX_TITLE_CHARS,
+  PERMISSION_LABELS,
+} from "@/lib/types";
 import type {
-  CreatableResourceType,
   ResourceItem,
   ResourcePermission,
+  ResourceType,
   ResourceVisibility,
   VideoSource,
 } from "@/lib/types";
@@ -57,8 +58,7 @@ const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime";
 interface ResourceEditorProps {
   /** Editing an existing item, or null when creating one of `createType`. */
   resource: ResourceItem | null;
-  /** Only an upload-backed type can be created; posts are read-only legacy. */
-  createType?: CreatableResourceType;
+  createType?: ResourceType;
   open: boolean;
   onClose: () => void;
   onSaved: (r: ResourceItem) => void;
@@ -82,6 +82,7 @@ export function ResourceEditor({
   const [permission, setPermission] = useState<ResourcePermission>(resource?.permission ?? "both");
   const [visibility, setVisibility] = useState<ResourceVisibility>(resource?.visibility ?? "library");
   const [thumbnail, setThumbnail] = useState(resource?.thumbnail ?? "");
+  const [body, setBody] = useState(resource?.body ?? "");
   const [source, setSource] = useState<VideoSource>(resource?.source ?? "embed");
   const [embedUrl, setEmbedUrl] = useState(
     resource?.provider === "youtube"
@@ -99,6 +100,7 @@ export function ResourceEditor({
   const [file, setFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const coverRef = useRef<HTMLInputElement>(null);
 
   const needsFile = type === "file" || (type === "video" && source === "upload");
   const existingFile = resource?.fileName;
@@ -108,18 +110,22 @@ export function ResourceEditor({
     [labs]
   );
 
-  const onThumbnail = async (f: File | undefined) => {
+  /* Cropped to the card's 3:2 on the way in, so the preview below is exactly
+     what the library will show. */
+  const onCover = async (f: File | undefined) => {
     if (!f) return;
     try {
-      setThumbnail(await readPhoto(f, 640));
-    } catch {
-      toast.error("Could not read that image.");
+      setThumbnail(await readCover(f));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not read that image.");
     }
   };
 
   const save = async (publish?: boolean) => {
     if (!title.trim()) return toast.error("Give this resource a title.");
     if (needsFile && isNew && !file) return toast.error("Choose a file to upload.");
+    if (type === "post" && publish && !body.trim())
+      return toast.error("Write something before publishing this post.");
     if (type === "video" && source === "embed" && !embedUrl.trim())
       return toast.error("Paste a YouTube, Vimeo, or Loom link.");
 
@@ -136,6 +142,7 @@ export function ResourceEditor({
         ...(isNew ? { type } : {}),
         ...(publish === undefined ? {} : { status: publish ? "Published" : "Draft" }),
       };
+      if (type === "post") payload.body = body;
       if (type === "video") {
         payload.source = source;
         payload.transcript = transcript;
@@ -169,13 +176,6 @@ export function ResourceEditor({
     }
   };
 
-  /* Belt and braces for the withdrawn flow: `createType` is typed to exclude
-     it, the menu that used to offer it is gone, and the API refuses it — but
-     an untyped or stale caller asking for a brand-new post gets nothing rather
-     than an empty composer. Placed after every hook so the hook order is
-     unconditional. */
-  if (isNew && type === "post") return null;
-
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
@@ -184,7 +184,9 @@ export function ResourceEditor({
             {isNew
               ? type === "file"
                 ? "Upload a file"
-                : "Add a video"
+                : type === "post"
+                  ? "Write a post"
+                  : "Add a video"
               : `Edit ${type === "file" ? "file" : type === "post" ? "post" : "video"}`}
           </DialogTitle>
           <DialogDescription>
@@ -196,24 +198,94 @@ export function ResourceEditor({
 
         <div className="flex flex-col gap-4">
           <Field label="Title">
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Client onboarding checklist" />
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              maxLength={MAX_TITLE_CHARS}
+              placeholder="Client onboarding checklist"
+            />
           </Field>
           <Field label="Description">
             <Textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={2}
+              maxLength={MAX_DESCRIPTION_CHARS}
               placeholder="One or two lines on what this is and when to use it."
             />
+            {/* The cap used to be invisible: the field took everything and the
+                API quietly kept the first 2,000 characters. It now refuses the
+                rest instead, so the number belongs where the typing happens. */}
+            <p className="mt-1 text-right text-xs tabular-nums text-ink-mute">
+              {description.length.toLocaleString()} / {MAX_DESCRIPTION_CHARS.toLocaleString()} characters
+            </p>
+          </Field>
+
+          <Field label="Cover image">
+            <div className="flex flex-wrap items-center gap-3.5">
+              <div className="h-[84px] w-[126px] flex-none overflow-hidden rounded-[10px] border border-hair bg-violet-pale">
+                {thumbnail ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- local data URL
+                  <img src={thumbnail} alt="" className="size-full object-cover" />
+                ) : (
+                  <span className="flex size-full items-center justify-center font-serif text-sm text-violet-deep italic">
+                    No cover
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" variant="outline" onClick={() => coverRef.current?.click()}>
+                  {thumbnail ? "Replace image" : "Choose image"}
+                </Button>
+                {thumbnail && (
+                  <Button type="button" variant="ghost" onClick={() => setThumbnail("")}>
+                    Remove
+                  </Button>
+                )}
+                <input
+                  ref={coverRef}
+                  type="file"
+                  hidden
+                  accept="image/*"
+                  onChange={(e) => onCover(e.target.files?.[0])}
+                />
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-ink-mute">
+              The picture on this resource&rsquo;s card in the library. Centre-cropped to 3:2 —
+              anything wider or taller loses its edges. Without one the card shows a plain
+              violet block.
+            </p>
           </Field>
 
           {type === "post" && (
-            <p className="rounded-lg border border-hair bg-paper p-3 text-xs text-ink-mute">
-              This post was written before the library became upload-only. Its
-              text is read-only and stays exactly as published — you can still
-              change everything else here, or delete it. To publish something
-              new, upload a file.
-            </p>
+            <Field label="Body">
+              <Tabs defaultValue="write">
+                <TabsList>
+                  <TabsTrigger value="write">Write</TabsTrigger>
+                  <TabsTrigger value="preview">Preview</TabsTrigger>
+                </TabsList>
+                <TabsContent value="write">
+                  <Textarea
+                    value={body}
+                    onChange={(e) => setBody(e.target.value)}
+                    rows={14}
+                    className="font-mono text-xs"
+                    placeholder={"## How to use this checklist\n\nWalk the client through each section…\n\n@[resource](RS-003)"}
+                  />
+                  <p className="mt-1 text-xs text-ink-mute">
+                    Markdown: <code>## heading</code>, <code>**bold**</code>, <code>- list</code>,{" "}
+                    <code>[link](https://…)</code>, <code>![image](https://…)</code>. Put{" "}
+                    <code>@[resource](RS-003)</code> on its own line to embed another resource inline.
+                  </p>
+                </TabsContent>
+                <TabsContent value="preview">
+                  <div className="rounded-lg border border-hair p-4">
+                    <Markdown text={body} />
+                  </div>
+                </TabsContent>
+              </Tabs>
+            </Field>
           )}
 
           {type === "video" && (
@@ -307,25 +379,6 @@ export function ResourceEditor({
                   <SelectItem value="course-only">Inside courses only</SelectItem>
                 </SelectContent>
               </Select>
-            </Field>
-            <Field label="Thumbnail">
-              <div className="flex items-center gap-3">
-                {thumbnail && (
-                  // eslint-disable-next-line @next/next/no-img-element -- local data URL
-                  <img src={thumbnail} alt="" className="h-10 w-16 rounded border border-hair object-cover" />
-                )}
-                <Input
-                  type="file"
-                  accept="image/*"
-                  className="text-xs"
-                  onChange={(e) => onThumbnail(e.target.files?.[0])}
-                />
-                {thumbnail && (
-                  <Button type="button" size="sm" variant="ghost" onClick={() => setThumbnail("")}>
-                    Clear
-                  </Button>
-                )}
-              </div>
             </Field>
           </div>
 

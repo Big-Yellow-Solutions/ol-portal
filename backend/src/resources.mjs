@@ -4,16 +4,16 @@
    feature: it stands alone in the Resource Library, and a Course is just an
    ordered list of them (courses.mjs). Three types share one record because
    they share all of their metadata and every access rule — only the payload
-   differs. Two of the three can still be created; see
-   CREATABLE_RESOURCE_TYPES:
+   differs:
 
      file   an uploaded PDF/PPTX/DOCX, stored in the same S3 bucket the Files
             page uses but under a `resources/` prefix so the auto-analyzer
             (which fires on `uploads/`) leaves it alone.
-     post   markdown that WAS written in the portal. Legacy only: authoring
-            was withdrawn, so no new post can be created and a stored body is
-            no longer writable. Existing posts still list, render (including
-            their inline @[resource](RS-003) embeds), and delete as before.
+     post   markdown written in the portal. The library's one intake that
+            needs nothing from the author's device: a note, a walkthrough, an
+            announcement. Can embed other resources inline via
+            @[resource](RS-003), which is how the PRD's "here's how to use
+            this checklist" post wraps a downloadable file.
      video  either an upload played from S3 or an embed. Embeds are parsed and
             rebuilt server-side into a known-good player URL rather than
             trusting whatever the author pasted.
@@ -40,21 +40,7 @@ import { writeAudit } from "./admin.mjs";
 const s3 = new S3Client({});
 const BUCKET = process.env.FILES_BUCKET;
 
-/* Every type that can EXIST on a stored record. "post" stays on this list
-   because posts written before native document authoring was withdrawn are
-   still real records: they list, preview, download and delete exactly as they
-   did. Only their creation is gone. */
 export const RESOURCE_TYPES = ["file", "post", "video"];
-
-/* Every type a caller may still bring INTO the library. The Resource Library
-   is an upload surface now — a resource arrives as a file from someone's
-   device (or a video, uploaded or linked), never as a document composed in
-   the portal. Enforced here rather than only in the browser so a direct POST
-   can't author one either. */
-export const CREATABLE_RESOURCE_TYPES = ["file", "video"];
-
-export const isCreatableType = type => CREATABLE_RESOURCE_TYPES.includes(type);
-
 export const PERMISSIONS = ["lab_leaders", "contributors", "both"];
 export const VISIBILITIES = ["library", "course-only"];
 
@@ -63,6 +49,11 @@ export const VISIBILITIES = ["library", "course-only"];
    as-is, so a 20-minute screen recording has to fit whole. */
 const MAX_DOC_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+const MAX_BODY_CHARS = 100_000;
+/* Exported because the editor prints it under the field. A description that
+   silently lost its tail was the whole complaint, so the number the browser
+   counts against has to be this one. */
+export const MAX_DESCRIPTION_CHARS = 2000;
 const MAX_TRANSCRIPT_CHARS = 200_000;
 const MAX_THUMBNAIL_CHARS = 120_000;
 const MAX_TAGS = 10;
@@ -193,10 +184,8 @@ export async function getResource(ctx, id) {
 export async function createResource(ctx, body) {
   if (ctx.role !== "Admin") return resp(403, { error: "Publishing resources is admin-only" });
   const b = body || {};
-  if (b.type === "post")
-    return resp(400, { error: "Posts can no longer be created — upload a file instead" });
-  if (!isCreatableType(b.type))
-    return resp(400, { error: "type must be file or video" });
+  if (!RESOURCE_TYPES.includes(b.type))
+    return resp(400, { error: "type must be file, post, or video" });
   const title = str(b.title, 200);
   if (!title) return resp(400, { error: "title is required" });
 
@@ -247,7 +236,7 @@ export async function deleteResource(ctx, id) {
    would have rejected — the same guarantee templates.mjs makes. Returns an
    `uploadUrl` whenever the caller attached new file metadata, which is how
    both first upload and file replacement work. */
-async function applyFields(ctx, item, b, isCreate) {
+export async function applyFields(ctx, item, b, isCreate) {
   const next = { ...item };
 
   if ("title" in b) {
@@ -255,7 +244,12 @@ async function applyFields(ctx, item, b, isCreate) {
     if (!title) return { error: "title is required" };
     next.title = title;
   }
-  if ("description" in b) next.description = str(b.description, 2000);
+  if ("description" in b) {
+    const description = String(b.description ?? "").trim();
+    if (description.length > MAX_DESCRIPTION_CHARS)
+      return { error: `description must be ${MAX_DESCRIPTION_CHARS} characters or fewer` };
+    next.description = description;
+  }
   if ("permission" in b) {
     if (!PERMISSIONS.includes(b.permission)) return { error: "invalid permission" };
     next.permission = b.permission;
@@ -292,13 +286,12 @@ async function applyFields(ctx, item, b, isCreate) {
 }
 
 export async function applyTypeFields(next, b, isCreate) {
-  /* A post's body is no longer writable from anywhere: the editor is gone and
-     an incoming `body` is ignored rather than rejected, so an older client
-     PATCHing a whole record still saves its metadata instead of erroring. The
-     stored body rides through untouched, which is what keeps existing posts
-     readable. Creation is already blocked upstream, so isCreate never lands
-     here for a post. */
-  if (next.type === "post") return { item: next };
+  /* Absent `body` on a PATCH means "not editing the text", not "clear it" —
+     a metadata-only save from the editor leaves the published words alone. */
+  if (next.type === "post") {
+    if ("body" in b || isCreate) next.body = String(b.body ?? next.body ?? "").slice(0, MAX_BODY_CHARS);
+    return { item: next };
+  }
 
   if (next.type === "file") {
     if (!b.file) {

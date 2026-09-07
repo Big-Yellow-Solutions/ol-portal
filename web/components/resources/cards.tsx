@@ -2,6 +2,7 @@
 
 import { StarGlyph } from "@/components/shell/top-nav";
 import { Badge } from "@/components/ui/badge";
+import { coverLabel } from "@/lib/resources-view";
 import { RESOURCE_TYPE_LABELS } from "@/lib/types";
 import type { Course, ResourceItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -14,36 +15,34 @@ import { cn } from "@/lib/utils";
 const CARD =
   "group flex cursor-pointer flex-col overflow-hidden rounded-[20px] border border-hair bg-white text-left shadow-card transition-shadow hover:shadow-lift";
 
-/* Records carry a data-URL thumbnail or nothing. Where there is nothing the
+/* Records carry a data-URL cover image or nothing. Where there is nothing the
    design still wants a filled block, so the placeholder names what the item
-   is rather than showing an empty grey rectangle. */
+   is rather than showing an empty grey rectangle — for a file that means the
+   format ("PDF"), which is worth more to someone scanning than the word
+   "File". `box` sets the shape: resources are 3:2, the ratio readCover crops
+   an uploaded graphic to. */
 function Cover({
   src,
   label,
-  height,
+  box,
   tone = "pale",
 }: {
   src?: string;
   label: string;
-  height: number;
+  box: string;
   tone?: "pale" | "deep";
 }) {
   if (src) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- data URL on the record
-      <img
-        src={src}
-        alt=""
-        style={{ height }}
-        className="w-full flex-none object-cover"
-      />
+      <img src={src} alt="" className={cn("w-full flex-none object-cover", box)} />
     );
   }
   return (
     <div
-      style={{ height }}
       className={cn(
         "flex w-full flex-none items-center justify-center",
+        box,
         tone === "deep" ? "bg-violet-deep" : "bg-violet-pale"
       )}
     >
@@ -86,8 +85,8 @@ export function ResourceCard({
     >
       <Cover
         src={resource.thumbnail}
-        label={RESOURCE_TYPE_LABELS[resource.type]}
-        height={132}
+        label={coverLabel(resource)}
+        box="aspect-[3/2]"
       />
       <div className="flex flex-1 flex-col gap-2 p-[18px]">
         <span className="inline-flex items-center gap-[7px] text-[11px] font-semibold tracking-[0.16em] text-violet-deep uppercase">
@@ -146,7 +145,7 @@ export function CourseCard({
       }}
       aria-label={`Open ${course.title}`}
     >
-      <Cover src={course.cover} label="Course" height={150} tone="deep" />
+      <Cover src={course.cover} label="Course" box="h-[150px]" tone="deep" />
       <div className="flex flex-1 flex-col gap-2.5 p-5">
         <span className="inline-flex items-center gap-[7px] text-[11px] font-semibold tracking-[0.16em] text-violet-deep uppercase">
           <StarGlyph />
