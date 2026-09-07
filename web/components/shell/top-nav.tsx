@@ -185,8 +185,18 @@ export function TopNav() {
           <NotificationButton current={owns(pathname, "/notifications")} />
 
           <DropdownMenu>
-            <DropdownMenuTrigger className="flex items-center gap-2.5 rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-              <span className="flex size-[34px] flex-none items-center justify-center overflow-hidden rounded-full bg-violet-deep text-[13px] font-semibold text-white">
+            {/* Hover grows the avatar's violet disc out into the whole pill and
+                turns the name white. Nothing new appears on hover: the disc
+                below starts exactly under the avatar, so it is that same circle
+                getting bigger, clipped back into a pill by the trigger. The
+                padding it fills is lg-only because the name is — below that the
+                control is just the avatar, and there is nothing to grow into. */}
+            <DropdownMenuTrigger className="group relative flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50 lg:pr-3.5">
+              <span
+                aria-hidden="true"
+                className="absolute top-0 left-0 size-[34px] rounded-full bg-violet-deep transition-all duration-300 ease-out group-hover:h-full group-hover:w-full group-data-[state=open]:h-full group-data-[state=open]:w-full"
+              />
+              <span className="relative flex size-[34px] flex-none items-center justify-center overflow-hidden rounded-full bg-violet-deep text-[13px] font-semibold text-white">
                 {meRecord?.photo ? (
                   <Image
                     src={meRecord.photo}
@@ -199,7 +209,7 @@ export function TopNav() {
                   initials(meRecord)
                 )}
               </span>
-              <span className="hidden text-sm font-medium whitespace-nowrap lg:block">
+              <span className="relative hidden text-sm font-medium whitespace-nowrap transition-colors duration-300 group-hover:text-white group-data-[state=open]:text-white lg:block">
                 {fullName(meRecord) || me}
               </span>
             </DropdownMenuTrigger>
