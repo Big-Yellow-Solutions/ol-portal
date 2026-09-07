@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PersonItem, personOptions } from "@/components/ui/person-select";
 import {
   Select,
   SelectContent,
@@ -14,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { AlertCircle, FlaskConical } from "lucide-react";
-import { fmtDollars, fullName, isActive } from "@/lib/data";
+import { fmtDollars, fullName } from "@/lib/data";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
@@ -154,8 +155,8 @@ function PipelineBoard() {
   );
 
   const leaders = useMemo(
-    () => Object.entries(people).filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader")).map(([username, p]) => ({ username, name: fullName(p) || username })),
-    [people]
+    () => personOptions(people, { labs, filter: (p) => p.role === "Admin" || p.role === "Lab Leader" }),
+    [people, labs]
   );
 
   const filtered = useMemo(() => {
@@ -362,7 +363,7 @@ function PipelineBoard() {
               <SelectTrigger className="w-44"><SelectValue placeholder="All owners" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All owners</SelectItem>
-                {leaders.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
+                {leaders.map((p) => <PersonItem key={p.id} person={p} />)}
               </SelectContent>
             </Select>
           )}

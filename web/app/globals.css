@@ -2,13 +2,14 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* HeroUI v3, for the select only (components/ui/select.tsx).
+/* HeroUI v3, for the select (components/ui/select.tsx) and the person
+   picker built on the same ListBox (components/ui/person-select.tsx).
 
    Deliberately NOT `@heroui/styles/css`: that entry re-imports Tailwind and
    `themes/shared/theme.css`, whose @theme block redefines --radius-sm…4xl and
    six --color-* mappings this app already owns — every rounded-lg in the
-   portal would change. Only the token vocabulary the select's own CSS reads is
-   pulled in, plus the four component structures it renders.
+   portal would change. Only the token vocabulary those components' own CSS
+   reads is pulled in, plus the five component structures they render.
 
    The seven variables HeroUI and this file both define (--background,
    --foreground, --border, --accent, --accent-foreground, --muted, --radius)
@@ -17,6 +18,7 @@
    structure and behaviour wearing the portal's palette, which is the point. */
 @import "@heroui/styles/themes/default/variables.css";
 @import "@heroui/styles/utilities";
+@import "@heroui/styles/components/avatar.css" layer(components);
 @import "@heroui/styles/components/label.css" layer(components);
 @import "@heroui/styles/components/popover.css" layer(components);
 @import "@heroui/styles/components/list-box.css" layer(components);

@@ -30,17 +30,17 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PersonItem, personOptions } from "@/components/ui/person-select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
-  SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
 import { PricingEditor } from "@/components/pricing-editor";
 import { api, ApiError } from "@/lib/api";
-import { DOC_KIND_LABEL, docKindOf, fullName, isContributorDoc } from "@/lib/data";
+import { DOC_KIND_LABEL, docKindOf, isContributorDoc } from "@/lib/data";
 import type { Contract, Deviation, Person, Pricing, Role } from "@/lib/types";
 
 interface DeviationError {
@@ -81,7 +81,13 @@ export function ContractEditor({
   const [deviationNote, setDeviationNote] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const admins = Object.entries(people).filter(([, p]) => p.role === "Admin");
+  /* An Admin who has left still countersigned whatever they countersigned,
+     so the one this contract already names stays pickable — see `keep`. */
+  const admins = personOptions(people, {
+    filter: (p) => p.role === "Admin",
+    describe: (p) => p.email ?? p.role,
+    keep: [olSignatory],
+  });
   const locked = contract.status === "Out for Signature" || contract.status === "Signed";
 
   /* The same editor drives all three kinds of paper. What changes is the
@@ -262,10 +268,8 @@ export function ContractEditor({
                   <SelectValue placeholder="Choose an Admin" />
                 </SelectTrigger>
                 <SelectContent>
-                  {admins.map(([key, p]) => (
-                    <SelectItem key={key} value={key}>
-                      {fullName(p) || key}
-                    </SelectItem>
+                  {admins.map((p) => (
+                    <PersonItem key={p.id} person={p} />
                   ))}
                 </SelectContent>
               </Select>

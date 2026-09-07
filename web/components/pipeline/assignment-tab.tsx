@@ -6,14 +6,15 @@ import { Check, ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PersonListBox, personOptions } from "@/components/ui/person-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
-import { fmtDollars, fullName, isActive } from "@/lib/data";
+import { fmtDollars, fullName } from "@/lib/data";
 import {
   ASSIGNMENT_APPROVER, CADENCES, POOL_PCT, SOFT_RESERVE_PCT,
-  assignmentMath, assignmentState, initialsOf, splitEvenly,
+  assignmentMath, assignmentState, splitEvenly,
 } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
@@ -43,17 +44,21 @@ export function AssignmentTab({
   editable: boolean;
   onSaved: (deal: Deal) => void;
 }) {
-  const { people, companies, contacts, me } = usePortalData();
+  const { labs, people, companies, contacts, me } = usePortalData();
   const state = assignmentState(deal);
   const filed = deal.assignment;
 
+  /* The deal owner is called out on their own row rather than sorted to the
+     top: the list stays alphabetical, and the person the deal suggests is
+     still findable at a glance. */
+  const dealOwnerKey = deal.dealOwner || deal.owner;
   const leaderOptions = useMemo(
     () =>
-      Object.entries(people)
-        .filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader"))
-        .map(([key, p]) => ({ key, name: fullName(p) || key }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    [people]
+      personOptions(people, {
+        labs,
+        filter: (p) => p.role === "Admin" || p.role === "Lab Leader",
+      }).map((p) => (p.id === dealOwnerKey ? { ...p, note: "Deal owner" } : p)),
+    [people, labs, dealOwnerKey]
   );
   const nameOf = (key: string) => fullName(people[key]) || key;
 
@@ -103,12 +108,16 @@ export function AssignmentTab({
 
   const isApprover = me === ASSIGNMENT_APPROVER;
 
-  function toggleLeader(key: string) {
-    const next = selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key];
+  // Re-splitting on every change keeps the total at 100 without anyone doing
+  // arithmetic; whoever wants a different split types over it afterwards.
+  function setLeaders(next: string[]) {
     setSelected(next);
-    // Re-splitting on every change keeps the total at 100 without anyone doing
-    // arithmetic; whoever wants a different split types over it afterwards.
     setShares(splitEvenly(next));
+  }
+
+  // The chips below the picker still remove one at a time.
+  function toggleLeader(key: string) {
+    setLeaders(selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]);
   }
 
   async function post(path: string, body?: unknown, done?: string) {
@@ -317,38 +326,14 @@ export function AssignmentTab({
             </button>
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-1.5">
-            <div className="flex max-h-[260px] flex-col overflow-y-auto">
-              {leaderOptions.map((o) => (
-                <button
-                  key={o.key}
-                  type="button"
-                  role="checkbox"
-                  aria-checked={selected.includes(o.key)}
-                  className="flex items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-violet-pale/40"
-                  onClick={() => toggleLeader(o.key)}
-                >
-                  {/* Decorative, not a control: the row itself is the button,
-                      and a real checkbox here would nest one button inside
-                      another — invalid HTML, and React says so at hydration. */}
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "flex size-4 shrink-0 items-center justify-center rounded-[5px] border",
-                      selected.includes(o.key) ? "border-violet-deep bg-violet-deep text-white" : "border-hair-strong bg-white"
-                    )}
-                  >
-                    {selected.includes(o.key) && <Check size={11} strokeWidth={3} />}
-                  </span>
-                  <span className="flex size-6.5 shrink-0 items-center justify-center rounded-full bg-violet-pale text-[10px] font-semibold text-violet-deep">
-                    {initialsOf(o.name)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{o.name}</span>
-                  {o.key === (deal.dealOwner || deal.owner) && (
-                    <span className="shrink-0 text-[10px] font-semibold tracking-wide text-warm-gray uppercase">Deal owner</span>
-                  )}
-                </button>
-              ))}
-            </div>
+            <PersonListBox
+              aria-label="Lab leaders"
+              people={leaderOptions}
+              value={selected}
+              onChange={setLeaders}
+              emptyLabel="No lab leaders to assign."
+              className="max-h-[260px] overflow-y-auto"
+            />
           </PopoverContent>
         </Popover>
 

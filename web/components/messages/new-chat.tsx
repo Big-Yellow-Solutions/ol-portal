@@ -2,8 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { CloseIcon } from "@/components/community/icons";
-import { AnimatedCheckIcon } from "@/components/ui/animated-state-icons";
 import { FIELD } from "@/components/community/primitives";
+import { PersonListBox } from "@/components/ui/person-select";
 import { useMessages } from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
@@ -19,11 +19,19 @@ export function NewChat() {
   const [picked, setPicked] = useState<string[]>([]);
   const [groupName, setGroupName] = useState("");
 
+  /* MessagePerson is already the picker's row shape — id, name, initials,
+     photo — with `role` carrying the "Lab Leader · Faith Lab" line. */
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return directory.filter(
-      (p) => !q || `${p.name} ${p.role}`.toLowerCase().includes(q)
-    );
+    return directory
+      .filter((p) => !q || `${p.name} ${p.role}`.toLowerCase().includes(q))
+      .map((p) => ({
+        id: p.id,
+        name: p.name,
+        initials: p.initials,
+        description: p.role,
+        photo: p.photo,
+      }));
   }, [directory, query]);
 
   const toggle = (id: string) =>
@@ -72,47 +80,14 @@ export function NewChat() {
           className={cn(FIELD, PILL_INPUT, "mb-1.5")}
         />
 
-        <div className="flex flex-col">
-          {shown.map((p) => {
-            const on = picked.includes(p.id);
-            return (
-              <button
-                key={p.id}
-                type="button"
-                aria-pressed={on}
-                onClick={() => toggle(p.id)}
-                className="-mx-2 flex cursor-pointer items-center gap-3 rounded-[10px] px-2 py-2.5 text-left transition-colors hover:bg-paper"
-              >
-                <span
-                  className={cn(
-                    "flex size-[19px] flex-none items-center justify-center rounded-[6px] border-[1.5px] text-white",
-                    on
-                      ? "border-violet-deep bg-violet-deep"
-                      : "border-[rgba(124,109,245,0.45)] bg-white"
-                  )}
-                >
-                  <AnimatedCheckIcon on={on} size={11} width={3.4} />
-                </span>
-                <span className="flex size-8 flex-none items-center justify-center rounded-full bg-violet-pale text-xs font-semibold text-violet-deep">
-                  {p.initials}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-ink">
-                    {p.name}
-                  </span>
-                  <span className="block truncate text-xs text-warm-gray">
-                    {p.role}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-          {shown.length === 0 && (
-            <p className="m-0 px-1 py-3.5 text-[13px] text-warm-gray">
-              No one by that name.
-            </p>
-          )}
-        </div>
+        <PersonListBox
+          aria-label="People to add"
+          people={shown}
+          value={picked}
+          onChange={setPicked}
+          emptyLabel="No one by that name."
+          className="-mx-2"
+        />
       </div>
 
       <div className="flex flex-none items-center gap-3 border-t border-hair px-[18px] pt-3.5 pb-[18px]">

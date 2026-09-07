@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PersonItem, personOptions } from "@/components/ui/person-select";
 import {
   Select,
   SelectContent,
@@ -24,7 +25,7 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
-import { fullName, isActive } from "@/lib/data";
+import { fullName } from "@/lib/data";
 import { assignmentState, billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE, CLOSED_WON } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
@@ -90,8 +91,8 @@ export function DealDrawer({
   const showAssignmentTab = !isNew && tab === "assignment";
 
   const leaders = useMemo(
-    () => Object.entries(people).filter(([, p]) => isActive(p) && (p.role === "Admin" || p.role === "Lab Leader")).map(([username, p]) => ({ username, name: fullName(p) || username })),
-    [people]
+    () => personOptions(people, { labs, filter: (p) => p.role === "Admin" || p.role === "Lab Leader" }),
+    [people, labs]
   );
 
   const [title, setTitle] = useState(existing?.client ?? "");
@@ -374,7 +375,7 @@ export function DealDrawer({
                 <Select value={owner} onValueChange={setOwner} disabled={!editable}>
                   <SelectTrigger id="pv2-owner"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {leaders.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
+                    {leaders.map((p) => <PersonItem key={p.id} person={p} />)}
                   </SelectContent>
                 </Select>
               </div>
@@ -383,7 +384,7 @@ export function DealDrawer({
                 <Select value={dealOwner} onValueChange={setDealOwner} disabled={!editable}>
                   <SelectTrigger id="pv2-deal-owner"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {leaders.map((p) => <SelectItem key={p.username} value={p.username}>{p.name}</SelectItem>)}
+                    {leaders.map((p) => <PersonItem key={p.id} person={p} />)}
                   </SelectContent>
                 </Select>
               </div>
