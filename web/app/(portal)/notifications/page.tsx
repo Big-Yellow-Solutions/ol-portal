@@ -31,6 +31,7 @@ import {
   type NotificationTab,
   type PortalNotification,
 } from "@/lib/notifications";
+import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,7 @@ export default function NotificationsPage() {
   const { items, unread, loadedAt, loading, error, markAllRead, markOneRead, countFor } =
     useNotifications();
   const { people } = usePortalData();
+  const { openConversation, openList } = useMessages();
   const [tab, setTab] = useState<Tab>("all");
 
   /* "All", plus any tab that has something in it. A tab with nothing behind
@@ -82,9 +84,16 @@ export default function NotificationsPage() {
     (n) => !n.read && (n.kind === "signature" || n.kind === "approval")
   );
 
+  /* A message's link names a thread. The panel is mounted by the shell, so
+     it opens here in place rather than routing through a hash the router
+     would not announce. */
   const open = (n: PortalNotification) => {
     void markOneRead(n.id);
-    if (n.href) router.push(n.href);
+    if (!n.href) return;
+    const thread = n.href.match(/#messages\/([^/?#]+)/);
+    if (thread) openConversation(decodeURIComponent(thread[1]));
+    else if (n.href.includes("#messages")) openList();
+    else router.push(n.href);
   };
 
   return (

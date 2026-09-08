@@ -8,8 +8,23 @@ import { cn } from "@/lib/utils";
    a DM before you read the name. */
 
 export function ConversationList() {
-  const { conversations, person, title, mentionIds, openConversation, openNew } =
-    useMessages();
+  const {
+    conversations,
+    loading,
+    person,
+    title,
+    mentionIds,
+    openConversation,
+    openNew,
+  } = useMessages();
+
+  if (loading && conversations.length === 0) {
+    return (
+      <div className="flex flex-1 items-center justify-center p-10 text-[13px] text-warm-gray">
+        Loading…
+      </div>
+    );
+  }
 
   if (conversations.length === 0) {
     return (

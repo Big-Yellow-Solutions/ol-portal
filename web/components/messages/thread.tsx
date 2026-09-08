@@ -5,7 +5,6 @@ import { ArrowRightIcon, BellIcon } from "@/components/community/icons";
 import { FIELD } from "@/components/community/primitives";
 import {
   ME,
-  quickReplies,
   segments,
   useMessages,
   type MessagePerson,
@@ -70,7 +69,6 @@ export function Thread() {
     setMq(null);
   };
 
-  const quick = quickReplies(active);
   const ready = draft.trim().length > 0;
 
   return (
@@ -108,7 +106,7 @@ export function Thread() {
 
           return (
             <div
-              key={`${i}-${m.time}`}
+              key={m.id}
               className={cn(
                 "flex flex-col gap-1",
                 mine ? "items-end" : "items-start"
@@ -122,6 +120,7 @@ export function Thread() {
               <div
                 className={cn(
                   "max-w-[82%] rounded-[14px] px-3.5 py-[11px] text-sm leading-[1.5] text-pretty",
+                  m.pending && "opacity-70",
                   mine
                     ? "rounded-br-[5px] bg-violet-deep text-white"
                     : "rounded-bl-[5px] border bg-white text-ink",
@@ -205,25 +204,6 @@ export function Thread() {
                 </div>
               )}
             </div>
-          </div>
-        )}
-
-        {quick.length > 0 && (
-          <div className="mb-2.5 flex gap-2 overflow-x-auto">
-            {quick.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => {
-                  send(q);
-                  setDraft("");
-                  setMq(null);
-                }}
-                className="flex-none cursor-pointer rounded-full border border-hair-strong bg-white px-[13px] py-1.5 text-xs font-medium whitespace-nowrap text-violet-deep transition-colors hover:bg-violet-pale"
-              >
-                {q}
-              </button>
-            ))}
           </div>
         )}
 

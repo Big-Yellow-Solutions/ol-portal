@@ -4,46 +4,35 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
-import { COMMUNITY_THREADS, initialsOfName } from "@/lib/community";
+import { api, ApiError } from "@/lib/api";
 import { messageTime } from "@/lib/dashboard";
-import { fullName, initials } from "@/lib/data";
+import { fullName, initials, isActive } from "@/lib/data";
+import { notificationAge } from "@/lib/notifications";
 import { usePortalData } from "@/lib/portal-data";
 import type { Lab, Person } from "@/lib/types";
 
-/* Messaging for the whole portal, from the Directory + Messages handoff.
+/* Messaging for the whole portal · the client half of backend/src/messages.mjs.
  *
  * The panel is mounted once by the shell rather than by a page, because every
  * "Message" affordance in the design opens the same surface: the top nav's
- * icon, the bench cards, Home's presence rows, and any link to `#messages`.
+ * icon, the bench cards, the community member rows, and any `#messages` link.
  *
- * There is no messages API — backend/src has no route for one — so a
- * conversation is whatever the session appends to it, and every thread starts
- * empty: nobody is shown words a colleague never wrote. Two things follow,
- * both deliberate:
- *
- * 1. The roster is the real bench (who the directory lists) plus anyone a
- *    seeded thread names who is not on it. Posts are no longer such a source:
- *    every post has a portal author now (see lib/community.ts), so a post's
- *    author is already on the bench. COMMUNITY_THREADS is empty until a
- *    messages API lands, so today the roster is exactly the bench.
- * 2. Sending appends immediately. When the API lands, that append becomes the
- *    optimistic write and the reconcile follows it; nothing else here moves.
+ * Everything on screen is the server's answer plus what this session has
+ * written and not yet heard back about. Sending appends immediately — the
+ * optimistic write — and the acknowledgement folds it into the server copy,
+ * so a message never blinks out between "sent" and "confirmed". The server
+ * copy is polled while the panel is open, so a message written on the other
+ * side of a conversation arrives without a reload.
  */
 
 /* The signed-in person's id inside a conversation. Real people are keyed by
-   username, network people by name — neither can collide with this. */
+   username (an email), which cannot collide with this. */
 export const ME = "me";
-
-const NETWORK = "net:";
-
-/* The id a community/network person is addressed by. Exported so Home can
-   hand a presence row straight to openWith(). */
-export function networkId(name: string): string {
-  return NETWORK + name;
-}
 
 export interface MessagePerson {
   id: string;
@@ -56,10 +45,13 @@ export interface MessagePerson {
 }
 
 export interface ChatMsg {
+  id: string;
   /* A person id, or ME. */
   from: string;
   text: string;
   time: string;
+  /* Written here and not yet acknowledged by the server. */
+  pending?: boolean;
 }
 
 export interface Conversation {
@@ -69,6 +61,10 @@ export interface Conversation {
   name?: string;
   time: string;
   msgs: ChatMsg[];
+  /* ISO of the last activity; what the list sorts by. */
+  updated: string;
+  /* Opened here and not yet acknowledged by the server. */
+  pending?: boolean;
 }
 
 export type PanelMode = "list" | "new" | "thread";
@@ -77,6 +73,24 @@ export type PanelMode = "list" | "new" | "thread";
 export interface Segment {
   text: string;
   id: string | null;
+}
+
+/* What the API returns. Members include the signed-in person; `from` is a
+   person key. The provider translates both into the ME-relative shape the
+   components read. */
+interface ServerMsg {
+  id: string;
+  from: string;
+  text: string;
+  created: string;
+}
+
+interface ServerConvo {
+  id: string;
+  members: string[];
+  name?: string;
+  updated: string;
+  msgs: ServerMsg[];
 }
 
 /* ---------- pure helpers ---------- */
@@ -96,10 +110,6 @@ export function defaultName(firsts: string[]): string {
     firsts.slice(0, 2).join(", ") +
     (firsts.length > 2 ? ` +${firsts.length - 2}` : "")
   );
-}
-
-function convoKey(ids: string[]): string {
-  return `c_${[...ids].sort().join("|")}`;
 }
 
 function sameMembers(a: string[], b: string[]): boolean {
@@ -148,70 +158,39 @@ export function segments(text: string, people: MessagePerson[]): Segment[] {
   return out.length ? out : [{ text, id: null }];
 }
 
-/* ---------- the network seed ---------- */
-
-/* The people a seeded thread is with who are not on the bench — without them
-   a seeded conversation would list a row nobody can be identified in. Name is
-   all such a record has, so that is all this makes a card out of. */
-function networkPeople(meName: string): MessagePerson[] {
-  return Object.keys(COMMUNITY_THREADS)
-    .filter((who) => who !== meName)
-    .map((who) => ({
-      id: networkId(who),
-      name: who,
-      first: who.split(" ")[0],
-      initials: initialsOfName(who),
-      role: "",
-    }));
+/* The list row's clock: a time for today, a day for anything older. */
+function convoTime(updated: string, now: Date): string {
+  const then = new Date(updated);
+  if (Number.isNaN(then.getTime())) return "";
+  const midnight = new Date(now);
+  midnight.setHours(0, 0, 0, 0);
+  return then >= midnight ? messageTime(then) : notificationAge(updated, now);
 }
 
-/* Per-person suggestions above the composer, carried over from the dashboard
-   drawer. Only the seeded network threads have them; a bench conversation has
-   nothing to suggest, so the row is absent there. */
-const NETWORK_QUICK: Record<string, string[]> = Object.fromEntries(
-  Object.entries(COMMUNITY_THREADS).map(([who, t]) => [networkId(who), t.quick])
-);
+/* Poll cadence. Open, a reply should land while the reader is still looking
+   at the thread; closed, the list only needs to be roughly right by the time
+   it is opened, and the open itself refreshes. */
+const POLL_OPEN_MS = 5_000;
+const POLL_CLOSED_MS = 45_000;
 
-export function quickReplies(convo: Conversation | null): string[] {
-  if (!convo || convo.members.length !== 1) return [];
-  return NETWORK_QUICK[convo.members[0]] ?? [];
-}
-
-/* Conversations that already have something in them. An empty seeded thread
-   would show up in the list as a row nobody has ever written in, so those are
-   created on demand by openWith() instead. */
-function seedConversations(): Record<string, Conversation> {
-  const out: Record<string, Conversation> = {};
-  for (const [who, thread] of Object.entries(COMMUNITY_THREADS)) {
-    if (thread.messages.length === 0) continue;
-    const id = networkId(who);
-    const key = convoKey([id]);
-    out[key] = {
-      id: key,
-      members: [id],
-      time: thread.messages[thread.messages.length - 1].time,
-      msgs: thread.messages.map((m) => ({
-        from: m.fromMe ? ME : id,
-        text: m.text,
-        time: m.time,
-      })),
-    };
-  }
-  return out;
-}
+const PENDING = "pending:";
+const pendingKey = (ids: string[]) => PENDING + [...ids].sort().join("|");
 
 /* ---------- context ---------- */
 
 interface MessagesValue {
   mode: PanelMode | null;
   active: Conversation | null;
-  /* Most-said-in first, the way the design orders the list. */
+  /* Newest activity first. */
   conversations: Conversation[];
-  /* Everyone addressable: the bench plus the network. */
+  /* Everyone addressable — the bench, plus anyone offboarded who is still in
+     a conversation, so an old thread keeps its name. */
   roster: MessagePerson[];
   /* Just the bench — who a new chat can be started with. */
   directory: MessagePerson[];
   me: MessagePerson;
+  loading: boolean;
+  error: string | null;
   person: (id: string) => MessagePerson;
   title: (convo: Conversation) => string;
   groupPlaceholder: (ids: string[]) => string;
@@ -223,6 +202,7 @@ interface MessagesValue {
   close: () => void;
   send: (text: string) => void;
   rename: (name: string) => void;
+  refresh: () => Promise<void>;
 }
 
 const MessagesContext = createContext<MessagesValue | undefined>(undefined);
@@ -234,8 +214,35 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
 
   const [mode, setMode] = useState<PanelMode | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [convos, setConvos] =
-    useState<Record<string, Conversation>>(seedConversations);
+  const [server, setServer] = useState<Record<string, ServerConvo>>({});
+  const [pendingConvos, setPendingConvos] = useState<
+    Record<string, { members: string[]; name?: string }>
+  >({});
+  const [pendingMsgs, setPendingMsgs] = useState<
+    Record<string, { id: string; text: string; created: string }[]>
+  >({});
+  const [loadedAt, setLoadedAt] = useState(() => new Date());
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  /* A conversation this session opened and is still waiting on. send() on
+     one of these waits for the id before writing. */
+  const creating = useRef<Map<string, Promise<string | null>>>(new Map());
+  const generation = useRef(0);
+
+  /* ---------- people ---------- */
+
+  const toCard = useCallback(
+    (username: string, p: Person): MessagePerson => ({
+      id: username,
+      name: fullName(p),
+      first: p.firstName,
+      initials: initials(p),
+      role: roleLine(p, labs),
+      photo: p.photo,
+    }),
+    [labs]
+  );
 
   const meCard = useMemo<MessagePerson>(
     () => ({
@@ -250,35 +257,24 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   );
 
   /* The directory is exactly what the bench lists, minus yourself — you
-     cannot start a conversation with yourself. */
+     cannot start a conversation with yourself. Every role is on it: an Admin
+     is as messageable as a Contributor. */
   const directory = useMemo<MessagePerson[]>(
     () =>
       bench
-        .filter((p) => p.role === "Lab Leader" || p.role === "Contributor")
         .filter((p) => p.username !== me)
-        .map((p) => ({
-          id: p.username,
-          name: fullName(p),
-          first: p.firstName,
-          initials: initials(p),
-          role: roleLine(p, labs),
-          photo: p.photo,
-        }))
+        .map((p) => toCard(p.username, p))
         .sort((a, b) => a.name.localeCompare(b.name)),
-    [bench, labs, me]
+    [bench, me, toCard]
   );
 
-  /* The network is only there to keep the seeded threads legible. If a real
-     colleague ever shares a name with one of those records, the real person
-     wins outright — two rows reading "Marcus Kelley" would make every mention
-     of that name a coin flip. */
   const roster = useMemo<MessagePerson[]>(() => {
-    const taken = new Set(directory.map((p) => p.name));
-    return [
-      ...directory,
-      ...networkPeople(meName).filter((p) => !taken.has(p.name)),
-    ];
-  }, [directory, meName]);
+    const onBench = new Set(directory.map((p) => p.id));
+    const gone = Object.entries(people)
+      .filter(([u, p]) => u !== me && !onBench.has(u) && !isActive(p))
+      .map(([u, p]) => toCard(u, p));
+    return [...directory, ...gone];
+  }, [directory, people, me, toCard]);
 
   const byId = useMemo(() => {
     const map = new Map<string, MessagePerson>([[ME, meCard]]);
@@ -323,82 +319,280 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     [meCard, roster]
   );
 
-  /* Never list a conversation whose members cannot be named — that only
-     happens when a seeded record was displaced by a real person of the same
-     name, and a row of "Someone" is worse than no row. */
+  /* ---------- reading ---------- */
+
+  const refresh = useCallback(async () => {
+    if (!me) return;
+    const mine = ++generation.current;
+    try {
+      const data = await api<{ items: ServerConvo[] }>("/messages");
+      if (mine !== generation.current) return;
+      const next: Record<string, ServerConvo> = {};
+      for (const c of data.items ?? []) next[c.id] = c;
+      setServer(next);
+      setLoadedAt(new Date());
+      setError(null);
+    } catch (err) {
+      if (mine !== generation.current) return;
+      if (err instanceof ApiError && err.status === 401) return;
+      setError(
+        err instanceof ApiError ? err.message : "Could not load messages."
+      );
+    } finally {
+      if (mine === generation.current) setLoading(false);
+    }
+  }, [me]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+    const timer = window.setInterval(
+      () => void refresh(),
+      mode ? POLL_OPEN_MS : POLL_CLOSED_MS
+    );
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refresh, mode]);
+
+  /* ---------- the merged view ---------- */
+
+  const convos = useMemo<Record<string, Conversation>>(() => {
+    const out: Record<string, Conversation> = {};
+    const toMsg = (m: ServerMsg): ChatMsg => ({
+      id: m.id,
+      from: m.from === me ? ME : m.from,
+      text: m.text,
+      time: messageTime(new Date(m.created)),
+    });
+    const unsent = (key: string): ChatMsg[] =>
+      (pendingMsgs[key] ?? []).map((m) => ({
+        id: m.id,
+        from: ME,
+        text: m.text,
+        time: messageTime(new Date(m.created)),
+        pending: true,
+      }));
+
+    for (const c of Object.values(server)) {
+      const extra = unsent(c.id);
+      const updated = extra.length
+        ? pendingMsgs[c.id][pendingMsgs[c.id].length - 1].created
+        : c.updated;
+      out[c.id] = {
+        id: c.id,
+        members: c.members.filter((k) => k !== me),
+        name: c.name || undefined,
+        updated,
+        time: convoTime(updated, loadedAt),
+        msgs: [...c.msgs.map(toMsg), ...extra],
+      };
+    }
+    for (const [key, p] of Object.entries(pendingConvos)) {
+      const extra = unsent(key);
+      const updated = extra.length
+        ? pendingMsgs[key][pendingMsgs[key].length - 1].created
+        : new Date().toISOString();
+      out[key] = {
+        id: key,
+        members: p.members,
+        name: p.name || undefined,
+        updated,
+        time: "Now",
+        msgs: extra,
+        pending: true,
+      };
+    }
+    return out;
+  }, [server, pendingConvos, pendingMsgs, me, loadedAt]);
+
+  /* Never list a conversation whose members cannot be named: a row of
+     "Someone" is worse than no row. The roster carries offboarded people, so
+     this only bites on a key the portal has never heard of. */
   const conversations = useMemo(
     () =>
       Object.values(convos)
         .filter((c) => c.members.every((id) => byId.has(id)))
-        .sort((a, b) => b.msgs.length - a.msgs.length),
+        .sort((a, b) => b.updated.localeCompare(a.updated)),
     [convos, byId]
   );
 
   const active = activeId ? (convos[activeId] ?? null) : null;
 
+  /* A thread opened by id (a notification's link, a stale hash) that the
+     list does not hold falls back to the list rather than an empty header. */
+  useEffect(() => {
+    if (mode === "thread" && activeId && !loading && !convos[activeId]) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMode("list");
+      setActiveId(null);
+    }
+  }, [mode, activeId, loading, convos]);
+
+  /* ---------- navigation ---------- */
+
   const openList = useCallback(() => {
     setMode("list");
     setActiveId(null);
-  }, []);
+    void refresh();
+  }, [refresh]);
 
   const openNew = useCallback(() => setMode("new"), []);
 
-  const openConversation = useCallback((id: string) => {
-    setActiveId(id);
-    setMode("thread");
-  }, []);
+  const openConversation = useCallback(
+    (id: string) => {
+      setActiveId(id);
+      setMode("thread");
+      void refresh();
+    },
+    [refresh]
+  );
 
   const close = useCallback(() => {
     setMode(null);
     setActiveId(null);
   }, []);
 
+  /* ---------- writing ---------- */
+
+  /* Fold an acknowledged conversation into the server copy right away, so it
+     does not depend on the next poll to exist. */
+  const absorbConvo = useCallback((c: ServerConvo) => {
+    setServer((prev) => ({ ...prev, [c.id]: c }));
+  }, []);
+
   /* Open the conversation these people already have, whoever created it and
-     in whatever order it stored them; otherwise start an empty one. */
+     in whatever order it stored them; otherwise ask the server for one. The
+     panel opens on it at once, and the id is swapped for the real one when
+     the answer lands. */
   const openWith = useCallback(
     (ids: string[], name?: string) => {
-      if (ids.length === 0) return;
+      const others = [...new Set(ids.filter((id) => id && id !== me && id !== ME))];
+      if (others.length === 0) return;
       const existing = Object.keys(convos).find((k) =>
-        sameMembers(convos[k].members, ids)
+        sameMembers(convos[k].members, others)
       );
       if (existing) {
         openConversation(existing);
         return;
       }
-      const key = convoKey(ids);
+
+      const key = pendingKey(others);
       const nm = (name ?? "").trim();
-      setConvos((prev) => ({
+      setPendingConvos((prev) => ({
         ...prev,
-        [key]: {
-          id: key,
-          members: ids,
-          time: "Now",
-          msgs: [],
-          name: nm || undefined,
-        },
+        [key]: { members: others, name: nm || undefined },
       }));
-      openConversation(key);
+      setActiveId(key);
+      setMode("thread");
+
+      const job = (async () => {
+        try {
+          const c = await api<ServerConvo>("/messages", {
+            method: "POST",
+            body: JSON.stringify({ members: others, name: nm || undefined }),
+          });
+          absorbConvo(c);
+          setPendingConvos((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          setPendingMsgs((prev) => {
+            if (!prev[key]) return prev;
+            const next = { ...prev, [c.id]: [...(prev[c.id] ?? []), ...prev[key]] };
+            delete next[key];
+            return next;
+          });
+          setActiveId((cur) => (cur === key ? c.id : cur));
+          setError(null);
+          return c.id;
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) return null;
+          setError(
+            err instanceof ApiError ? err.message : "Could not start the conversation."
+          );
+          setPendingConvos((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          setPendingMsgs((prev) => {
+            const next = { ...prev };
+            delete next[key];
+            return next;
+          });
+          setActiveId((cur) => (cur === key ? null : cur));
+          setMode((m) => (m === "thread" ? "list" : m));
+          return null;
+        } finally {
+          creating.current.delete(key);
+        }
+      })();
+      creating.current.set(key, job);
     },
-    [convos, openConversation]
+    [convos, me, openConversation, absorbConvo]
   );
 
   const send = useCallback(
     (text: string) => {
       const body = text.trim();
       if (!body || !activeId) return;
-      const time = messageTime(new Date());
-      setConvos((prev) => {
-        const convo = prev[activeId];
-        if (!convo) return prev;
-        return {
-          ...prev,
-          [activeId]: {
-            ...convo,
-            time,
-            msgs: [...convo.msgs, { from: ME, text: body, time }],
-          },
-        };
-      });
+      const key = activeId;
+      const temp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+      const created = new Date().toISOString();
+      setPendingMsgs((prev) => ({
+        ...prev,
+        [key]: [...(prev[key] ?? []), { id: temp, text: body, created }],
+      }));
+
+      void (async () => {
+        /* A message typed into a conversation the server has not yet named
+           waits for the name; the pending row it sits under is moved to the
+           real id by openWith's own reconcile. */
+        let id: string | null = key;
+        if (key.startsWith(PENDING)) {
+          id = (await creating.current.get(key)) ?? null;
+        }
+        const dropTemp = (from: string) =>
+          setPendingMsgs((prev) => {
+            if (!prev[from]) return prev;
+            const rest = prev[from].filter((m) => m.id !== temp);
+            const next = { ...prev };
+            if (rest.length) next[from] = rest;
+            else delete next[from];
+            return next;
+          });
+        if (!id) {
+          dropTemp(key);
+          return;
+        }
+        try {
+          const m = await api<ServerMsg>(`/messages/${id}/send`, {
+            method: "POST",
+            body: JSON.stringify({ text: body }),
+          });
+          setServer((prev) => {
+            const c = prev[id];
+            if (!c || c.msgs.some((x) => x.id === m.id)) return prev;
+            return {
+              ...prev,
+              [id]: { ...c, updated: m.created, msgs: [...c.msgs, m] },
+            };
+          });
+          dropTemp(id);
+          setError(null);
+        } catch (err) {
+          dropTemp(id);
+          if (err instanceof ApiError && err.status === 401) return;
+          setError(
+            err instanceof ApiError ? err.message : "Could not send the message."
+          );
+        }
+      })();
     },
     [activeId]
   );
@@ -406,16 +600,28 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   /* A blank name is not a name — it reverts the group to the members' own. */
   const rename = useCallback(
     (name: string) => {
-      if (!activeId) return;
+      if (!activeId || activeId.startsWith(PENDING)) return;
+      const id = activeId;
       const nm = name.trim();
-      setConvos((prev) => {
-        const convo = prev[activeId];
-        if (!convo) return prev;
-        const next: Conversation = { ...convo, name: nm || undefined };
-        return { ...prev, [activeId]: next };
+      setServer((prev) => {
+        const c = prev[id];
+        if (!c) return prev;
+        return { ...prev, [id]: { ...c, name: nm || undefined } };
       });
+      void api<ServerConvo>(`/messages/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: nm }),
+      })
+        .then(absorbConvo)
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) return;
+          setError(
+            err instanceof ApiError ? err.message : "Could not rename the group."
+          );
+          void refresh();
+        });
     },
-    [activeId]
+    [activeId, absorbConvo, refresh]
   );
 
   const value = useMemo<MessagesValue>(
@@ -426,6 +632,8 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       roster,
       directory,
       me: meCard,
+      loading,
+      error,
       person,
       title,
       groupPlaceholder,
@@ -437,6 +645,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       close,
       send,
       rename,
+      refresh,
     }),
     [
       mode,
@@ -445,6 +654,8 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       roster,
       directory,
       meCard,
+      loading,
+      error,
       person,
       title,
       groupPlaceholder,
@@ -456,6 +667,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       close,
       send,
       rename,
+      refresh,
     ]
   );
 

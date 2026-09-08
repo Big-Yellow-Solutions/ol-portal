@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import {
   Sheet,
   SheetContent,
@@ -33,19 +34,28 @@ const CIRCLE =
   "flex size-8 flex-none cursor-pointer items-center justify-center rounded-full border border-hair-strong bg-white text-violet-deep transition-colors hover:bg-violet-pale";
 
 export function MessagesPanel() {
-  const { mode, active, close, openList } = useMessages();
+  const { mode, active, error, close, openList, openConversation } =
+    useMessages();
+  const pathname = usePathname();
 
   /* Every portal screen links to messaging as `#messages`, including screens
      that are not this one — so honour the hash on arrival and on any later
-     click of such a link while already here. */
+     click of such a link while already here. `#messages/<id>` (what a
+     notification links to) opens that thread. The pathname is a dependency
+     because a router push does not fire hashchange, and this panel outlives
+     the page it was reached from. */
   useEffect(() => {
     const openIfHashed = () => {
-      if (window.location.hash === "#messages") openList();
+      const hash = window.location.hash;
+      if (!hash.startsWith("#messages")) return;
+      const thread = hash.match(/^#messages\/([^/?#]+)/);
+      if (thread) openConversation(decodeURIComponent(thread[1]));
+      else if (hash === "#messages") openList();
     };
     openIfHashed();
     window.addEventListener("hashchange", openIfHashed);
     return () => window.removeEventListener("hashchange", openIfHashed);
-  }, [openList]);
+  }, [openList, openConversation, pathname]);
 
   return (
     <Sheet open={!!mode} onOpenChange={(open) => !open && close()}>
@@ -59,6 +69,14 @@ export function MessagesPanel() {
         className="w-full gap-0 border-l border-hair bg-white p-0 shadow-lift"
       >
         <Header key={`${mode}:${active?.id ?? ""}`} />
+        {error && (
+          <p
+            role="alert"
+            className="m-0 flex-none border-b border-hair bg-[#fff4f2] px-[18px] py-2 text-xs text-[#b3261e]"
+          >
+            {error}
+          </p>
+        )}
         {mode === "list" && <ConversationList />}
         {mode === "new" && <NewChat />}
         {mode === "thread" && active && <Thread key={active.id} />}

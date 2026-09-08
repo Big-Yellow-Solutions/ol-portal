@@ -27,6 +27,7 @@ import * as courses from "./courses.mjs";
 import * as guides from "./guides.mjs";
 import * as community from "./community.mjs";
 import * as notifications from "./notifications.mjs";
+import * as messages from "./messages.mjs";
 import { fullName } from "./util.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
@@ -526,6 +527,16 @@ async function route(ctx, method, path, seg, body) {
      resolved identity, so neither takes a person to read as a parameter. */
   if (method === "GET" && path === "/notifications") return await notifications.listNotifications(ctx);
   if (method === "POST" && path === "/notifications/read") return await notifications.markRead(ctx, body);
+  /* Messages. Membership is checked on every route from the JWT-resolved
+     identity; the conversation id in the path names WHICH thread, never WHO
+     is reading it. `/send` sits before the bare `{id}` PATCH for the same
+     reason the resource sub-routes do. */
+  if (method === "GET" && path === "/messages") return await messages.listConversations(ctx);
+  if (method === "POST" && path === "/messages") return await messages.createConversation(ctx, body);
+  if (method === "POST" && seg[0] === "messages" && seg[1] && seg[2] === "send")
+    return await messages.sendMessage(ctx, decodeURIComponent(seg[1]), body);
+  if (method === "PATCH" && seg[0] === "messages" && seg[1] && !seg[2])
+    return await messages.renameConversation(ctx, decodeURIComponent(seg[1]), body);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);
   if (method === "POST" && path === "/recurrences/run") return await recurring.runNow(ctx);
   if (method === "GET" && path === "/kb") return await kb.listKb(ctx);
