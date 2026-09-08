@@ -30,7 +30,7 @@
    error event on an otherwise successful response. */
 
 import { CognitoJwtVerifier } from "aws-jwt-verify";
-import { verifyWorkosToken } from "./authz.mjs";
+import { verifyWorkosToken, sessionVerified } from "./authz.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 import { runOptimist } from "./optimist.mjs";
 
@@ -95,6 +95,11 @@ async function validate(event) {
     // for all of them.
     return { error: { status: 401, message: "Session expired; sign in again" } };
   }
+
+  /* No authorizer in front of this URL, so the emailed-code gate that the
+     API's authorizer applies (authz.mjs) is applied here by hand. */
+  if (PROVIDER === "workos" && !(await sessionVerified(claims.sid)))
+    return { error: { status: 403, message: "Confirm your sign-in with the emailed code first" } };
 
   const { username, role } = identityFromClaims(claims);
   const { ctx, error } = await buildContext({

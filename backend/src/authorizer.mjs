@@ -13,7 +13,7 @@
 
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { decodeJwt } from "jose";
-import { verifyWorkosToken } from "./authz.mjs";
+import { verifyWorkosToken, sessionVerified, isVerifyRoute } from "./authz.mjs";
 import { doc, TABLE, writeAudit, AUDIT_TTL_DAYS } from "./util.mjs";
 
 const DENY = { isAuthorized: false };
@@ -113,8 +113,25 @@ export const handler = async event => {
     log("sign-in audit write failed", err.message);
   }
 
+  /* The emailed code (authz.mjs). A session that has not entered its code is
+     admitted to the /auth/verify routes and nothing else. This is a deny, not
+     a "verified: false" hint passed downstream, so a route added later is
+     covered without remembering to check. The client learns the state from
+     GET /auth/verify before it asks for anything else, so a well-behaved
+     session never sees the bare 403 this produces. */
+  const sid = claims.sid || "";
+  let verified;
+  try {
+    verified = await sessionVerified(sid);
+  } catch (err) {
+    log("verification lookup failed", err.message);
+    return DENY;
+  }
+  const path = (event.rawPath || "").replace(/\/+$/, "");
+  if (!verified && !isVerifyRoute(path)) return DENY;
+
   return {
     isAuthorized: true,
-    context: { email, role, sid: claims.sid || "", sub: claims.sub || "" }
+    context: { email, role, sid, sub: claims.sub || "", verified: verified ? "true" : "false" }
   };
 };

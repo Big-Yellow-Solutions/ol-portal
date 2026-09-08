@@ -28,6 +28,7 @@ import * as guides from "./guides.mjs";
 import * as community from "./community.mjs";
 import * as notifications from "./notifications.mjs";
 import * as messages from "./messages.mjs";
+import * as verify from "./verify.mjs";
 import { fullName } from "./util.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
@@ -616,6 +617,23 @@ export const handler = async event => {
       if (rawMethod === "GET" && signMatch[2] === "/docusign-view") return await docusign.contractEmbeddedView(signMatch[1]);
       if (rawMethod === "GET" && !signMatch[2]) return await signing.signView(signMatch[1]);
       if (rawMethod === "POST" && !signMatch[2]) return await signing.signSubmit(signMatch[1], publicBody, meta);
+      return resp(404, { error: "no such route" });
+    }
+
+    /* The emailed second factor. These three routes are the only ones the
+       authorizer admits an unconfirmed session to, and they run off the
+       authorizer's own context — email and sid straight from the token —
+       rather than a portal context, so a person whose PERSON row is missing
+       still gets a clear answer from the portal's 403 afterwards instead of
+       being stuck behind a code they can never use. Only the WorkOS
+       authorizer produces this context; under Cognito the routes are moot. */
+    if (verify.isVerifyRoute(rawPath)) {
+      const auth = event.requestContext?.authorizer?.lambda || {};
+      const who = { email: String(auth.email || "").toLowerCase(), sid: String(auth.sid || "") };
+      if (!who.email || !who.sid) return resp(400, { error: "This sign-in has no session to confirm" });
+      if (rawMethod === "GET" && rawPath === "/auth/verify") return await verify.status(who);
+      if (rawMethod === "POST" && rawPath === "/auth/verify/send") return await verify.send(who);
+      if (rawMethod === "POST" && rawPath === "/auth/verify") return await verify.check({ ...who, code: publicBody?.code });
       return resp(404, { error: "no such route" });
     }
 

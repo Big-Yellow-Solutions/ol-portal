@@ -11,6 +11,8 @@
    by hand and the verification done in code. */
 
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
+import { doc, TABLE } from "./util.mjs";
 
 /* AuthKit access tokens are issued by a CLIENT-SCOPED url:
 
@@ -74,4 +76,46 @@ export async function verifyWorkosToken(token) {
    caller does not reach into module state. */
 export function resetJwksCache() {
   jwks = undefined;
+}
+
+/* ---------- the emailed second factor ----------
+
+   AuthKit's only MFA factor is TOTP, and the portal's rule (9/8/26) is that
+   every sign-in is confirmed by a code emailed to the account's address. So
+   the step is the portal's own: a WorkOS session is admitted only to the
+   /auth/verify routes until its code has been entered (verify.mjs runs those),
+   and both entry points — the API Gateway authorizer and The Optimist's
+   Function URL — ask here first.
+
+   One row per WorkOS session, keyed on the token's `sid`. A refresh keeps its
+   sid, so a verified session stays verified for its life; signing in again
+   mints a new sid, and with it a new challenge. That is what makes "a code on
+   every sign-in" true without the portal tracking sign-ins itself. */
+export const MFA_PK = "MFA";
+
+export const isVerifyRoute = path => /^\/auth\/verify(\/|$)/.test(path || "");
+
+/* Verified sids this container has already confirmed. A session cannot become
+   unverified again, so a positive answer is safe to keep; a negative one is
+   always re-read, so a code entered through another container counts on the
+   very next request. */
+const verifiedSids = new Set();
+const VERIFIED_CAP = 500;
+
+export function markVerified(sid) {
+  if (verifiedSids.size > VERIFIED_CAP) verifiedSids.clear();
+  verifiedSids.add(sid);
+}
+
+export async function sessionVerified(sid) {
+  if (!sid) return false;
+  if (verifiedSids.has(sid)) return true;
+  const { Item } = await doc.send(new GetCommand({ TableName: TABLE, Key: { pk: MFA_PK, sk: sid } }));
+  if (!Item?.verified) return false;
+  markVerified(sid);
+  return true;
+}
+
+export function resetVerifiedCache() {
+  verifiedSids.clear();
 }

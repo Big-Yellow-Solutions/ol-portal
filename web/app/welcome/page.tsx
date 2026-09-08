@@ -11,16 +11,21 @@ import { useAuth } from "@/lib/auth";
 import { PortalDataProvider, usePortalData, WELCOME_SKIPPED_KEY } from "@/lib/portal-data";
 import { api } from "@/lib/api";
 import { readPhoto } from "@/lib/photo";
+import { useSessionVerified, verifyPath } from "@/lib/verify";
 
 export default function WelcomePage() {
   const { status } = useAuth();
   const router = useRouter();
+  // Same gate as the portal layout: this page loads portal data too.
+  const verification = useSessionVerified(status);
 
   useEffect(() => {
     if (status === "signedOut") router.replace("/login");
-  }, [status, router]);
+    else if (status === "signedIn" && verification === "needed")
+      router.replace(verifyPath("/welcome"));
+  }, [status, verification, router]);
 
-  if (status !== "signedIn") {
+  if (status !== "signedIn" || verification !== "ok") {
     return (
       <div className="flex min-h-screen items-center justify-center bg-violet-deep text-white">
         Loading…
