@@ -30,14 +30,23 @@
    validated against the PERSON partition so a chat cannot be opened with a
    key that is not a person.
 
+   A message also goes out as an email to each other member, through the same
+   SES sender every proposal and contract already leaves by (email.mjs). It is
+   from the writer's own address, so replying to the email reaches the writer
+   even though the words live in the portal. One email per recipient per
+   conversation per EMAIL_COOLDOWN, tracked on the CONVO row (`emailed`), so a
+   back-and-forth does not become a flood — the bell carries every message,
+   the inbox carries "there is something waiting".
+
    No GSI on this table, so "my conversations" is a scan of the CONVO
    partition filtered by membership — the same shape every other list here
    takes, and the partition is one row per conversation the whole portal has
    ever had, not one per message. */
 
-import { resp, get, put, listType, fullName, doc, TABLE } from "./util.mjs";
+import { resp, get, put, listType, fullName, esc, doc, TABLE } from "./util.mjs";
 import { QueryCommand } from "@aws-sdk/lib-dynamodb";
 import { notify, mentionKeys } from "./notifications.mjs";
+import { sendClientEmail } from "./email.mjs";
 import { createHash } from "node:crypto";
 
 const MAX_TEXT = 4000;
@@ -46,6 +55,11 @@ const MAX_MEMBERS = 20;
 /* Per thread, newest kept. Older rows stay in the table; nothing yet asks
    for them. */
 const MAX_MSGS = 200;
+/* The quiet period between emails to one person about one conversation. */
+const EMAIL_COOLDOWN_MS = 15 * 60_000;
+
+/* Swappable so a test can watch the outbox without an SES client. */
+export const mailer = { send: sendClientEmail };
 
 const now = () => new Date().toISOString();
 const str = (v, max) => String(v ?? "").trim().slice(0, max);
@@ -77,7 +91,8 @@ const msgPartition = id => `MSG#${id}`;
 const isMember = (convo, key) => Array.isArray(convo?.members) && convo.members.includes(key);
 
 const publicMsg = ({ pk, sk, ...rest }) => ({ id: sk, ...rest });
-const publicConvo = ({ pk, sk, ...rest }, msgs) => ({ id: sk, ...rest, msgs });
+/* `emailed` is the cooldown ledger — bookkeeping, not conversation. */
+const publicConvo = ({ pk, sk, emailed, ...rest }, msgs) => ({ id: sk, ...rest, msgs });
 
 /* The newest MAX_MSGS of a thread, oldest first, as the panel reads them.
    Read newest-first so the cap keeps the recent end, then sorted by key
@@ -175,11 +190,19 @@ export async function sendMessage(ctx, id, body) {
     created
   };
   await put(msg);
-  await put({ ...convo, updated: created, lastText: text.slice(0, 200), lastFrom: ctx.me.sk });
+
+  const emailed = { ...(convo.emailed || {}) };
+  const due = convo.members.filter(k =>
+    k !== ctx.me.sk && Date.parse(emailed[k] || 0) + EMAIL_COOLDOWN_MS <= Date.parse(created));
+  for (const k of due) emailed[k] = created;
+
+  await put({
+    ...convo, updated: created, lastText: text.slice(0, 200), lastFrom: ctx.me.sk, emailed
+  });
   log("messages.sent", { actor: ctx.me.sk, conversation: id, chars: text.length });
   metric("MessageSent");
 
-  await tell(ctx, convo, text);
+  await tell(ctx, convo, text, due);
   return resp(201, publicMsg(msg));
 }
 
@@ -202,7 +225,7 @@ export async function renameConversation(ctx, id, body) {
    hears that they were named, which is the louder of the two and what the
    bubble's "was notified" line promises. A name that is not in the
    conversation is not told — they could not open what it points at. */
-async function tell(ctx, convo, text) {
+async function tell(ctx, convo, text, emailTo = []) {
   try {
     const others = convo.members.filter(k => k !== ctx.me.sk);
     if (!others.length) return;
@@ -214,6 +237,12 @@ async function tell(ctx, convo, text) {
     const group = convo.members.length > 2;
     const where = group ? (convo.name || "a group chat") : "Direct message";
     const href = `/community#messages/${convo.sk}`;
+
+    await Promise.all(emailTo.map(k => email({
+      ctx, convo, text, actorName, group, href,
+      to: people.find(p => p.sk === k),
+      mentioned: named.includes(k)
+    })));
 
     await Promise.all([
       notify({
@@ -230,6 +259,50 @@ async function tell(ctx, convo, text) {
   } catch (err) {
     console.error(JSON.stringify({
       level: "warn", message: "message notify failed", conversation: convo.sk, detail: err.message
+    }));
+  }
+}
+
+/* The email half of a message. Best-effort like the bell: a bounced address
+   must not turn a sent message into a 500, so this logs and returns.
+
+   The address is the person's own `email`, or their key when the key is an
+   address (every WorkOS-era account is keyed by email). A record with
+   neither has no inbox to reach. */
+async function email({ ctx, convo, text, actorName, group, href, to, mentioned }) {
+  const address = String(to?.email || (String(to?.sk || "").includes("@") ? to.sk : "")).trim();
+  if (!address) return;
+
+  const senderEmail = String(ctx.me.email || (String(ctx.me.sk).includes("@") ? ctx.me.sk : "")).trim();
+  const url = `${process.env.FRONTEND_URL}${href}`;
+  const title = group ? (convo.name || "your group chat") : null;
+  const subject = mentioned
+    ? (group ? `${actorName} mentioned you in ${title}` : `${actorName} mentioned you in a message`)
+    : (group ? `New message in ${title} from ${actorName}` : `${actorName} sent you a message`);
+  const lead = mentioned
+    ? `${actorName} mentioned you in ${group ? title : "a message"} on the Optimistic Labs Portal:`
+    : `${actorName} sent you a message ${group ? `in ${title} ` : ""}on the Optimistic Labs Portal:`;
+  const footer = senderEmail
+    ? `Reply in the portal, or reply to this email to reach ${actorName} directly.`
+    : "Reply in the portal.";
+
+  const plain = `${lead}\n\n"${text}"\n\nOpen the conversation: ${url}\n\n${footer}`;
+  const html =
+    `<p>${esc(lead)}</p>` +
+    `<blockquote style="margin:0 0 16px;padding:12px 16px;border-left:3px solid #7c6df5;background:#f6f4ff;color:#111">${esc(text).replace(/\n/g, "<br>")}</blockquote>` +
+    `<p><a href="${esc(url)}">Open the conversation</a></p>` +
+    `<p style="color:#666;font-size:13px">${esc(footer)}</p>`;
+
+  try {
+    await mailer.send({
+      sender: { name: actorName, email: senderEmail || undefined },
+      toEmail: address, subject, text: plain, html
+    });
+    log("messages.emailed", { actor: ctx.me.sk, conversation: convo.sk, to: to.sk, mentioned });
+    metric("MessageEmailed");
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: "warn", message: "message email failed", conversation: convo.sk, to: to.sk, detail: err.message
     }));
   }
 }

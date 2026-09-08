@@ -27,8 +27,12 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 
 const { doc } = await import("../src/util.mjs");
 const {
-  listConversations, createConversation, sendMessage, renameConversation, conversationId
+  listConversations, createConversation, sendMessage, renameConversation, conversationId, mailer
 } = await import("../src/messages.mjs");
+
+/* The outbox, in memory. Nothing here reaches SES. */
+const outbox = [];
+mailer.send = async m => { outbox.push(m); };
 const { listNotifications } = await import("../src/notifications.mjs");
 
 /* ---------- the table, in memory ---------- */
@@ -63,12 +67,14 @@ doc.send = async cmd => {
 const PEOPLE = [
   { sk: "teddy@optimisticlabs.com", firstName: "Teddy", lastName: "Schwarz", role: "Admin", labs: [] },
   { sk: "hello@optimisticlabs.com", firstName: "Liz", lastName: "Russell", role: "Admin", labs: [] },
-  { sk: "cass", firstName: "Cass", lastName: "Ito", role: "Contributor", labs: ["sports"] },
+  { sk: "cass", firstName: "Cass", lastName: "Ito", role: "Contributor", labs: ["sports"], email: "cass@example.org" },
+  { sk: "quiet", firstName: "Quiet", lastName: "Person", role: "Contributor", labs: [] },
   { sk: "gone", firstName: "Gone", lastName: "Person", role: "Contributor", labs: [], active: false }
 ];
 
 const reset = () => {
   rows.clear();
+  outbox.length = 0;
   for (const p of PEOPLE) rows.set(rowKey("PERSON", p.sk), { pk: "PERSON", ...p });
 };
 
@@ -179,4 +185,73 @@ test("messages come back oldest first and the list is newest-activity first", as
   const list = body(await listConversations(TEDDY)).items;
   assert.deepEqual(list.map(c => c.id), [b, a]);
   assert.deepEqual(list[1].msgs.map(m => m.text), ["one", "two"]);
+});
+
+test("the recipient gets an email from the writer's own address, and the writer does not", async () => {
+  reset();
+  process.env.FRONTEND_URL = "https://portal.test";
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  await sendMessage(TEDDY, id, { text: "lunch?" });
+
+  assert.equal(outbox.length, 1);
+  const m = outbox[0];
+  assert.equal(m.toEmail, "hello@optimisticlabs.com");
+  assert.equal(m.sender.email, "teddy@optimisticlabs.com");
+  assert.equal(m.sender.name, "Teddy Schwarz");
+  assert.equal(m.subject, "Teddy Schwarz sent you a message");
+  assert.match(m.text, /"lunch\?"/);
+  assert.match(m.text, new RegExp(`https://portal.test/community#messages/${id}`));
+  assert.match(m.html, /Open the conversation/);
+});
+
+test("a mention says so in the subject, and a group names itself", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk, CASS.me.sk], name: "Launch" })).id;
+  await sendMessage(TEDDY, id, { text: "@Cass can you own this?" });
+
+  const to = Object.fromEntries(outbox.map(m => [m.toEmail, m.subject]));
+  assert.equal(to["cass@example.org"], "Teddy Schwarz mentioned you in Launch");
+  assert.equal(to["hello@optimisticlabs.com"], "New message in Launch from Teddy Schwarz");
+});
+
+test("one email per person per conversation per cooldown; the bell still rings every time", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  await sendMessage(TEDDY, id, { text: "one" });
+  await sendMessage(TEDDY, id, { text: "two" });
+  await sendMessage(TEDDY, id, { text: "three" });
+  assert.equal(outbox.length, 1);
+  assert.equal(body(await listNotifications(LIZ)).items.length, 3);
+
+  /* Liz answering restarts nothing for her, but Teddy has not been emailed
+     yet, so her first reply reaches his inbox. */
+  await sendMessage(LIZ, id, { text: "yes" });
+  assert.equal(outbox.length, 2);
+  assert.equal(outbox[1].toEmail, "teddy@optimisticlabs.com");
+
+  /* Once the quiet period has passed, the next message emails again. */
+  const convo = rows.get(rowKey("CONVO", id));
+  convo.emailed[LIZ.me.sk] = new Date(Date.now() - 16 * 60_000).toISOString();
+  await sendMessage(TEDDY, id, { text: "still there?" });
+  assert.equal(outbox.length, 3);
+  assert.equal(outbox[2].toEmail, "hello@optimisticlabs.com");
+});
+
+test("a person with no address gets the bell and no email; a failed send is not a failed message", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: ["quiet"] })).id;
+  const r = await sendMessage(TEDDY, id, { text: "hi" });
+  assert.equal(r.statusCode, 201);
+  assert.equal(outbox.length, 0);
+  assert.equal(body(await listNotifications(as("quiet"))).items.length, 1);
+
+  const id2 = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  const real = mailer.send;
+  mailer.send = async () => { throw new Error("SES down"); };
+  try {
+    const r2 = await sendMessage(TEDDY, id2, { text: "hi" });
+    assert.equal(r2.statusCode, 201);
+  } finally {
+    mailer.send = real;
+  }
 });
