@@ -2,8 +2,13 @@
    Pipeline's Companies tab, and the billing entities a deal can point at.
 
    HubSpot's export carries no individuals (that is its separate "Contacts"
-   export), so nothing here touches CONTACT. Run the Contacts export through a
-   sibling importer later and link each person to their company by domain.
+   export). The one exception: a company with a phone on file gets a primary
+   contact carrying that number, so the number is reachable from a deal. The
+   export names no person, so that contact is a placeholder named after the
+   company with the title "Main line" — rename it, or replace it from the
+   Contacts export, and the number stays. Only HubSpot-sourced companies that
+   still have no primary contact get one, so a re-run after someone has
+   hand-picked a real person leaves their choice alone.
 
    Column mapping (HubSpot → COMPANY):
      Company name   → name      blank names fall back to the website's domain,
@@ -155,13 +160,40 @@ for (const r of rows) {
   });
 }
 
+/* ---------- primary contacts for the companies with a phone ----------
+
+   Shape mirrors createContact in src/contacts.mjs, including its side effect
+   of becoming the company's primary contact when it has none. Companies
+   created above are stamped in memory before their own write, so they go in
+   with the link already set; companies already in the table get a second
+   write with the link added. */
+const contacts = await query("CONTACT");
+let maxCt = contacts.reduce((m, c) => Math.max(m, parseInt(c.sk.replace(/\D/g, ""), 10) || 0), 0);
+const contactCreates = [], companyLinks = [];
+for (const company of [...existing, ...creates]) {
+  if (company.source !== "hubspot" || !company.phone || company.contactId) continue;
+  const id = "CT-" + String(++maxCt).padStart(3, "0");
+  contactCreates.push({
+    pk: "CONTACT", sk: id, name: company.name, title: "Main line",
+    companyId: company.sk, phone: company.phone, email: "",
+    createdBy: actor, created: stamp, updated: stamp,
+    source: "hubspot"
+  });
+  company.contactId = id;
+  if (!creates.includes(company)) companyLinks.push({ ...company, updated: stamp });
+}
+
 console.log(`${rows.length} rows in ${csvPath}; ${existing.length} companies already in ${TABLE}\n`);
 for (const c of creates)
   console.log(`  + ${c.sk}  ${c.name}${c.kind ? `  · ${c.kind}` : ""}${c.phone ? `  · ${c.phone}` : ""}${c.website ? `  · ${c.website}` : ""}`);
 for (const s of skips) console.log(`  - skip  ${s.name}  (${s.why})`);
-console.log(`\n${creates.length} to create, ${skips.length} skipped`);
+for (const c of contactCreates)
+  console.log(`  + ${c.sk}  ${c.name} · ${c.title} · ${c.phone}  → primary contact of ${c.companyId}`);
+console.log(`\n${creates.length} companies to create, ${skips.length} skipped; ${contactCreates.length} primary contacts to create`);
 
 if (!confirm) { console.log("\nDry run. Re-run with --confirm to write."); process.exit(0); }
 
 for (const item of creates) await doc.send(new PutCommand({ TableName: TABLE, Item: item }));
-console.log(`\nWrote ${creates.length} companies to ${TABLE} as ${actor}.`);
+for (const item of contactCreates) await doc.send(new PutCommand({ TableName: TABLE, Item: item }));
+for (const item of companyLinks) await doc.send(new PutCommand({ TableName: TABLE, Item: item }));
+console.log(`\nWrote ${creates.length} companies and ${contactCreates.length} primary contacts to ${TABLE} as ${actor}.`);
