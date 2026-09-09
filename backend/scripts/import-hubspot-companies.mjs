@@ -22,9 +22,11 @@
    the hand-entered "Independent Center".
 
    The record shape mirrors createCompany in src/contacts.mjs exactly, plus
-   the extra columns above. `createdBy` is the Admin running the import, which
-   is what keeps the rows in a Lab Leader's scope until a deal points at them
-   (see labScope there).
+   the extra columns above. `createdBy` is the Admin running the import, so
+   the rows are visible to Admins only until a deal in a Lab Leader's lab
+   points at one — labScope in contacts.mjs only widens a Lab Leader's slice
+   by records they created themselves or that their deals reach. Pass a Lab
+   Leader's email to --as only if every row should land in their scope.
 
    Usage:
      node scripts/import-hubspot-companies.mjs --csv path.csv             # dry run
