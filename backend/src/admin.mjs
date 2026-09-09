@@ -51,7 +51,7 @@ export async function listPortalUsers(ctx) {
     for (const p of people.Items || []) {
       if (seen.has(p.sk)) continue;
       users.push(withProfile({
-        username: p.sk, email: p.email || "", status: "NO_ACCOUNT", created: "", mfaEnrolled: false
+        username: p.sk, email: p.email || "", status: "NO_ACCOUNT", created: "", authenticator: "off"
       }, p));
     }
   }
@@ -71,7 +71,18 @@ const withProfile = (account, person) => ({
      not the same thing at all, and only the PERSON record can tell them apart,
      so the status is overridden here rather than inferred on the page. */
   active: person?.active !== false,
-  status: person?.active === false ? "DEACTIVATED" : account.status
+  status: person?.active === false ? "DEACTIVATED" : account.status,
+  /* The portal's real second factor, and the one the Accounts page reports.
+     It is not a per-account setting anybody can turn off: authz.mjs admits a
+     WorkOS session to nothing but /auth/verify until the code verify.mjs
+     emails has been entered, so it holds for every account that can sign in
+     at all — and for none that cannot. Derived here rather than on the page
+     because the rule lives on this side.
+
+     `authenticator` rides along untouched from the directory. That one is a
+     TOTP app in Cognito or WorkOS, which this portal never asks anyone to
+     enrol; it is reported as the extra it is, not as the whole answer. */
+  mfaEmailCode: account.status === "CONFIRMED" && person?.active !== false
 });
 
 /* ---------- invites (PRD 2.2) ----------
@@ -275,7 +286,13 @@ const sameLabs = (a, b) => {
 
 /* PRD 2.5 lost-device recovery: admin resets access after an out-of-band
    identity check. What "reset" does is the directory's business (see
-   directory.mjs); the portal profile is untouched either way. */
+   directory.mjs); the portal profile is untouched either way.
+
+   Under WorkOS that is only a TOTP app, and since the portal never asks
+   anyone to enrol one, the ordinary answer here is 409. The message carries
+   the way forward rather than just the refusal: the factor an admin is
+   usually trying to rescue is the emailed code, and the fix for a lost inbox
+   is a new sign-in address, not this route. */
 export async function resetUserMfa(ctx, username) {
   if (!isAdmin(ctx)) return forbidden();
   if (username === ctx.me.sk) return resp(400, { error: "you can't reset your own access" });
@@ -283,7 +300,9 @@ export async function resetUserMfa(ctx, username) {
   const r = await directory.resetMfa(username, person?.role);
   if (r.notFound) return resp(404, { error: "no such user" });
   if (r.noEmail) return resp(409, { error: "user has no email on file; set one first" });
-  if (r.nothingToReset) return resp(409, { error: "no authenticator is enrolled; nothing to reset" });
+  if (r.nothingToReset) return resp(409, {
+    error: "no authenticator app is enrolled, so there is nothing to remove — the portal's second factor is the code emailed at each sign-in; if they can't reach that inbox, change their sign-in email instead"
+  });
   await writeAudit(ctx.me.sk, "user.access-reset", `${username} → ${r.detail}`);
   return resp(200, { mfaReset: username });
 }

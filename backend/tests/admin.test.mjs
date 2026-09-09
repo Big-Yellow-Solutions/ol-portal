@@ -198,7 +198,8 @@ test("the list merges users, pending invitations, and profiles with no account",
   assert.deepEqual(Object.keys(byUser).sort(), ["liz@optimisticlabs.com", "marcus", "teddy@optimisticlabs.com"]);
 
   assert.equal(byUser["teddy@optimisticlabs.com"].status, "CONFIRMED");
-  assert.equal(byUser["teddy@optimisticlabs.com"].mfaEnrolled, true);
+  assert.equal(byUser["teddy@optimisticlabs.com"].authenticator, "on");
+  assert.equal(byUser["teddy@optimisticlabs.com"].mfaEmailCode, true);
   assert.equal(byUser["teddy@optimisticlabs.com"].created, "2026-09-01");
   assert.equal(byUser["teddy@optimisticlabs.com"].name, "Teddy Schwarz");
 
@@ -208,6 +209,53 @@ test("the list merges users, pending invitations, and profiles with no account",
   assert.equal(byUser.marcus.status, "NO_ACCOUNT");
   assert.equal(byUser.marcus.role, "Lab Leader");
   assert.equal(byUser["gone@optimisticlabs.com"], undefined, "a revoked invitation is not an account");
+
+  /* Nobody who cannot sign in has been challenged for a code yet, so the
+     column must not claim the factor for an unopened invite or a profile
+     with no account at all. */
+  assert.equal(byUser["liz@optimisticlabs.com"].mfaEmailCode, false);
+  assert.equal(byUser.marcus.mfaEmailCode, false);
+});
+
+/* The whole point of the tri-state: before it, a WorkOS call that failed was
+   reported as "not enrolled", which reads on the page as a security control
+   that is switched off. */
+test("a factor list that cannot be read is unknown, not off", async () => {
+  reset();
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) =>
+    /\/auth_factors$/.test(new URL(url).pathname)
+      ? json(429, { message: "Too many requests" })
+      : real(url, init);
+  try {
+    const byUser = Object.fromEntries(
+      body(await admin.listPortalUsers(asAdmin())).map(u => [u.username, u]));
+    assert.equal(byUser["teddy@optimisticlabs.com"].authenticator, "unknown");
+    /* The emailed code is the portal's own gate and owes WorkOS nothing, so
+       it stays true while the directory is unreachable. */
+    assert.equal(byUser["teddy@optimisticlabs.com"].mfaEmailCode, true);
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("no enrolled authenticator is off, and says nothing about the emailed code", async () => {
+  reset();
+  wos.factors = {};
+  const byUser = Object.fromEntries(
+    body(await admin.listPortalUsers(asAdmin())).map(u => [u.username, u]));
+  assert.equal(byUser["teddy@optimisticlabs.com"].authenticator, "off");
+  assert.equal(byUser["teddy@optimisticlabs.com"].mfaEmailCode, true);
+});
+
+test("a deactivated person has no sign-in left, so no emailed code", async () => {
+  reset();
+  const person = rows.get(rowKey("PERSON", "teddy@optimisticlabs.com"));
+  rows.set(rowKey("PERSON", "teddy@optimisticlabs.com"), { ...person, active: false });
+  const byUser = Object.fromEntries(
+    body(await admin.listPortalUsers(asAdmin())).map(u => [u.username, u]));
+  assert.equal(byUser["teddy@optimisticlabs.com"].status, "DEACTIVATED");
+  assert.equal(byUser["teddy@optimisticlabs.com"].mfaEmailCode, false);
 });
 
 test("the list is admin-only", async () => {
