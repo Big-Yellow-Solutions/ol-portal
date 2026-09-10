@@ -333,14 +333,12 @@ export function BillingEntityPanel({
           <Input placeholder="Full name" value={ipName} onChange={(e) => setIpName(e.target.value)} className="mb-2" />
           <div className="flex gap-2">
             <Input placeholder="Email" value={ipEmail} onChange={(e) => setIpEmail(e.target.value)} />
-            <div className="flex-1">
-              <Input
-                placeholder="Phone, e.g. +1 555 123 4567"
-                value={ipPhone}
-                onChange={(e) => setIpPhone(e.target.value)}
-                className={ipPhoneErr ? "border-red" : undefined}
-              />
-            </div>
+            <Input
+              placeholder="Phone, e.g. +1 555 123 4567"
+              value={ipPhone}
+              onChange={(e) => setIpPhone(e.target.value)}
+              className={ipPhoneErr ? "border-red" : undefined}
+            />
           </div>
           {ipPhoneErr && <p className="mt-1 text-xs text-red">{ipPhoneErr}</p>}
           <div className="mt-3 flex items-center gap-2.5">
