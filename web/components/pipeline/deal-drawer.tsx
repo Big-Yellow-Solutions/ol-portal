@@ -25,7 +25,7 @@ import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
-import { fullName } from "@/lib/data";
+import { fmtDollars, fullName } from "@/lib/data";
 import { assignmentState, billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE, CLOSED_WON } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
@@ -402,7 +402,17 @@ export function DealDrawer({
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="pv2-amount">Amount</Label>
-                <Input id="pv2-amount" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))} placeholder="10000" disabled={!editable} />
+                {/* Shown as money, kept as digits: the change handler strips the
+                    dollar sign and commas back out, so typing into "$2,500"
+                    just works and the body still sends a number. */}
+                <Input
+                  id="pv2-amount"
+                  inputMode="numeric"
+                  value={amount ? fmtDollars(Number(amount)) : ""}
+                  onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
+                  placeholder="$10,000"
+                  disabled={!editable}
+                />
               </div>
             </div>
 
