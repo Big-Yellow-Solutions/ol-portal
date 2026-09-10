@@ -53,9 +53,13 @@ export function DealCard({
          flex-col button lays each row out shrink-to-fit: the billing line
          can't shrink below its nowrap text and runs past the card, the amount
          hugs the date instead of the right edge, and the empty h-px divider
-         collapses to nothing. Saying stretch explicitly wins in every engine. */
+         collapses to nothing. Saying stretch explicitly wins in every engine.
+         overflow-hidden is the backstop behind it: the card clips at its own
+         edge, so even an engine that ignores the alignment cannot paint a
+         company or contact name past the border. It changes nothing while the
+         rows are stretched — every line already truncates or wraps inside. */
       className={cn(
-        "group relative flex w-full flex-col items-stretch gap-0 rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
+        "group relative flex w-full flex-col items-stretch gap-0 overflow-hidden rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
         billing.due ? "border-red/45" : "border-hair",
         canDrag && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-45"
