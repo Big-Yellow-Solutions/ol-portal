@@ -22,6 +22,14 @@
      NO_ACCOUNT              a PERSON record with nothing to sign in with
                              (WorkOS only — Cognito's list was pool-driven)
 
+   `authenticator` is the enrolment state of a TOTP app in the directory —
+   "on", "off", or "unknown" when the directory could not be asked. It is
+   deliberately NOT the portal's second factor: that is the code verify.mjs
+   emails on every sign-in (see authz.mjs), which no directory knows about.
+   The third value exists because the two-valued version reported every failed
+   lookup as a confident "off", which is the one answer that is never safe to
+   guess about a security control.
+
    Results are plain objects, never HTTP responses: admin.mjs decides what
    "not found" or "already accepted" means to the caller. */
 
@@ -57,14 +65,23 @@ const cognito = {
     const { Users } = await idp.send(new ListUsersCommand({ UserPoolId: POOL, Limit: 60 }));
     return await Promise.all((Users || []).map(async u => {
       const attr = n => u.Attributes?.find(a => a.Name === n)?.Value;
-      let mfaEnrolled = false;
+      let authenticator = "off";
       try {
         const detail = await idp.send(new AdminGetUserCommand({ UserPoolId: POOL, Username: u.Username }));
-        mfaEnrolled = (detail.UserMFASettingList || []).includes("SOFTWARE_TOKEN_MFA");
-      } catch { /* user may be mid-delete; show as not enrolled */ }
+        authenticator = (detail.UserMFASettingList || []).includes("SOFTWARE_TOKEN_MFA") ? "on" : "off";
+      } catch (err) {
+        /* A user mid-delete reads the same as a throttled or broken call, and
+           neither is evidence that nobody enrolled. Say "unknown" and leave a
+           line to find, rather than a silent false negative on the page. */
+        authenticator = "unknown";
+        console.error(JSON.stringify({
+          level: "warn", message: "Cognito MFA state unreadable",
+          username: u.Username, detail: err.message
+        }));
+      }
       return {
         username: u.Username, email: attr("email") || "", status: u.UserStatus,
-        created: day(u.UserCreateDate), mfaEnrolled
+        created: day(u.UserCreateDate), authenticator
       };
     }));
   },
@@ -156,13 +173,23 @@ const wos = {
   async listAccounts() {
     const [users, invitations] = await Promise.all([workos.listUsers(), workos.listInvitations()]);
     const accounts = await Promise.all(users.map(async u => {
-      let mfaEnrolled = false;
+      let authenticator = "off";
       try {
-        mfaEnrolled = (await workos.listAuthFactors(u.id)).length > 0;
-      } catch { /* a factor list that cannot be read shows as not enrolled */ }
+        authenticator = (await workos.listAuthFactors(u.id)).length ? "on" : "off";
+      } catch (err) {
+        /* An unreadable factor list is not an empty one: a missing API key, a
+           401 and a rate limit all land here, and reporting any of them as
+           "off" tells an admin a security control is missing when nobody
+           knows. */
+        authenticator = "unknown";
+        console.error(JSON.stringify({
+          level: "warn", message: "WorkOS auth factors unreadable",
+          user: addr(u.email), detail: err.message
+        }));
+      }
       return {
         username: addr(u.email), email: u.email, status: "CONFIRMED",
-        created: day(u.created_at), mfaEnrolled
+        created: day(u.created_at), authenticator
       };
     }));
     const known = new Set(accounts.map(a => a.username));
@@ -171,7 +198,7 @@ const wos = {
       known.add(addr(i.email));
       accounts.push({
         username: addr(i.email), email: i.email, status: "FORCE_CHANGE_PASSWORD",
-        created: day(i.created_at), mfaEnrolled: false
+        created: day(i.created_at), authenticator: "off"
       });
     }
     return accounts;

@@ -53,7 +53,12 @@ interface AdminUser {
   email: string;
   status: string;
   created: string;
-  mfaEnrolled: boolean;
+  /* The emailed sign-in code, which is the portal's actual second factor and
+     true for every account that can sign in. `authenticator` is the separate,
+     optional TOTP app in the directory — "unknown" when the directory could
+     not be asked, which must not be drawn as "off". */
+  mfaEmailCode: boolean;
+  authenticator: "on" | "off" | "unknown";
   firstName: string;
   lastName: string;
   name: string;
@@ -83,7 +88,14 @@ const ROLE_OPTIONS: Role[] = ["Lab Leader", "Contributor", "Admin"];
 /* What each directory does on invite and on reset, in the words the admin
    sees. The mechanics differ (a temporary password vs. an invitation link; a
    recreated account vs. a removed authenticator) and the copy must not
-   promise one while the backend does the other. */
+   promise one while the backend does the other.
+
+   Under WorkOS the reset is narrower than its old name suggested. The
+   portal's second factor is the code verify.mjs emails at every sign-in, and
+   nothing on this page can reset that — it is minted per session, not
+   enrolled. The button only clears a TOTP app somebody added in WorkOS, so it
+   says so, and points at the email change for the case an admin actually
+   reaches for it: somebody who cannot open the inbox the codes go to. */
 const WORKOS = CONFIG.authProvider === "workos";
 const COPY = WORKOS
   ? {
@@ -91,9 +103,10 @@ const COPY = WORKOS
       inviteNote:
         "WorkOS emails an invitation link valid for 7 days. The person sets their own password (12+ chars, breach-checked) on the way in.",
       resetConfirm: (u: string) =>
-        `Reset two-factor for "${u}"? Verify their identity out-of-band first (call or known email thread). Their authenticator is removed and they enroll a new one at next sign-in. Their password and portal data are untouched.`,
-      resetDone: (u: string) => `Two-factor reset for ${u}. They re-enroll at next sign-in.`,
-      resetLabel: "Reset 2FA",
+        `Remove the authenticator app enrolled for "${u}"? Verify their identity out-of-band first (call or known email thread). This does not touch the code the portal emails at every sign-in — if that is what they have lost, change their sign-in email instead. Their password and portal data are untouched.`,
+      resetDone: (u: string) =>
+        `Authenticator app removed for ${u}. They enroll a new one at next sign-in; their emailed sign-in code is unchanged.`,
+      resetLabel: "Reset authenticator",
       emailNote: (u: string) =>
         `New sign-in email for ${u}. They sign in with the new address from now on, and their portal profile moves with it.`,
     }
@@ -676,9 +689,20 @@ function AdminConsole({
                             <Badge variant={statusVariant}>{statusLabel}</Badge>
                           </TableCell>
                           <TableCell>
-                            <Badge variant={u.mfaEnrolled ? "success" : "outline"}>
-                              {u.mfaEnrolled ? "2FA on" : "2FA not set"}
+                            <Badge variant={u.mfaEmailCode ? "success" : "outline"}>
+                              {u.mfaEmailCode ? "Email code" : "No sign-in yet"}
                             </Badge>
+                            {/* Only worth a line when there is something to
+                                say: an enrolled app, or a directory that
+                                would not tell us. A plain "no app" is the
+                                normal state here and would just be noise. */}
+                            {u.mfaEmailCode && u.authenticator !== "off" && (
+                              <div className="text-xs text-ink-mute">
+                                {u.authenticator === "on"
+                                  ? "+ authenticator app"
+                                  : "app status unknown"}
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1.5">
