@@ -22,9 +22,12 @@ import {
   COMMUNITY_EVENTS,
   INITIAL_RSVPS,
   RSVP_CHOICES,
+  canEditPost,
   createPost,
+  deletePost,
   listPosts,
   toCommunityPost,
+  updatePost,
   type CommunityComment,
   type CommunityEvent,
   type CommunityLab,
@@ -214,6 +217,42 @@ function Community() {
     }
   };
 
+  /* Edit and delete follow the same shape as posting: write, then re-read,
+     so what is on screen is what the store holds. A failed edit is rethrown
+     so the editor keeps the draft. */
+  const editPost = async (post: CommunityPost, text: string) => {
+    try {
+      await updatePost(post.id, { text });
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not save that edit.");
+      throw err;
+    }
+    try {
+      await loadPosts();
+      toast.success("Post updated.");
+    } catch {
+      toast.error("Saved, but the feed could not be reloaded. Refresh to see it.");
+    }
+  };
+
+  const removePost = async (post: CommunityPost) => {
+    const whose = post.author === me ? "your post" : `${post.who}'s post`;
+    if (!window.confirm(`Delete ${whose}? This cannot be undone.`)) return;
+    try {
+      await deletePost(post.id);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not delete that post.");
+      return;
+    }
+    if (openId === post.id) closePost();
+    try {
+      await loadPosts();
+      toast.success("Post deleted.");
+    } catch {
+      toast.error("Deleted, but the feed could not be reloaded. Refresh to see it.");
+    }
+  };
+
   const addComment = (id: string, text: string) =>
     setThreads((s) => ({
       ...s,
@@ -335,11 +374,14 @@ function Community() {
               liked={(p) => !!liked[p.id]}
               likes={likesFor}
               comments={(p) => commentsFor(p).length}
+              canEdit={(p) => canEditPost(p, role, me)}
               onPickLab={pickLab}
               onPost={submitPost}
               onLike={(p) => toggleLike(p.id)}
               onOpen={(p) => setPickedPost(p.id)}
               onAuthor={dmAuthor}
+              onEdit={editPost}
+              onDelete={removePost}
             />
           )}
 
@@ -514,9 +556,12 @@ function Community() {
             liked={!!liked[openPost.id]}
             likes={likesFor(openPost)}
             meInitials={meInitials}
+            canEdit={canEditPost(openPost, role, me)}
             onLike={() => toggleLike(openPost.id)}
             onComment={(text) => addComment(openPost.id, text)}
             onAuthor={() => dmAuthor(openPost.who)}
+            onEdit={(text) => editPost(openPost, text)}
+            onDelete={() => removePost(openPost)}
           />
         )}
       </CommunityDialog>

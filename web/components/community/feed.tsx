@@ -36,11 +36,14 @@ export function CommunityFeed({
   liked,
   likes,
   comments,
+  canEdit,
   onPickLab,
   onPost,
   onLike,
   onOpen,
   onAuthor,
+  onEdit,
+  onDelete,
 }: {
   labs: CommunityLab[];
   postLabs: string[];
@@ -52,11 +55,14 @@ export function CommunityFeed({
   liked: (post: CommunityPost) => boolean;
   likes: (post: CommunityPost) => number;
   comments: (post: CommunityPost) => number;
+  canEdit: (post: CommunityPost) => boolean;
   onPickLab: (name: string) => void;
   onPost: (text: string, lab: string) => Promise<void>;
   onLike: (post: CommunityPost) => void;
   onOpen: (post: CommunityPost) => void;
   onAuthor: (who: string) => void;
+  onEdit: (post: CommunityPost, text: string) => Promise<void>;
+  onDelete: (post: CommunityPost) => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [postTo, setPostTo] = useState<string | null>(null);
@@ -218,9 +224,12 @@ export function CommunityFeed({
             liked={liked(p)}
             likes={likes(p)}
             comments={comments(p)}
+            canEdit={canEdit(p)}
             onLike={() => onLike(p)}
             onOpen={() => onOpen(p)}
             onAuthor={() => onAuthor(p.who)}
+            onEdit={(text) => onEdit(p, text)}
+            onDelete={() => onDelete(p)}
           />
         ))
       )}

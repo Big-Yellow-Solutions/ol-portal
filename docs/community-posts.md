@@ -82,6 +82,13 @@ Counters go out as CloudWatch Embedded Metric Format lines in namespace
   read as "nobody has posted".
 - The composer's "Posting to" menu offers only labs the person may post to, so
   the server's lab rule cannot produce an error they had no way to avoid.
+- Edit and Delete sit at the end of a card's action row (and the opened post's)
+  for the author and for an Admin — `canEditPost` in `web/lib/community.ts`
+  mirrors the server's `canEdit`, and only decides whether the controls are
+  drawn. Editing replaces the text in place with the composer's textarea; a
+  failed save keeps the draft. Delete confirms first, then re-reads the feed
+  and closes the post if it was open. An edited post says "· edited" after
+  its time.
 - Home's digest and presence card read the same `GET /posts`. Both need fields a
   post does not carry yet (`headline`, presence), so they still show their empty
   states — but they now read from the feed's source of truth rather than a

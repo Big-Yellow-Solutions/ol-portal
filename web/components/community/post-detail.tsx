@@ -8,32 +8,47 @@ import {
   Initials,
   TogglePill,
 } from "@/components/community/primitives";
-import { commentLabel, likeLabel, PhotoSlot } from "@/components/community/post-card";
+import {
+  commentLabel,
+  likeLabel,
+  OwnerActions,
+  PhotoSlot,
+  PostEditor,
+  postMeta,
+} from "@/components/community/post-card";
 import type { CommunityComment, CommunityPost } from "@/lib/community";
 import { cn } from "@/lib/utils";
 
 /* The opened post: the same content as the feed card at a larger measure,
-   with the comment thread and a reply box underneath. */
+   with the comment thread and a reply box underneath. The owner's Edit and
+   Delete sit on the same row as the like count, as they do on the card. */
 export function PostDetail({
   post,
   comments,
   liked,
   likes,
   meInitials,
+  canEdit,
   onLike,
   onComment,
   onAuthor,
+  onEdit,
+  onDelete,
 }: {
   post: CommunityPost;
   comments: CommunityComment[];
   liked: boolean;
   likes: number;
   meInitials: string;
+  canEdit: boolean;
   onLike: () => void;
   onComment: (text: string) => void;
   onAuthor: () => void;
+  onEdit: (text: string) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,13 +78,23 @@ export function PostDetail({
           >
             {post.who}
           </button>
-          <span className="block text-xs text-warm-gray">
-            {post.lab} · {post.time}
-          </span>
+          <span className="block text-xs text-warm-gray">{postMeta(post)}</span>
         </span>
       </div>
 
-      <p className="m-0 text-[17px] leading-[1.6] text-pretty">{post.text}</p>
+      {editing ? (
+        <PostEditor
+          initial={post.text}
+          size="detail"
+          onSave={async (text) => {
+            await onEdit(text);
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <p className="m-0 text-[17px] leading-[1.6] text-pretty">{post.text}</p>
+      )}
 
       {post.linkTitle && (
         <a
@@ -95,6 +120,9 @@ export function PostDetail({
         <span className="text-[13px] text-warm-gray">
           {commentLabel(comments.length)}
         </span>
+        {canEdit && !editing && (
+          <OwnerActions onEdit={() => setEditing(true)} onDelete={onDelete} />
+        )}
       </div>
 
       {comments.map((c, i) => (
