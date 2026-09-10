@@ -48,8 +48,14 @@ export function DealCard({
         onDragStart();
       }}
       onDragEnd={onDragEnd}
+      /* items-stretch is not decoration. WebKit's UA sheet still gives <button>
+         `align-items: flex-start` (Blink dropped that rule), so in Safari a
+         flex-col button lays each row out shrink-to-fit: the billing line
+         can't shrink below its nowrap text and runs past the card, the amount
+         hugs the date instead of the right edge, and the empty h-px divider
+         collapses to nothing. Saying stretch explicitly wins in every engine. */
       className={cn(
-        "group relative flex w-full flex-col gap-0 rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
+        "group relative flex w-full flex-col items-stretch gap-0 rounded-[16px] border bg-card p-[13px] text-left shadow-[0_1px_2px_rgba(17,17,17,0.04)] transition hover:border-violet-deep hover:shadow-[0_18px_34px_-16px_rgba(61,47,212,0.30)] hover:-translate-y-0.5",
         billing.due ? "border-red/45" : "border-hair",
         canDrag && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-45"
@@ -85,7 +91,7 @@ export function DealCard({
         {deal.recurring && <Repeat size={14} className="shrink-0 text-violet" aria-label="Recurring deal" />}
       </div>
 
-      <h4 className="text-[15px] leading-[1.3] font-bold tracking-[-0.015em] text-ink">{deal.client}</h4>
+      <h4 className="text-[15px] leading-[1.3] font-bold tracking-[-0.015em] break-words text-ink">{deal.client}</h4>
       {cadence && <p className="mt-1 truncate text-[11px] font-medium text-violet">{cadence}</p>}
 
       {SHOW_BILLING_ON_CARDS && (
