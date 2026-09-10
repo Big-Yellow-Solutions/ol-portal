@@ -1,11 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
 import ProfilePage from "@/app/(portal)/profile/page";
 import { PortalShell } from "@/components/shell/portal-shell";
-import { useAuth } from "@/lib/auth";
 import { MessagesProvider } from "@/lib/messages";
+import { NotificationsProvider } from "@/lib/notifications";
 import { PortalDataProvider } from "@/lib/portal-data";
+import { registerTokenSource } from "@/lib/session";
 
 /*
  Click-test harness for the profile page — the same shape as /dev/community.
@@ -24,30 +26,40 @@ import { PortalDataProvider } from "@/lib/portal-data";
  Nothing here reaches a deployed build — the guard below is the same one the
  other harnesses use.
 */
-export default function DevProfilePage() {
-  const { status } = useAuth();
-  if (process.env.NODE_ENV === "production") notFound();
+/* Same stand-in as /dev/pipeline: api() reads a null token as a dead session
+   and bounces to /login before the request is made. This harness previously
+   relied on CognitoAuthProvider's own token source, which resolves to null
+   when there's no real Cognito session — so it hit that redirect too. */
+const HARNESS_TOKEN = {
+  getToken: async () => "dev-harness",
+  endSession: async () => {},
+};
 
-  /* Mirrors app/(portal)/layout.tsx, and it is load-bearing rather than
-     cosmetic: AuthProvider registers api()'s token source in its own effect,
-     and effects run child-first, so a PortalDataProvider mounted in the same
-     commit fetches before that source exists and the whole harness dies with
-     "No auth token source registered". The real portal never hits this
-     because its layout holds children until auth has settled. */
-  if (status === "loading") {
-    return <p className="p-8 text-sm text-ink-mute">Starting…</p>;
-  }
+export default function DevProfilePage() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => {
+      registerTokenSource(HARNESS_TOKEN);
+      setReady(true);
+    });
+  }, []);
+
+  if (process.env.NODE_ENV === "production") notFound();
+  if (!ready) return null;
 
   return (
     <PortalDataProvider>
-      <MessagesProvider>
-        {/* The real shell, so the states above the page — the bootstrap
-            failure screens, the welcome redirect — are exercised here too and
-            not only in production. */}
-        <PortalShell>
-          <ProfilePage />
-        </PortalShell>
-      </MessagesProvider>
+      <NotificationsProvider>
+        <MessagesProvider>
+          {/* The real shell, so the states above the page — the bootstrap
+              failure screens, the welcome redirect — are exercised here too and
+              not only in production. TopNav's bell needs NotificationsProvider,
+              same as /dev/notifications. */}
+          <PortalShell>
+            <ProfilePage />
+          </PortalShell>
+        </MessagesProvider>
+      </NotificationsProvider>
     </PortalDataProvider>
   );
 }

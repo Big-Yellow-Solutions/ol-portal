@@ -1,9 +1,11 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { notFound } from "next/navigation";
 import CommunityPage from "@/app/(portal)/community/page";
 import { MessagesProvider } from "@/lib/messages";
 import { PortalDataProvider } from "@/lib/portal-data";
+import { registerTokenSource } from "@/lib/session";
 
 /*
  Click-test harness for Community, and for the thing Community could not do
@@ -27,8 +29,27 @@ import { PortalDataProvider } from "@/lib/portal-data";
  Nothing here reaches a deployed build — the guard below is the same one
  /dev/deal-drawer-footer uses.
 */
+/* Same stand-in as /dev/pipeline: api() reads a null token as a dead session
+   and bounces to /login before the request is made, and dev-api.mjs ignores
+   the header anyway — it injects the identity the authorizer would supply.
+   (This harness predates that change, which is why it was missing until now —
+   see the long note in /dev/pipeline for why registration is a microtask.) */
+const HARNESS_TOKEN = {
+  getToken: async () => "dev-harness",
+  endSession: async () => {},
+};
+
 export default function DevCommunityPage() {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    queueMicrotask(() => {
+      registerTokenSource(HARNESS_TOKEN);
+      setReady(true);
+    });
+  }, []);
+
   if (process.env.NODE_ENV === "production") notFound();
+  if (!ready) return null;
 
   return (
     <PortalDataProvider>
