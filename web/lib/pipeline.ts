@@ -35,6 +35,30 @@ export const billingRequiredAt = (stage: Stage): boolean =>
 export const proposalRequiredAt = (stage: Stage): boolean =>
   !isLost(stage) && stageIndex(stage) >= stageIndex("Proposal Sent");
 
+/* A company's website is stored as typed (see backend/src/contacts.mjs's
+   cleanWebsite): the HubSpot import wrote bare domains, and a person may
+   paste a full URL. Either becomes a link by assuming https when there is no
+   scheme, and reads as a label with the scheme and any trailing slash gone. */
+export const websiteHref = (site: string): string =>
+  /^https?:\/\//i.test(site) ? site : `https://${site}`;
+export const websiteLabel = (site: string): string =>
+  site.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+
+/* Mirrors cleanWebsite's rule exactly, so the form can say no before the
+   server does: once a missing scheme is assumed it has to parse as a URL,
+   with a dotted host and no whitespace. */
+export function websiteError(value: string): string | null {
+  const v = value.trim();
+  if (!v) return null;
+  try {
+    const url = new URL(websiteHref(v));
+    if (/\s/.test(v) || !url.hostname.includes(".")) throw new Error();
+  } catch {
+    return "Enter a web address, like example.org";
+  }
+  return null;
+}
+
 /** Design's `initials()` for a freeform name — distinct from lib/data.ts's
  *  `initials()`, which reads a staff Person's firstName/lastName. */
 export function initialsOf(name: string): string {

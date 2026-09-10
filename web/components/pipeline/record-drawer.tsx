@@ -1,23 +1,29 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Mail, Phone, Link2, AlertTriangle } from "lucide-react";
+import { Mail, Phone, Link2, Globe, MapPin, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api, ApiError } from "@/lib/api";
 import { can } from "@/lib/can";
 import { fmtDollars } from "@/lib/data";
 import { cn } from "@/lib/utils";
-import { companyForContact, initialsOf } from "@/lib/pipeline";
+import { companyForContact, initialsOf, websiteError, websiteHref, websiteLabel } from "@/lib/pipeline";
 import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
-import type { Contact } from "@/lib/types";
+import type { Company, Contact } from "@/lib/types";
 
 /* Pipeline v2 (design handoff), section 5b: the company/person record drawer.
    Opened either from the Companies/People tab or from a deal's Billing entity
-   panel — `returnDealId` tracks the latter so "Back to deal" can reopen it. */
+   panel — `returnDealId` tracks the latter so "Back to deal" can reopen it.
+
+   A company is reached by its website and address, a person by email and
+   phone — the two record types share the drawer but not the rows. Both are
+   editable by anyone who manages contacts (can.manageContacts mirrors
+   backend/src/contacts.mjs's check on the PATCH routes this saves to). */
 export function RecordDrawer({
   type,
   id,
@@ -39,44 +45,67 @@ export function RecordDrawer({
   const companyMap = useMemo(() => Object.fromEntries(companies.map((c) => [c.id, c])), [companies]);
   const contactMap = useMemo(() => Object.fromEntries(contacts.map((c) => [c.id, c])), [contacts]);
 
-  const record = type === "company" ? companyMap[id] : contactMap[id];
-  // Companies aren't editable here yet — only the person ("Contact") side of
-  // a billing entity is. manageContacts mirrors backend/src/contacts.mjs's
-  // permission check on the PATCH /contacts/:id route this saves to.
-  const editable = type === "contact" && can.manageContacts(role!);
+  const isCompany = type === "company";
+  const company = isCompany ? companyMap[id] : undefined;
+  const contact = isCompany ? undefined : contactMap[id];
+  const record: Company | Contact | undefined = company ?? contact;
+  const editable = can.manageContacts(role!);
 
   // The page keys this component by `${type}:${id}` so it remounts (and
   // these reset) whenever a different record is opened, without needing an
-  // effect to resync state.
+  // effect to resync state. `sub` is a company's kind or a person's title —
+  // the line under the name in both cases.
   const [name, setName] = useState(record?.name ?? "");
-  const [title, setTitle] = useState(type === "contact" ? ((record as Contact | undefined)?.title ?? "") : "");
-  const [phone, setPhone] = useState(record?.phone ?? "");
-  const [email, setEmail] = useState(record?.email ?? "");
+  const [sub, setSub] = useState((isCompany ? company?.kind : contact?.title) ?? "");
+  const [phone, setPhone] = useState(contact?.phone ?? "");
+  const [email, setEmail] = useState(contact?.email ?? "");
+  const [website, setWebsite] = useState(company?.website ?? "");
+  const [address, setAddress] = useState(company?.address ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   if (!record) return null;
 
-  const phoneErr = editable ? phoneError(phone) : null;
+  const phoneErr = editable && contact ? phoneError(phone) : null;
+  const websiteErr = editable && company ? websiteError(website) : null;
   const dirty =
     name.trim() !== record.name ||
-    title !== ((record as Contact).title ?? "") ||
-    phone.trim() !== (record.phone ?? "") ||
-    email.trim() !== (record.email ?? "");
-  const canSave = editable && dirty && !!name.trim() && !phoneErr;
+    sub.trim() !== ((isCompany ? company?.kind : contact?.title) ?? "") ||
+    (isCompany
+      ? website.trim() !== (company?.website ?? "") || address.trim() !== (company?.address ?? "")
+      : phone.trim() !== (contact?.phone ?? "") || email.trim() !== (contact?.email ?? ""));
+  const canSave = editable && dirty && !!name.trim() && !phoneErr && !websiteErr;
+
+  const reset = () => {
+    setName(record.name);
+    setSub((isCompany ? company?.kind : contact?.title) ?? "");
+    setPhone(contact?.phone ?? "");
+    setEmail(contact?.email ?? "");
+    setWebsite(company?.website ?? "");
+    setAddress(company?.address ?? "");
+  };
 
   const save = async () => {
     if (!canSave) return;
     setSaving(true);
     try {
-      const saved = await api<Contact>(`/contacts/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ name: name.trim(), title: title.trim(), phone: phone.trim(), email: email.trim() }),
-      });
-      setContacts((prev) => prev.map((c) => (c.id === id ? saved : c)));
-      toast.success("Person saved");
+      if (isCompany) {
+        const saved = await api<Company>(`/companies/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: name.trim(), kind: sub.trim(), website: website.trim(), address: address.trim() }),
+        });
+        setCompanies((prev) => prev.map((c) => (c.id === id ? saved : c)));
+        toast.success("Company saved");
+      } else {
+        const saved = await api<Contact>(`/contacts/${id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ name: name.trim(), title: sub.trim(), phone: phone.trim(), email: email.trim() }),
+        });
+        setContacts((prev) => prev.map((c) => (c.id === id ? saved : c)));
+        toast.success("Person saved");
+      }
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : "Could not save this person.");
+      toast.error(err instanceof ApiError ? err.message : `Could not save this ${isCompany ? "company" : "person"}.`);
     } finally {
       setSaving(false);
     }
@@ -85,7 +114,7 @@ export function RecordDrawer({
   /* A person's own companyId still wins, but a point of contact named on a
      company's deal is not "an individual" — reading companyId alone left
      someone like that with no company row at all. */
-  const derived = type === "contact" ? companyForContact(record as Contact, companyMap, deals) : null;
+  const derived = contact ? companyForContact(contact, companyMap, deals) : null;
   const remove = async () => {
     if (!window.confirm(`Delete ${record.name}? This cannot be undone.`)) return;
     setDeleting(true);
@@ -104,12 +133,12 @@ export function RecordDrawer({
     }
   };
 
-  const linked = type === "company"
-    ? (record as { contactId?: string | null }).contactId ? contactMap[(record as { contactId?: string }).contactId!] : undefined
-    : derived?.company;
+  const linked = company ? (company.contactId ? contactMap[company.contactId] : undefined) : derived?.company;
 
-  const recordDeals = deals.filter((d) => (type === "company" ? d.companyId === id : d.contactId === id));
+  const recordDeals = deals.filter((d) => (isCompany ? d.companyId === id : d.contactId === id));
   const totalValue = recordDeals.reduce((sum, d) => sum + (d.amount || 0), 0);
+
+  const row = "flex items-center gap-3 bg-white px-3.5 py-3";
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -117,7 +146,7 @@ export function RecordDrawer({
         <SheetHeader className="flex-row items-center gap-3 border-b border-hair p-4">
           <div className="min-w-0 flex-1">
             <SheetTitle className="truncate">{name.trim() || record.name}</SheetTitle>
-            <SheetDescription className="text-xs">{type === "company" ? "Company record" : "Person record"}</SheetDescription>
+            <SheetDescription className="text-xs">{isCompany ? "Company record" : "Person record"}</SheetDescription>
           </div>
           {returnDealId && (
             <Button variant="outline" size="sm" className="rounded-full" onClick={() => onBackToDeal(returnDealId)}>
@@ -131,7 +160,7 @@ export function RecordDrawer({
           <div className="mb-4 flex items-center gap-3.5">
             <span
               className={`flex size-13 shrink-0 items-center justify-center text-lg font-semibold text-violet-deep bg-violet-pale ${
-                type === "company" ? "rounded-2xl" : "rounded-full"
+                isCompany ? "rounded-2xl" : "rounded-full"
               }`}
             >
               {initialsOf(record.name)}
@@ -141,53 +170,106 @@ export function RecordDrawer({
                 <Input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Full name"
+                  placeholder={isCompany ? "Company name" : "Full name"}
                   className="mb-1 h-8 text-sm font-semibold"
                 />
               ) : (
                 <div className="truncate text-lg font-bold text-ink">{record.name}</div>
               )}
               {editable ? (
-                <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title" className="h-8 text-sm" />
+                <Input
+                  value={sub}
+                  onChange={(e) => setSub(e.target.value)}
+                  placeholder={isCompany ? "Industry" : "Title"}
+                  className="h-8 text-sm"
+                />
               ) : (
                 <div className="mt-0.5 truncate text-sm text-ink-mute">
-                  {type === "company" ? (record as { kind?: string }).kind || "Company" : (record as { title?: string }).title || "Individual"}
+                  {isCompany ? company?.kind || "Company" : contact?.title || "Individual"}
                 </div>
               )}
             </div>
           </div>
 
           <div className="mb-5 flex flex-col gap-px overflow-hidden rounded-2xl border border-hair bg-hair-soft">
-            <span className="flex items-center gap-3 bg-white px-3.5 py-3">
-              <Mail size={15} className="shrink-0 text-violet-deep" />
-              {editable ? (
-                <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="h-8 min-w-0 flex-1 text-sm" />
-              ) : (
-                <span className="min-w-0 flex-1 truncate text-sm">{record.email || "No email on file"}</span>
-              )}
-            </span>
-            <span className="flex items-center gap-3 bg-white px-3.5 py-3">
-              <Phone size={15} className="shrink-0 text-violet-deep" />
-              {editable ? (
-                <div className="min-w-0 flex-1">
-                  <Input
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="Phone, e.g. +1 555 123 4567"
-                    className={cn("h-8 text-sm", phoneErr && "border-red")}
-                  />
-                  {phoneErr && <p className="mt-1 text-xs text-red">{phoneErr}</p>}
-                </div>
-              ) : (
-                <span className="min-w-0 flex-1 text-sm">{record.phone || "No phone on file"}</span>
-              )}
-            </span>
+            {company ? (
+              <>
+                <span className={row}>
+                  <Globe size={15} className="shrink-0 text-violet-deep" />
+                  {editable ? (
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        value={website}
+                        onChange={(e) => setWebsite(e.target.value)}
+                        placeholder="Website, e.g. example.org"
+                        className={cn("h-8 text-sm", websiteErr && "border-red")}
+                      />
+                      {websiteErr && <p className="mt-1 text-xs text-red">{websiteErr}</p>}
+                    </div>
+                  ) : company.website ? (
+                    <a
+                      href={websiteHref(company.website)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 truncate text-sm font-medium text-violet-deep hover:text-violet"
+                    >
+                      {websiteLabel(company.website)}
+                    </a>
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink-mute">No website on file</span>
+                  )}
+                </span>
+                <span className={cn(row, "items-start")}>
+                  <MapPin size={15} className="mt-0.5 shrink-0 text-violet-deep" />
+                  {editable ? (
+                    <Textarea
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="Address"
+                      rows={2}
+                      className="min-h-0 flex-1 text-sm"
+                    />
+                  ) : (
+                    <span className={cn("min-w-0 flex-1 text-sm whitespace-pre-line", !company.address && "text-ink-mute")}>
+                      {company.address || "No address on file"}
+                    </span>
+                  )}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className={row}>
+                  <Mail size={15} className="shrink-0 text-violet-deep" />
+                  {editable ? (
+                    <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="h-8 min-w-0 flex-1 text-sm" />
+                  ) : (
+                    <span className="min-w-0 flex-1 truncate text-sm">{record.email || "No email on file"}</span>
+                  )}
+                </span>
+                <span className={row}>
+                  <Phone size={15} className="shrink-0 text-violet-deep" />
+                  {editable ? (
+                    <div className="min-w-0 flex-1">
+                      <Input
+                        value={phone}
+                        onChange={(e) => setPhone(e.target.value)}
+                        placeholder="Phone, e.g. +1 555 123 4567"
+                        className={cn("h-8 text-sm", phoneErr && "border-red")}
+                      />
+                      {phoneErr && <p className="mt-1 text-xs text-red">{phoneErr}</p>}
+                    </div>
+                  ) : (
+                    <span className="min-w-0 flex-1 text-sm">{record.phone || "No phone on file"}</span>
+                  )}
+                </span>
+              </>
+            )}
             {linked && (
-              <span className="flex items-center gap-3 bg-white px-3.5 py-3">
+              <span className={row}>
                 <Link2 size={15} className="shrink-0 text-violet-deep" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-violet-deep">{linked.name}</span>
                 <span className="shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">
-                  {type === "company" ? "Primary contact" : derived?.viaDeal ? "Company · via deal" : "Company"}
+                  {isCompany ? "Primary contact" : derived?.viaDeal ? "Company · via deal" : "Company"}
                 </span>
               </span>
             )}
@@ -222,10 +304,11 @@ export function RecordDrawer({
             ))}
           </div>
 
-          {/* A deal past the billing gate must carry a company or a person, so
-              deleting the person a deal names would strand it. The reason sits
-              under the list that is the evidence for it. */}
-          {editable && (
+          {/* Only a person can be deleted — a company has no delete route, by
+              design. A deal past the billing gate must carry a company or a
+              person, so deleting the person a deal names would strand it. The
+              reason sits under the list that is the evidence for it. */}
+          {editable && contact && (
             <div className="mt-4 border-t border-hair pt-4">
               {recordDeals.length > 0 ? (
                 <div className="flex items-start gap-2.5 rounded-xl border border-hair-strong bg-warm-panel p-3">
@@ -248,17 +331,7 @@ export function RecordDrawer({
 
         {editable && (
           <div className="flex items-center justify-end gap-2 border-t border-hair p-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!dirty || saving}
-              onClick={() => {
-                setName(record.name);
-                setTitle((record as Contact).title ?? "");
-                setPhone(record.phone ?? "");
-                setEmail(record.email ?? "");
-              }}
-            >
+            <Button variant="ghost" size="sm" disabled={!dirty || saving} onClick={reset}>
               Reset
             </Button>
             <Button size="sm" disabled={!canSave || saving} onClick={save}>

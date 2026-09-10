@@ -5,9 +5,10 @@ import { toast } from "sonner";
 import { Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { billingRequiredAt, initialsOf, BILLING_GATE_STAGE } from "@/lib/pipeline";
+import { billingRequiredAt, initialsOf, websiteError, BILLING_GATE_STAGE } from "@/lib/pipeline";
 import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
 import type { Company, Contact, Stage } from "@/lib/types";
@@ -38,8 +39,8 @@ export function BillingEntityPanel({
   const [pq, setPq] = useState("");
   const [inline, setInline] = useState<"company" | "person" | null>(null);
   const [icName, setIcName] = useState("");
-  const [icEmail, setIcEmail] = useState("");
-  const [icPhone, setIcPhone] = useState("");
+  const [icWebsite, setIcWebsite] = useState("");
+  const [icAddress, setIcAddress] = useState("");
   const [ipName, setIpName] = useState("");
   const [ipEmail, setIpEmail] = useState("");
   const [ipPhone, setIpPhone] = useState("");
@@ -61,21 +62,23 @@ export function BillingEntityPanel({
 
   const cqLower = cq.trim().toLowerCase();
   const companyOptions = companies
-    .filter((c) => !cqLower || `${c.name} ${c.email ?? ""}`.toLowerCase().includes(cqLower))
+    .filter((c) => !cqLower || `${c.name} ${c.website ?? ""}`.toLowerCase().includes(cqLower))
     .slice(0, 4);
   const pqLower = pq.trim().toLowerCase();
   const contactOptions = contacts
     .filter((c) => !pqLower || `${c.name} ${c.email ?? ""}`.toLowerCase().includes(pqLower))
     .slice(0, 4);
 
+  const icWebsiteErr = websiteError(icWebsite);
+
   async function saveCompany() {
     const name = icName.trim();
-    if (!name) return;
+    if (!name || icWebsiteErr) return;
     setSaving(true);
     try {
       const created = await api<Company>("/companies", {
         method: "POST",
-        body: JSON.stringify({ name, email: icEmail.trim(), phone: icPhone.trim() }),
+        body: JSON.stringify({ name, website: icWebsite.trim(), address: icAddress.trim() }),
       });
       setCompanies((prev) => [...prev, created]);
       onChangeCompany(created.id);
@@ -209,8 +212,8 @@ export function BillingEntityPanel({
               onClick={() => {
                 setInline("company");
                 setIcName(cq.trim());
-                setIcEmail("");
-                setIcPhone("");
+                setIcWebsite("");
+                setIcAddress("");
               }}
             >
               <span className="flex size-7.5 shrink-0 items-center justify-center rounded-lg bg-violet-pale/60">
@@ -230,14 +233,24 @@ export function BillingEntityPanel({
         <div className="mb-4 rounded-xl border border-violet-deep bg-white p-3.5">
           <span className="mb-2.5 block text-[11px] font-semibold tracking-wide text-violet-deep uppercase">New company</span>
           <Input placeholder="Company name" value={icName} onChange={(e) => setIcName(e.target.value)} className="mb-2" />
-          <div className="flex gap-2">
-            <Input placeholder="Email" value={icEmail} onChange={(e) => setIcEmail(e.target.value)} />
-            <Input placeholder="Phone" value={icPhone} onChange={(e) => setIcPhone(e.target.value)} />
-          </div>
+          <Input
+            placeholder="Website, e.g. example.org"
+            value={icWebsite}
+            onChange={(e) => setIcWebsite(e.target.value)}
+            className={icWebsiteErr ? "border-red" : undefined}
+          />
+          {icWebsiteErr && <p className="mt-1 text-xs text-red">{icWebsiteErr}</p>}
+          <Textarea
+            placeholder="Address"
+            value={icAddress}
+            onChange={(e) => setIcAddress(e.target.value)}
+            rows={2}
+            className="mt-2 min-h-0"
+          />
           <div className="mt-3 flex items-center gap-2.5">
             <span className="flex-1 text-[11px] text-ink-mute">Saved to Contacts and attached here</span>
             <Button variant="ghost" size="sm" onClick={() => setInline(null)}>Cancel</Button>
-            <Button size="sm" disabled={!icName.trim() || saving} onClick={saveCompany}>Save &amp; attach</Button>
+            <Button size="sm" disabled={!icName.trim() || !!icWebsiteErr || saving} onClick={saveCompany}>Save &amp; attach</Button>
           </div>
         </div>
       )}
