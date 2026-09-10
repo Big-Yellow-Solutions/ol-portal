@@ -602,20 +602,19 @@ function AdminConsole({
                     <TableHead>Email</TableHead>
                     <TableHead>Role · Labs</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead>2FA</TableHead>
                     <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {usersLoading ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-ink-mute">
+                      <TableCell colSpan={5} className="text-center text-ink-mute">
                         Loading…
                       </TableCell>
                     </TableRow>
                   ) : sortedUsers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center text-ink-mute">
+                      <TableCell colSpan={5} className="text-center text-ink-mute">
                         No users yet.
                       </TableCell>
                     </TableRow>
@@ -674,11 +673,6 @@ function AdminConsole({
                           </TableCell>
                           <TableCell>
                             <Badge variant={statusVariant}>{statusLabel}</Badge>
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={u.mfaEnrolled ? "success" : "outline"}>
-                              {u.mfaEnrolled ? "2FA on" : "2FA not set"}
-                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1.5">
