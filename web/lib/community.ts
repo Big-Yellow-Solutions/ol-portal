@@ -23,7 +23,7 @@
 
 import { api } from "@/lib/api";
 import { fullName, initials } from "@/lib/data";
-import type { Lab, Person } from "@/lib/types";
+import type { Lab, Person, Role } from "@/lib/types";
 
 export interface CommunityComment {
   who: string;
@@ -35,11 +35,17 @@ export interface CommunityComment {
 
 export interface CommunityPost {
   id: string;
+  /* The author's PERSON key — what decides whether the reader may edit or
+     delete this post. `who` is for reading; this is for deciding. */
+  author: string;
   who: string;
   initials: string;
   online?: boolean;
   lab: string;
   time: string;
+  /* Rewritten since it was posted. The feed says so next to the time, so an
+     edited post never reads as the one people replied to. */
+  edited: boolean;
   kind: string;
   likes: number;
   text: string;
@@ -129,6 +135,16 @@ export const updatePost = (id: string, input: Partial<NewPost>) =>
 export const deletePost = (id: string) =>
   api<{ deleted: string }>(`/posts/${id}`, { method: "DELETE" });
 
+/* Mirrors canEdit in backend/src/community.mjs exactly: the author, or an
+   Admin for moderation. A Lab Leader does not own other people's posts in
+   their lab. This only decides whether the controls are drawn — the server
+   answers for real on the PATCH and the DELETE. */
+export const canEditPost = (
+  post: Pick<CommunityPost, "author">,
+  role: Role | null,
+  me: string | null
+): boolean => role === "Admin" || (!!me && post.author === me);
+
 /* ---------- record to card ---------- */
 
 const MINUTE = 60_000;
@@ -176,10 +192,12 @@ export function toCommunityPost(
   const person = people[record.author];
   return {
     id: record.id,
+    author: record.author,
     who: fullName(person) || record.authorName || record.author,
     initials: person ? initials(person) : initialsOfName(record.authorName),
     lab: record.lab ? (labs.find((l) => l.id === record.lab)?.name ?? ALL_LABS) : ALL_LABS,
     time: postTime(record.created, now),
+    edited: !!record.updated && record.updated !== record.created,
     kind: record.kind,
     likes: record.likes ?? 0,
     text: record.text,

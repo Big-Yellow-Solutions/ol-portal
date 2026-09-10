@@ -19,7 +19,7 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 const { doc } = await import("../src/util.mjs");
 const { perms } = await import("../src/identity.mjs");
 const {
-  createCompany, listCompanies, createContact, listContacts, updateContact, deleteContact
+  createCompany, listCompanies, updateCompany, createContact, listContacts, updateContact, deleteContact
 } = await import("../src/contacts.mjs");
 
 const rows = new Map();
@@ -105,6 +105,63 @@ test("a person record can be edited, phone included", async () => {
   const reread = body(await updateContact(admin, created.id, {}));
   assert.equal(reread.name, "Nora Beck-Ito");
   assert.equal(reread.phone, "+1 (555) 987-6543");
+});
+
+/* ---------- a company's website and address ----------
+
+   A company is reached by its website and its address, where a person is
+   reached by email and phone. The website is kept as typed — a bare domain
+   from the HubSpot import, or a full URL somebody pasted — and only has to
+   parse as one. */
+
+test("a company keeps its website as typed, with or without a scheme", async () => {
+  const bare = body(await createCompany(admin, { name: "Independent Center", website: "independentcenter.org" }));
+  assert.equal(bare.website, "independentcenter.org");
+
+  const full = body(await createCompany(admin, { name: "Bell Works", website: "https://www.bell.works/about" }));
+  assert.equal(full.website, "https://www.bell.works/about");
+});
+
+test("a company's website has to be one", async () => {
+  for (const website of ["not a website", "example", "http://"]) {
+    const res = await createCompany(admin, { name: "Nope", website });
+    assert.equal(res.statusCode, 400, website);
+    assert.match(body(res).error, /invalid website/);
+  }
+  // Optional: a company can exist before anyone finds its site.
+  assert.equal(body(await createCompany(admin, { name: "Stealth Co" })).website, "");
+});
+
+test("a company's address is free text, kept whole", async () => {
+  const address = "1 Cherry Hill Rd\nSuite 200\nCherry Hill, NJ 08003";
+  const co = body(await createCompany(admin, { name: "Independent Center", address }));
+  assert.equal(co.address, address);
+
+  const saved = body(await updateCompany(admin, co.id, { website: "independentcenter.org", address: "PO Box 12" }));
+  assert.equal(saved.website, "independentcenter.org");
+  assert.equal(saved.address, "PO Box 12");
+
+  const badPatch = await updateCompany(admin, co.id, { website: "still not one" });
+  assert.equal(badPatch.statusCode, 400);
+  assert.equal(body(await listCompanies(admin))[0].address, "PO Box 12", "a refused patch changes nothing");
+});
+
+test("an imported company answers with its city and country until an address is written", async () => {
+  rows.set(rowKey("COMPANY", "CO-002"), {
+    pk: "COMPANY", sk: "CO-002", name: "Independent Center", kind: "Non-profit",
+    phone: "+1 (856) 751-9500", email: "", contactId: null, createdBy: "teddy",
+    created: "2026-09-08", updated: "2026-09-08",
+    website: "independentcenter.org", city: "Cherry Hill", country: "United States",
+    hubspotId: "1", source: "hubspot"
+  });
+  const [listed] = body(await listCompanies(admin));
+  assert.equal(listed.address, "Cherry Hill, United States");
+  assert.equal(listed.website, "independentcenter.org");
+
+  const saved = body(await updateCompany(admin, "CO-002", { address: "1 Cherry Hill Rd, Cherry Hill, NJ 08003" }));
+  assert.equal(saved.address, "1 Cherry Hill Rd, Cherry Hill, NJ 08003");
+  // The fallback is a read-time courtesy, not a stored value.
+  assert.equal(rows.get(rowKey("COMPANY", "CO-002")).city, "Cherry Hill");
 });
 
 /* ---------- deleting a person ----------

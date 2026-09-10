@@ -267,6 +267,14 @@ export interface Company {
   id: string;
   name: string;
   kind?: string;
+  /** As typed — a bare domain or a full URL. lib/pipeline.ts's websiteHref
+   *  and websiteLabel turn either into a link and a label. */
+  website?: string;
+  /** Free text, possibly several lines. The API answers an imported
+   *  company's city and country here until a fuller one is written. */
+  address?: string;
+  /** Still on the record for the HubSpot-imported companies; no company form
+   *  shows or writes them. */
   phone?: string;
   email?: string;
   /** A Contact this company's primary contact — one company, one primary. */

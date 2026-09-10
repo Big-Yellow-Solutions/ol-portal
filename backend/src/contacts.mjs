@@ -12,7 +12,12 @@
 
    Companies have no delete endpoint: the design never exposes one (only
    "remove from this deal", which just clears the deal's companyId). A contact
-   does — see deleteContact, which refuses while a deal still points at it. */
+   does — see deleteContact, which refuses while a deal still points at it.
+
+   A company is reached by its website and its address; a person by email and
+   phone. The company record still accepts `phone` and `email` — the HubSpot
+   import wrote a phone on 16 of them, and the "Main line" contact it created
+   for each reads it from there — but no company form shows them. */
 
 import { resp, today, get, put, del, listType, nextId } from "./util.mjs";
 
@@ -27,6 +32,36 @@ function cleanEmail(v) {
   if (email && !EMAIL_RE.test(email)) return { error: "invalid email" };
   return { value: email };
 }
+
+/* A company's website, kept as typed: the HubSpot import writes a bare
+   domain ("example.org") and a person may paste a full URL, and both should
+   read back the way they went in. The one rule is that it parses as a web
+   address once a missing scheme is assumed — so "example" and "not a url"
+   are refused, and the browser can always turn what is stored into a link. */
+function cleanWebsite(v) {
+  const site = str(v, 300);
+  if (!site) return { value: "" };
+  try {
+    const url = new URL(/^https?:\/\//i.test(site) ? site : `https://${site}`);
+    if (/\s/.test(site) || !url.hostname.includes(".")) throw new Error("not a website");
+  } catch {
+    return { error: "invalid website" };
+  }
+  return { value: site };
+}
+
+/* A postal address is free text — one line or several — because there is no
+   format that survives every country, and nothing here posts mail. */
+const cleanAddress = v => str(v, 500);
+
+/* The record as the browser reads it. An imported company carries no
+   `address` of its own but does carry the city and country HubSpot gave it,
+   and "Cherry Hill, United States" is a better answer than "No address on
+   file" until somebody writes the full one. */
+const companyView = ({ pk, sk, ...c }) => ({
+  id: sk, ...c,
+  address: c.address || [c.city, c.country].filter(Boolean).join(", ")
+});
 
 // A person's phone is optional, but when given must be a real number: at
 // least 10 significant digits (a bare US number) and no more than 15
@@ -102,7 +137,7 @@ export async function listCompanies(ctx) {
   const scope = await labScope(ctx);
   const items = (await listType("COMPANY")).filter(c => inScope(scope, "companies", c.sk));
   items.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-  return resp(200, items.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
+  return resp(200, items.map(companyView));
 }
 
 export async function createCompany(ctx, body) {
@@ -112,6 +147,8 @@ export async function createCompany(ctx, body) {
   if (!name) return resp(400, { error: "name is required" });
   const email = cleanEmail(b.email);
   if (email.error) return resp(400, { error: email.error });
+  const website = cleanWebsite(b.website);
+  if (website.error) return resp(400, { error: website.error });
   const scope = await labScope(ctx);
   // A contact outside the caller's scope is "unknown", not "forbidden" —
   // naming one must not confirm it exists.
@@ -122,6 +159,7 @@ export async function createCompany(ctx, body) {
   const stamp = today();
   const company = {
     pk: "COMPANY", sk: id, name, kind: str(b.kind, 200),
+    website: website.value, address: cleanAddress(b.address),
     phone: str(b.phone, 40), email: email.value,
     contactId: b.contactId || null,
     // What keeps a just-created record in its author's scope until a deal
@@ -130,8 +168,7 @@ export async function createCompany(ctx, body) {
     created: stamp, updated: stamp
   };
   await put(company);
-  const { pk, sk, ...rest } = company;
-  return resp(201, { id: sk, ...rest });
+  return resp(201, companyView(company));
 }
 
 export async function updateCompany(ctx, id, body) {
@@ -148,6 +185,12 @@ export async function updateCompany(ctx, id, body) {
     patch.name = name;
   }
   if ("kind" in b) patch.kind = str(b.kind, 200);
+  if ("website" in b) {
+    const website = cleanWebsite(b.website);
+    if (website.error) return resp(400, { error: website.error });
+    patch.website = website.value;
+  }
+  if ("address" in b) patch.address = cleanAddress(b.address);
   if ("phone" in b) patch.phone = str(b.phone, 40);
   if ("email" in b) {
     const email = cleanEmail(b.email);
@@ -161,8 +204,7 @@ export async function updateCompany(ctx, id, body) {
   }
   const next = { ...c, ...patch, updated: today() };
   await put(next);
-  const { pk, sk, ...rest } = next;
-  return resp(200, { id: sk, ...rest });
+  return resp(200, companyView(next));
 }
 
 /* ---------- contacts (people who work at companies, or bill directly) ---------- */
