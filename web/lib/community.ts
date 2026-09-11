@@ -92,7 +92,7 @@ export interface Announcement {
   meta: string;
 }
 
-export const ALL_LABS = "All labs";
+export const EVERYONE = "Everyone";
 
 /* ---------- the posts API ---------- */
 
@@ -102,7 +102,7 @@ export const POST_KINDS = ["Update", "Ask", "Win", "Link", "Introduction"] as co
 export type PostKind = (typeof POST_KINDS)[number];
 
 /* One stored post. `lab` is a lab id, and its absence is the scope "everyone"
-   rather than a missing value — the composer's "All labs" option. */
+   rather than a missing value — the composer's "Everyone" option. */
 export interface PostRecord {
   id: string;
   author: string;
@@ -195,7 +195,7 @@ export function toCommunityPost(
     author: record.author,
     who: fullName(person) || record.authorName || record.author,
     initials: person ? initials(person) : initialsOfName(record.authorName),
-    lab: record.lab ? (labs.find((l) => l.id === record.lab)?.name ?? ALL_LABS) : ALL_LABS,
+    lab: record.lab ? (labs.find((l) => l.id === record.lab)?.name ?? EVERYONE) : EVERYONE,
     time: postTime(record.created, now),
     edited: !!record.updated && record.updated !== record.created,
     kind: record.kind,

@@ -10,7 +10,7 @@ import {
 } from "@/components/community/primitives";
 import { PostCard } from "@/components/community/post-card";
 import {
-  ALL_LABS,
+  EVERYONE,
   PINNED_ANNOUNCEMENT,
   type CommunityLab,
   type CommunityPost,
@@ -72,7 +72,7 @@ export function CommunityFeed({
      lab's chip but only file under their own — so the select falls back to
      the network rather than showing a value that is not one of its options. */
   const chosen = postTo ?? filter;
-  const target = postLabs.includes(chosen) ? chosen : ALL_LABS;
+  const target = postLabs.includes(chosen) ? chosen : EVERYONE;
 
   const submit = async () => {
     const text = draft.trim();
@@ -202,14 +202,14 @@ export function CommunityFeed({
            the feed is for rather than repeating the button that fills it. */
         <div className="rounded-[16px] border border-dashed border-hair-strong bg-white p-10 text-center">
           <p className="m-0 text-[15px] leading-[1.55] text-pretty text-warm-gray">
-            {filter === ALL_LABS
+            {filter === EVERYONE
               ? "Nothing has been posted yet. Wins, links and asks the network should see land here."
               : `Nothing in ${filter} yet.`}
           </p>
-          {filter !== ALL_LABS && (
+          {filter !== EVERYONE && (
             <button
               type="button"
-              onClick={() => onPickLab(ALL_LABS)}
+              onClick={() => onPickLab(EVERYONE)}
               className="mt-2 cursor-pointer text-[13px] font-semibold text-violet-deep hover:text-violet"
             >
               See every lab

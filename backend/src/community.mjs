@@ -144,7 +144,7 @@ async function applyFields(ctx, item, b, isCreate) {
     next.tags = tags;
   }
   /* `lab` absent on a create means the whole network, which is what the
-     composer's "All labs" option is. On an update, only an explicit `lab` key
+     composer's "Everyone" option is. On an update, only an explicit `lab` key
      moves a post between scopes. */
   if ("lab" in b) {
     if (b.lab) {
@@ -194,7 +194,7 @@ async function tellMentioned(ctx, post, text, previousText) {
       actorName: fullName(ctx.me) || ctx.me.sk,
       verb: "mentioned you in a post",
       snippet: post.text,
-      meta: [lab?.name || "All labs", "Community"].join(" · "),
+      meta: [lab?.name || "Everyone", "Community"].join(" · "),
       href: `/community?post=${post.sk}`
     });
   } catch (err) {
