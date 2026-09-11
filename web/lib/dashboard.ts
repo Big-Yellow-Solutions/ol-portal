@@ -7,9 +7,9 @@
  */
 
 import {
-  ALL_LABS,
   COMMUNITY_THREADS,
   DIGEST_ORDER,
+  EVERYONE,
   type CommunityPost,
   type LeaderThread,
 } from "@/lib/community";
@@ -38,9 +38,9 @@ export interface Leader {
 
 /* Who to credit. An outside link is credited to its publication and the
    leader who surfaced it; anything written inside the network is credited to
-   its author and their lab. An all-labs post has no lab to name. */
+   its author and their lab. A post to everyone has no lab to name. */
 function byline(post: CommunityPost): string {
-  const lab = post.lab === ALL_LABS ? null : post.lab;
+  const lab = post.lab === EVERYONE ? null : post.lab;
   return [post.linkSource, post.who, post.linkSource ? null : lab, post.time]
     .filter(Boolean)
     .join(" · ");
@@ -85,7 +85,7 @@ export function presenceLeaders(
     seen.set(post.who, {
       name: post.who,
       initials: post.initials,
-      lab: post.lab === ALL_LABS ? "" : post.lab,
+      lab: post.lab === EVERYONE ? "" : post.lab,
       online: post.online,
       isNew: isNew.has(post.who),
       thread: COMMUNITY_THREADS[post.who] ?? EMPTY_THREAD,

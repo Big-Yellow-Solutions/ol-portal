@@ -18,8 +18,8 @@ import {
 } from "@/components/community/rail";
 import { benchRoster } from "@/components/bench/person-card";
 import {
-  ALL_LABS,
   COMMUNITY_EVENTS,
+  EVERYONE,
   INITIAL_RSVPS,
   RSVP_CHOICES,
   canEditPost,
@@ -69,7 +69,7 @@ function Community() {
     TABS.includes(askedFor as Tab) ? (askedFor as Tab) : "feed"
   );
   const [rail, setRail] = useState(true);
-  const [filter, setFilter] = useState(ALL_LABS);
+  const [filter, setFilter] = useState(EVERYONE);
   /* Home's digest links straight at a story: /community?post=p1 opens that
      post's thread on arrival, the way Resources' ?r= does, and survives the
      static export. */
@@ -136,7 +136,7 @@ function Community() {
   const labList = useMemo<CommunityLab[]>(() => {
     const headcount = (n: number) => `${n} ${n === 1 ? "member" : "members"}`;
     return [
-      { name: ALL_LABS, count: headcount(members.length) },
+      { name: EVERYONE, count: headcount(members.length) },
       ...labs.map((l) => ({
         name: l.name,
         count: headcount(members.filter((p) => p.labs.includes(l.name)).length),
@@ -149,11 +149,11 @@ function Community() {
      person could not have avoided. */
   const postLabs = useMemo(() => {
     const mine = role === "Admin" ? labs : labs.filter((l) => myLabs.includes(l.id));
-    return [ALL_LABS, ...mine.map((l) => l.name)];
+    return [EVERYONE, ...mine.map((l) => l.name)];
   }, [role, labs, myLabs]);
 
   const visiblePosts = allPosts.filter(
-    (p) => filter === ALL_LABS || p.lab === filter || p.lab === ALL_LABS
+    (p) => filter === EVERYONE || p.lab === filter || p.lab === EVERYONE
   );
 
   const commentsFor = (p: CommunityPost) => p.comments.concat(threads[p.id] ?? []);
@@ -210,7 +210,7 @@ function Community() {
       await loadPosts();
       setPostsError(null);
       toast.success(
-        labName === ALL_LABS ? "Posted to the network." : `Posted to ${labName}.`
+        labName === EVERYONE ? "Posted to the network." : `Posted to ${labName}.`
       );
     } catch {
       toast.error("Posted, but the feed could not be reloaded. Refresh to see it.");

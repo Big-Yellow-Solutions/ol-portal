@@ -8,7 +8,7 @@ import { PersonCard, type BenchPerson } from "@/components/bench/person-card";
 import { toast } from "sonner";
 import { startActingAs } from "@/lib/act-as";
 import { ApiError } from "@/lib/api";
-import { ALL_LABS } from "@/lib/community";
+import { EVERYONE } from "@/lib/community";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
@@ -54,7 +54,7 @@ export function CommunityMembers({
     const q = query.trim().toLowerCase();
     return roster.filter((p) => {
       if (tag && !p.tags.includes(tag)) return false;
-      if (lab !== ALL_LABS && !p.labs.includes(lab)) return false;
+      if (lab !== EVERYONE && !p.labs.includes(lab)) return false;
       if (!q) return true;
       return `${p.name} ${p.role} ${p.engage ?? ""} ${p.tags.join(" ")}`
         .toLowerCase()

@@ -152,7 +152,7 @@ Then open `/dev/community` and walk this list:
 
 - [ ] Write a post and click Post — it appears, the draft clears, a toast confirms the scope it went to.
 - [ ] Reload the page — the post is still there. *(This is the bug.)*
-- [ ] Switch identity and reload: `fetch("http://localhost:8788/__dev/as/omar", {method:"POST"})` — a Sports Lab post is not visible to someone outside that lab; a post filed to "All labs" is visible to everyone.
+- [ ] Switch identity and reload: `fetch("http://localhost:8788/__dev/as/omar", {method:"POST"})` — a Sports Lab post is not visible to someone outside that lab; a post filed to "Everyone" is visible to everyone.
 - [ ] The composer's "Posting to" menu lists only the labs that person is in, while the filter chips still list every lab.
 - [ ] Stop the dev API and post — an error toast appears and the draft is preserved.
 - [ ] Reload with the API stopped — the feed reports the load failure instead of showing an empty feed.
