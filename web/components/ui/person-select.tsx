@@ -4,8 +4,7 @@ import * as React from "react";
 import { Check } from "lucide-react";
 import { Avatar, Description, Label, ListBox } from "@heroui/react";
 
-import { fullName, initials, isActive } from "@/lib/data";
-import { roleLine } from "@/lib/messages";
+import { fullName, initials, isActive, roleLine } from "@/lib/data";
 import type { Lab, Person } from "@/lib/types";
 import { cn } from "@/lib/utils";
 

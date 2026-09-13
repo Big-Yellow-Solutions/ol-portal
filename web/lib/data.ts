@@ -4,10 +4,12 @@ import type {
   EnvelopeStatus,
   FileStatus,
   InvoiceStatus,
+  Lab,
   Person,
   ProposalStatus,
   Stage,
 } from "@/lib/types";
+import type { PersonWithUsername } from "@/lib/portal-data";
 
 export type BadgeVariant =
   | "default"
@@ -140,6 +142,19 @@ export function fmtCompact(n: number | undefined | null): string {
 export const isActive = (person: { active?: boolean } | undefined | null): boolean =>
   person?.active !== false;
 
+/* Who is on the roster — the Directory and Community's Members tab.
+
+   A member is anyone with a portal account who has not been offboarded. An
+   account is created by the invite (admin.mjs provisionAccount writes the
+   sign-in and the PERSON record together), so having a record is having an
+   account; whether the person has filled in the welcome screen yet does not
+   matter — their card simply reads "No profile yet" until they do. Every
+   role qualifies: an Admin is a colleague to find and message like anyone
+   else. Offboarded people stay in `people` so an old owner reference still
+   resolves to a name, but are never on the roster. */
+export const isMember = (person: Person | undefined | null): boolean =>
+  !!person && isActive(person);
+
 export function fullName(person: Person | undefined | null): string {
   if (!person) return "";
   return [person.firstName, person.lastName].filter(Boolean).join(" ");
@@ -150,4 +165,59 @@ export function initials(person: Person | undefined | null): string {
   const first = person.firstName?.[0] ?? "";
   const last = person.lastName?.[0] ?? "";
   return (first + last).toUpperCase() || "?";
+}
+
+/* "Lab Leader · Faith Lab". The directory card, the picker row and the DM
+   header all read this same line; an Admin outside every lab reads as
+   "Admin". */
+export function roleLine(person: Person, labs: Lab[]): string {
+  const names = (person.labs ?? []).map(
+    (id) => labs.find((l) => l.id === id)?.name ?? id
+  );
+  return [person.role, ...names].filter(Boolean).join(" · ");
+}
+
+/* A roster card's worth of a person — exactly what PersonCard draws, and
+   nothing the viewer was not already sent. */
+export interface BenchPerson {
+  id: string;
+  name: string;
+  initials: string;
+  role: string;
+  /* Lab names, not ids — the lab filter on Community's Members tab and the
+     "Message the group" roster both work in the names the design shows. */
+  labs: string[];
+  engage?: string;
+  tags: string[];
+  /* Email, or the phone number if that is all this person publishes. The
+     server strips whichever they chose to hide, so anything here is public. */
+  contact?: string;
+  photo?: string;
+}
+
+/* The roster itself, card-shaped. The Directory and Community's Members tab
+   are the same roster read twice, so the mapping lives here rather than in
+   either screen, next to the rule that says who is on it.
+
+   One card per person: `bench` comes off a map keyed by username, and a
+   person in several labs is one record carrying several lab ids, never a
+   row per lab — so nothing here has to dedupe. Order is kept as given, which
+   is the table's own (by username). */
+export function benchRoster(
+  bench: PersonWithUsername[],
+  labs: Lab[]
+): BenchPerson[] {
+  return bench.filter(isMember).map((p) => ({
+    id: p.username,
+    name: fullName(p),
+    initials: initials(p),
+    role: roleLine(p, labs),
+    labs: (p.labs ?? []).map(
+      (id) => labs.find((l) => l.id === id)?.name ?? id
+    ),
+    engage: p.bench?.blurb,
+    tags: p.bench?.specialties ?? [],
+    contact: p.bench?.email || p.bench?.phone,
+    photo: p.photo,
+  }));
 }

@@ -16,7 +16,6 @@ import {
   EventDateBlock,
   LabList,
 } from "@/components/community/rail";
-import { benchRoster } from "@/components/bench/person-card";
 import {
   COMMUNITY_EVENTS,
   EVERYONE,
@@ -38,7 +37,7 @@ import {
 import { ApiError } from "@/lib/api";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
-import { fullName, initials } from "@/lib/data";
+import { benchRoster, fullName, initials } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 type Tab = "feed" | "events" | "groups" | "members";

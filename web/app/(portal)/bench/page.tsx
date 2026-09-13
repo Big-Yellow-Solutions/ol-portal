@@ -4,7 +4,8 @@ import { useMemo, useState } from "react";
 import { PlusIcon, SearchIcon } from "@/components/community/icons";
 import { FIELD } from "@/components/community/primitives";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
-import { benchRoster, PersonCard } from "@/components/bench/person-card";
+import { PersonCard } from "@/components/bench/person-card";
+import { benchRoster } from "@/lib/data";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
@@ -67,7 +68,7 @@ export default function BenchPage() {
             The bench
           </h1>
           <p className="m-0 text-[17px] leading-[1.6] text-ink-soft text-pretty">
-            All Lab Leaders and Contributors across Optimistic Labs
+            Everyone across Optimistic Labs
           </p>
         </div>
         <div className="flex flex-none items-center gap-2.5 pb-1">

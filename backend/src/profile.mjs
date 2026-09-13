@@ -76,8 +76,11 @@ export async function updateProfile(ctx, username, body) {
    opted out, phone hides unless opted in. */
 export function publicView(person, viewerKey, viewerRole, personKey) {
   if (viewerRole === "Admin" || personKey === viewerKey) return person;
-  /* `active` stays — the pickers and the bench read it. Who offboarded whom
-     and when is admin business, and bootstrap sends this to everyone. */
+  /* `active` stays — the pickers and the roster read it: every account that
+     has not been offboarded is on the Directory and Members, whatever the
+     role. `onboarded` only drives the owner's own welcome gate, and the owner
+     always gets their full record. Who offboarded whom and when is admin
+     business, and bootstrap sends this to everyone. */
   const { email, onboarded, offboardedAt, offboardedBy, ...rest } = person;
   if (rest.bench) {
     const b = { ...rest.bench };

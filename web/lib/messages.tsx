@@ -11,10 +11,10 @@ import React, {
 } from "react";
 import { api, ApiError } from "@/lib/api";
 import { messageTime } from "@/lib/dashboard";
-import { fullName, initials, isActive } from "@/lib/data";
+import { fullName, initials, isActive, roleLine } from "@/lib/data";
 import { notificationAge } from "@/lib/notifications";
 import { usePortalData } from "@/lib/portal-data";
-import type { Lab, Person } from "@/lib/types";
+import type { Person } from "@/lib/types";
 
 /* Messaging for the whole portal · the client half of backend/src/messages.mjs.
  *
@@ -94,15 +94,6 @@ interface ServerConvo {
 }
 
 /* ---------- pure helpers ---------- */
-
-/* "Lab Leader · Faith Lab". The directory card, the picker row and the DM
-   header all read this same line. */
-export function roleLine(person: Person, labs: Lab[]): string {
-  const names = (person.labs ?? []).map(
-    (id) => labs.find((l) => l.id === id)?.name ?? id
-  );
-  return [person.role, ...names].filter(Boolean).join(" · ");
-}
 
 /* "Marcus, Dana +1" — the name a group falls back to when nobody renames it. */
 export function defaultName(firsts: string[]): string {
@@ -256,7 +247,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     [meName, meRecord]
   );
 
-  /* The directory is exactly what the bench lists, minus yourself — you
+  /* The directory is exactly what the roster lists, minus yourself — you
      cannot start a conversation with yourself. Every role is on it: an Admin
      is as messageable as a Contributor. */
   const directory = useMemo<MessagePerson[]>(
