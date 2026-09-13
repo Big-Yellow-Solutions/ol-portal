@@ -1,10 +1,10 @@
 /* The roster · who the Directory and Community's Members tab list.
 
    Members used to be "every active Lab Leader or Contributor", a filter
-   inherited from the original bench page, so an Admin never appeared and
-   onboarding never mattered. The rule is now isMember in lib/data.ts —
-   active, and finished the welcome screen, whatever the role — and these
-   pin it, along with the card mapping around it.
+   inherited from the original bench page, so an Admin never appeared. The
+   rule is now isMember in lib/data.ts — every account that has not been
+   offboarded, whatever the role, welcome screen or not — and these pin it,
+   along with the card mapping around it.
 
    Runs the real lib/data.ts under Node's own type stripping, so nothing here
    is a copy of the rule: a change to isMember or benchRoster is a change to
@@ -43,7 +43,7 @@ const BENCH = [
     bench: { blurb: "Data pipelines", specialties: ["SQL", "dbt"], email: "cass@ol.test" },
     photo: "data:image/png;base64,AAAA",
   }),
-  // Signed in, skipped the welcome screen (or has not reached it yet).
+  // Has an account, has not filled in the welcome screen (or skipped it).
   person("pat", { onboarded: false }),
   person("quinn", { onboarded: undefined }),
   // Offboarded — the record is kept, marked, and never on the roster.
@@ -69,12 +69,14 @@ test("an onboarded Lab Leader and Contributor are on it too", () => {
   assert.equal(roster.find((p) => p.id === "cass")?.role, "Contributor · Sports Lab");
 });
 
-test("someone who has not finished the welcome screen is not", () => {
-  assert.equal(isMember(person("pat", { onboarded: false })), false);
-  assert.equal(isMember(person("quinn", { onboarded: undefined })), false);
+test("someone who has not finished the welcome screen is on it too — an account is enough", () => {
+  assert.equal(isMember(person("pat", { onboarded: false })), true);
+  assert.equal(isMember(person("quinn", { onboarded: undefined })), true);
   const roster = benchRoster(BENCH, LABS);
-  assert.ok(!ids(roster).includes("pat"));
-  assert.ok(!ids(roster).includes("quinn"));
+  assert.ok(ids(roster).includes("pat"));
+  assert.ok(ids(roster).includes("quinn"));
+  // Nothing on the card depends on the flag.
+  assert.equal(roster.find((p) => p.id === "pat")?.engage, undefined);
 });
 
 test("an offboarded person is not; a record with no active flag at all is", () => {
@@ -85,8 +87,9 @@ test("an offboarded person is not; a record with no active flag at all is", () =
   assert.ok(ids(roster).includes("evan"));
 });
 
-test("the whole roster: every onboarded, active person once, in the order given", () => {
-  assert.deepEqual(ids(benchRoster(BENCH, LABS)), ["liz", "marcus", "nora", "cass", "evan"]);
+test("the whole roster: every active account once, in the order given", () => {
+  assert.deepEqual(ids(benchRoster(BENCH, LABS)),
+    ["liz", "marcus", "nora", "cass", "pat", "quinn", "evan"]);
 });
 
 test("a person in two labs is one card carrying both lab names", () => {

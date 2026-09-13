@@ -62,10 +62,10 @@ export default function ProfilePage() {
   const [busy, setBusy] = useState<"photo" | "email" | "phone" | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* The same card the Directory draws for this person. Someone off the
-     roster — not yet through the welcome screen, or offboarded — gets no
-     card there, so the aside says why instead of drawing one nobody will
-     see. Role is not a reason: an Admin's card is as real as anyone's. */
+  /* The same card the Directory draws for this person. Only an offboarded
+     person is off the roster, and they get no card there, so the aside says
+     so instead of drawing one nobody will see. Role is not a reason: an
+     Admin's card is as real as anyone's. */
   const card = useMemo(
     () =>
       person && username
@@ -387,21 +387,8 @@ export default function ProfilePage() {
               </>
             ) : (
               <p className="m-0 text-[13px] text-warm-gray">
-                {mine ? (
-                  <>
-                    Not on the Directory yet. Finish setting up your profile on
-                    the{" "}
-                    <Link href="/welcome" className="text-violet-deep hover:underline">
-                      welcome screen
-                    </Link>{" "}
-                    and your card appears there and on Community&apos;s Members
-                    tab.
-                  </>
-                ) : person.active === false ? (
-                  `${first} was offboarded and is no longer listed.`
-                ) : (
-                  `${first} has not finished setting up their profile yet, so they are not listed.`
-                )}
+                {mine ? "Your account" : first} was offboarded and is no longer
+                listed.
               </p>
             )}
           </Panel>

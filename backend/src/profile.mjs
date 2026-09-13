@@ -73,17 +73,15 @@ export async function updateProfile(ctx, username, body) {
 
 /* Applied to every person in bootstrap for non-admin viewers (self excluded):
    root email (auth/invite address) is admin-only, bench email hides when
-   opted out, phone hides unless opted in.
-
-   `active` and `onboarded` go to every viewer. They are what the Directory
-   and Community's Members tab read to decide who is on the roster — an
-   offboarded person is not, and neither is someone who has not finished the
-   welcome screen — and neither says anything private: the card already reads
-   "No profile yet" for the latter. Who offboarded whom and when is admin
-   business, and bootstrap sends this to everyone. */
+   opted out, phone hides unless opted in. */
 export function publicView(person, viewerKey, viewerRole, personKey) {
   if (viewerRole === "Admin" || personKey === viewerKey) return person;
-  const { email, offboardedAt, offboardedBy, ...rest } = person;
+  /* `active` stays — the pickers and the roster read it: every account that
+     has not been offboarded is on the Directory and Members, whatever the
+     role. `onboarded` only drives the owner's own welcome gate, and the owner
+     always gets their full record. Who offboarded whom and when is admin
+     business, and bootstrap sends this to everyone. */
+  const { email, onboarded, offboardedAt, offboardedBy, ...rest } = person;
   if (rest.bench) {
     const b = { ...rest.bench };
     if (b.showEmail === false) delete b.email;
