@@ -2,10 +2,10 @@
 
    /bootstrap hands the browser the whole PERSON partition, and the Directory
    and Community's Members tab decide who is on the roster from what arrives
-   (web/lib/data.ts, isMember: active and onboarded, any role). That only
-   works if the fields that decision reads reach every viewer, and only
-   stays safe if the fields it must not read do not. Both halves are pinned
-   here, from a Contributor's side and an Admin's.
+   (web/lib/data.ts, isMember: every account not offboarded, any role). That
+   only works if the field that decision reads reaches every viewer, and
+   only stays safe if the fields it must not read do not. Both halves are
+   pinned here, from a Contributor's side and an Admin's.
 
    Handler-level, through the same router the Lambda runs, with the real
    table stand-in over AWS_ENDPOINT_URL_DYNAMODB — app.mjs builds its own
@@ -97,8 +97,8 @@ async function bootstrapAs(actor) {
      liz     Admin, onboarded                       — on the roster
      nora    Lab Leader in two labs, onboarded      — on it once, not twice
      cass    Contributor, onboarded                 — on it; the viewer below
-     pat     Contributor, never finished /welcome   — sent, so the browser can
-                                                      tell, but not a member
+     pat     Contributor, never finished /welcome   — on the roster all the
+                                                      same; an account is enough
      dana    Lab Leader, offboarded                 — sent, so a deal she owned
                                                       still names her, not a member
      CT-001  a client contact                       — not a portal user at all
@@ -137,24 +137,25 @@ test("a Contributor is sent every person, Admins included, each exactly once", a
   assert.equal(res.status, 200);
   assert.deepEqual(Object.keys(res.body.people).sort(), ["cass", "dana", "liz", "nora", "pat"]);
   assert.equal(res.body.people.liz.role, "Admin");
-  assert.equal(res.body.people.liz.onboarded, true);
   // Two labs is one record with two ids — never a row per lab.
   assert.deepEqual(res.body.people.nora.labs, ["sports", "philanthropy"]);
 });
 
-test("the fields the roster rule reads reach a Contributor for everyone", async () => {
+test("the one field the roster rule reads reaches a Contributor for everyone", async () => {
   const { people } = (await bootstrapAs("cass")).body;
-  assert.equal(people.liz.onboarded, true);
-  assert.equal(people.nora.onboarded, true);
-  assert.notEqual(people.pat.onboarded, true, "pat never finished the welcome screen");
   assert.equal(people.dana.active, false, "dana was offboarded");
-  assert.equal(people.dana.onboarded, true, "offboarding does not rewrite onboarding");
+  for (const who of ["liz", "nora", "pat"])
+    assert.notEqual(people[who].active, false, `${who} is active`);
+  // pat has an account and no welcome-screen flag; nothing else is needed.
+  assert.equal(people.pat.role, "Contributor");
 });
 
-test("what a Contributor is never sent: root email, the offboarding audit, hidden contact details", async () => {
+test("what a Contributor is never sent: root email, others' welcome flag, the offboarding audit, hidden contact details", async () => {
   const { people } = (await bootstrapAs("cass")).body;
-  for (const who of ["liz", "nora", "pat", "dana"])
+  for (const who of ["liz", "nora", "pat", "dana"]) {
     assert.equal(people[who].email, undefined, `${who}'s sign-in address leaked`);
+    assert.equal(people[who].onboarded, undefined, `${who}'s welcome flag leaked`);
+  }
   assert.equal(people.dana.offboardedAt, undefined);
   assert.equal(people.dana.offboardedBy, undefined);
   // Bench email shows unless hidden; phone stays hidden until opted in; the
@@ -176,6 +177,7 @@ test("an Admin is sent the full record", async () => {
   assert.equal(people.nora.email, "nora@optimisticlabs.com");
   assert.equal(people.nora.bench.phone, "555-0100");
   assert.equal(people.dana.offboardedBy, "liz");
+  assert.equal(people.liz.onboarded, true);
   assert.equal(people.pat.onboarded, undefined);
 });
 

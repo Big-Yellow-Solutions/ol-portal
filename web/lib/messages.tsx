@@ -247,10 +247,9 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     [meName, meRecord]
   );
 
-  /* Everyone still active, minus yourself — you cannot start a conversation
-     with yourself. Wider than the Members roster on purpose: a colleague who
-     has not finished the welcome screen yet is still someone you can message.
-     Every role is on it: an Admin is as messageable as a Contributor. */
+  /* The directory is exactly what the roster lists, minus yourself — you
+     cannot start a conversation with yourself. Every role is on it: an Admin
+     is as messageable as a Contributor. */
   const directory = useMemo<MessagePerson[]>(
     () =>
       bench

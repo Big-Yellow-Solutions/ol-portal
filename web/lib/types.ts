@@ -62,11 +62,11 @@ export type FileStatus =
 // Nested `bench` matches backend/src/profile.mjs exactly — bench-directory
 // fields (blurb, specialties, contact-visibility toggles) live under
 // `person.bench`, not flat on the person record. `bootstrap`'s `people` map
-// strips `email` and the offboarding audit fields, and filters
+// strips `email`/`onboarded` and the offboarding audit fields, and filters
 // `bench.email`/`bench.phone`, for any viewer who isn't an Admin or the person
 // themselves (server-side privacy filtering — see profile.mjs's publicView).
-// `active` and `onboarded` reach every viewer: they decide who is on the
-// roster (see isMember in lib/data).
+// `active` reaches every viewer: it is what decides who is on the roster (see
+// isMember in lib/data).
 export interface PersonBench {
   specialties?: string[];
   blurb?: string;
@@ -84,8 +84,8 @@ export interface Person {
   labs: string[];
   email?: string;
   /* Set once, by the welcome screen, when the person finishes setting up
-     their own profile. The portal's record of onboarding, and with `active`
-     what makes someone a member of the roster. */
+     their own profile. Only ever present on your own record, and only read
+     by the welcome gate — the roster does not care. */
   onboarded?: boolean;
   photo?: string;
   bench?: PersonBench;

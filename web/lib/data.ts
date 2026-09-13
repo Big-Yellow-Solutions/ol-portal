@@ -144,15 +144,16 @@ export const isActive = (person: { active?: boolean } | undefined | null): boole
 
 /* Who is on the roster — the Directory and Community's Members tab.
 
-   A member is anyone still active who has finished the welcome screen. That
-   screen is the only writer of `onboarded` (welcome/page.tsx → PATCH
-   /profile), so the flag is the portal's own record of onboarding rather than
-   something inferred from role, from having a sign-in, or from how full the
-   profile is. Every role qualifies: an Admin is a colleague to find and
-   message like anyone else. Offboarded people stay in `people` so an old
-   owner reference still resolves to a name, but are never on the roster. */
+   A member is anyone with a portal account who has not been offboarded. An
+   account is created by the invite (admin.mjs provisionAccount writes the
+   sign-in and the PERSON record together), so having a record is having an
+   account; whether the person has filled in the welcome screen yet does not
+   matter — their card simply reads "No profile yet" until they do. Every
+   role qualifies: an Admin is a colleague to find and message like anyone
+   else. Offboarded people stay in `people` so an old owner reference still
+   resolves to a name, but are never on the roster. */
 export const isMember = (person: Person | undefined | null): boolean =>
-  isActive(person) && person?.onboarded === true;
+  !!person && isActive(person);
 
 export function fullName(person: Person | undefined | null): string {
   if (!person) return "";
