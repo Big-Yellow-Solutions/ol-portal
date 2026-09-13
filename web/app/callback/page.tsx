@@ -4,22 +4,26 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
 import { CONFIG } from "@/lib/config";
 
 /* Where AuthKit lands after a hosted sign-in.
 
    The exchange itself is not done here — the AuthKit client mounted in the
    root layout spots the ?code= and trades it for a session, then routes on to
-   wherever the user was heading. This route exists so that lands somewhere
-   real: authkit-js only performs the exchange when the current pathname equals
-   the registered redirect URI's path, and Amplify rewrites every unmatched
-   path to /index.html with a 200, so without a page here a misconfigured
-   redirect URI would serve the app shell and drop the code in silence rather
-   than 404 where anyone would notice.
+   wherever the user was heading (onRedirectCallback in lib/auth-workos.tsx,
+   reading the page out of the OAuth `state`). This route exists so that lands
+   somewhere real: authkit-js only performs the exchange when the current
+   pathname equals the registered redirect URI's path, and Amplify rewrites
+   every unmatched path to /index.html with a 200, so without a page here a
+   misconfigured redirect URI would serve the app shell and drop the code in
+   silence rather than 404 where anyone would notice.
 
    So this page waits, and says something useful when waiting is the wrong
-   answer. */
+   answer. It does not route on its own once the session is live: it used to
+   answer "signedIn" with router.replace("/"), and because Next runs the
+   newest navigation and discards one still pending, that replaced the
+   provider's navigation back to the user's page with a trip to the home
+   page every time — the second half of the 9/13/26 redirect bug. */
 
 /* Long enough not to trip over a slow token exchange, short enough that a
    dead-ended sign-in doesn't sit on a spinner indefinitely. The usual cause is
@@ -28,7 +32,6 @@ import { CONFIG } from "@/lib/config";
 const STUCK_AFTER_MS = 10_000;
 
 export default function CallbackPage() {
-  const { status } = useAuth();
   const router = useRouter();
   const [problem, setProblem] = useState<string | null>(null);
   const [stuck, setStuck] = useState(false);
@@ -57,12 +60,6 @@ export default function CallbackPage() {
     const timer = window.setTimeout(() => setStuck(true), STUCK_AFTER_MS);
     return () => window.clearTimeout(timer);
   }, [router]);
-
-  useEffect(() => {
-    /* Belt and braces. onRedirectCallback normally moves the user on; this
-       covers arriving here with a session already live. */
-    if (status === "signedIn") router.replace("/");
-  }, [status, router]);
 
   const failed = problem ?? (stuck ? STUCK_MESSAGE : null);
 

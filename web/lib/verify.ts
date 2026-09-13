@@ -13,6 +13,7 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
 import { CONFIG } from "@/lib/config";
+import { safeReturnTo as safePath } from "@/lib/return-to";
 
 export interface VerifyStatus {
   email: string;
@@ -87,23 +88,13 @@ export function useSessionVerified(authStatus: string): Verification {
 }
 
 /** The verify page, carrying where to go afterwards. */
-export function verifyPath(returnTo: string) {
-  return `/verify?returnTo=${encodeURIComponent(returnTo)}`;
-}
+export { verifyPath } from "@/lib/return-to";
 
 /** Resolve a `returnTo` query value to a path on this origin, or "/". It
- *  arrives through the URL, so it is treated the way the OAuth `state` is. */
+ *  arrives through the URL, so it is treated the way the OAuth `state` is
+ *  (lib/return-to.ts) — plus one rule of this page's own: never bounce back
+ *  into the verify page itself. */
 export function safeReturnTo(raw: string | null | undefined) {
-  if (!raw) return "/";
-  let url: URL;
-  try {
-    url = new URL(raw, window.location.origin);
-  } catch {
-    return "/";
-  }
-  if (url.origin !== window.location.origin) return "/";
-  const path = `${url.pathname}${url.search}${url.hash}`;
-  if (!path.startsWith("/") || path.startsWith("//")) return "/";
-  // Never bounce back into the verify page itself.
+  const path = safePath(raw);
   return path.startsWith("/verify") ? "/" : path;
 }

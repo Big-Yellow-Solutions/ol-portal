@@ -11,7 +11,8 @@ import { useAuth } from "@/lib/auth";
 import { PortalDataProvider, usePortalData, WELCOME_SKIPPED_KEY } from "@/lib/portal-data";
 import { api } from "@/lib/api";
 import { readPhoto } from "@/lib/photo";
-import { useSessionVerified, verifyPath } from "@/lib/verify";
+import { loginPath, verifyPath } from "@/lib/return-to";
+import { useSessionVerified } from "@/lib/verify";
 
 export default function WelcomePage() {
   const { status } = useAuth();
@@ -20,7 +21,7 @@ export default function WelcomePage() {
   const verification = useSessionVerified(status);
 
   useEffect(() => {
-    if (status === "signedOut") router.replace("/login");
+    if (status === "signedOut") router.replace(loginPath("/welcome"));
     else if (status === "signedIn" && verification === "needed")
       router.replace(verifyPath("/welcome"));
   }, [status, verification, router]);

@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { useSessionVerified, verifyPath } from "@/lib/verify";
+import { currentPath, loginPath, verifyPath } from "@/lib/return-to";
+import { useSessionVerified } from "@/lib/verify";
 import { MessagesProvider } from "@/lib/messages";
 import { NotificationsProvider } from "@/lib/notifications";
 import { PortalDataProvider } from "@/lib/portal-data";
@@ -20,12 +21,14 @@ export default function PortalLayout({
      nothing asks the API for data — until the session has entered it. */
   const verification = useSessionVerified(status);
 
+  /* Both detours carry the page (path and query) so it can be restored
+     afterwards. "signedOut" is only ever conclusive here: the provider
+     reports "loading" until it has finished checking the session, including
+     the one it can recover from a cookie after a document load. */
   useEffect(() => {
-    if (status === "signedOut") router.replace("/login");
-    else if (status === "signedIn" && verification === "needed") {
-      const { pathname, search } = window.location;
-      router.replace(verifyPath(`${pathname}${search}`));
-    }
+    if (status === "signedOut") router.replace(loginPath(currentPath()));
+    else if (status === "signedIn" && verification === "needed")
+      router.replace(verifyPath(currentPath()));
   }, [status, verification, router]);
 
   if (status !== "signedIn" || verification !== "ok") {
