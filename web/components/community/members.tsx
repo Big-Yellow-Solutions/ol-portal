@@ -4,11 +4,12 @@ import { useMemo, useState } from "react";
 import { PlusIcon, SearchIcon } from "@/components/community/icons";
 import { FIELD } from "@/components/community/primitives";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
-import { PersonCard, type BenchPerson } from "@/components/bench/person-card";
+import { PersonCard } from "@/components/bench/person-card";
 import { toast } from "sonner";
 import { startActingAs } from "@/lib/act-as";
 import { ApiError } from "@/lib/api";
 import { EVERYONE } from "@/lib/community";
+import type { BenchPerson } from "@/lib/data";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,9 @@ export function CommunityMembers({
   const { people, me, role, refresh } = usePortalData();
 
   /* Admin "act as", from the card the Admin is already looking at — the other
-     way in is the Admin page's user table, and both call the same helper. */
+     way in is the Admin page's user table, and both call the same helper.
+     Offered for every card but your own and another Admin's: the server
+     refuses both, so the menu simply does not appear. */
   const impersonate = async (username: string, name: string) => {
     try {
       await startActingAs(username, name);
@@ -139,7 +142,9 @@ export function CommunityMembers({
               onMessage={() => openWith([p.id])}
               onEdit={() => setEditingKey(p.id)}
               onImpersonate={
-                role === "Admin" && p.id !== me ? () => impersonate(p.id, p.name) : undefined
+                role === "Admin" && p.id !== me && people[p.id]?.role !== "Admin"
+                  ? () => impersonate(p.id, p.name)
+                  : undefined
               }
             />
           ))}

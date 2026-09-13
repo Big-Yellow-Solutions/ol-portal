@@ -6,13 +6,13 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { StarGlyph } from "@/components/shell/top-nav";
 import { EditProfileDialog } from "@/components/bench/edit-profile-dialog";
-import { benchRoster, PersonCard } from "@/components/bench/person-card";
+import { PersonCard } from "@/components/bench/person-card";
 import { PencilIcon } from "@/components/community/icons";
 import { Panel } from "@/components/community/primitives";
 import { api, ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { fullName, initials } from "@/lib/data";
-import { roleLine, useMessages } from "@/lib/messages";
+import { benchRoster, fullName, initials, roleLine } from "@/lib/data";
+import { useMessages } from "@/lib/messages";
 import { readPhoto } from "@/lib/photo";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
@@ -62,9 +62,10 @@ export default function ProfilePage() {
   const [busy, setBusy] = useState<"photo" | "email" | "phone" | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  /* The same card the Directory draws for this person. Admins are not on the
-     bench (benchRoster lists Lab Leaders and Contributors), so for them the
-     aside says so instead of drawing a card nobody will see. */
+  /* The same card the Directory draws for this person. Someone off the
+     roster — not yet through the welcome screen, or offboarded — gets no
+     card there, so the aside says why instead of drawing one nobody will
+     see. Role is not a reason: an Admin's card is as real as anyone's. */
   const card = useMemo(
     () =>
       person && username
@@ -386,8 +387,21 @@ export default function ProfilePage() {
               </>
             ) : (
               <p className="m-0 text-[13px] text-warm-gray">
-                Admins are not listed on the bench. The Directory shows Lab
-                Leaders and Contributors.
+                {mine ? (
+                  <>
+                    Not on the Directory yet. Finish setting up your profile on
+                    the{" "}
+                    <Link href="/welcome" className="text-violet-deep hover:underline">
+                      welcome screen
+                    </Link>{" "}
+                    and your card appears there and on Community&apos;s Members
+                    tab.
+                  </>
+                ) : person.active === false ? (
+                  `${first} was offboarded and is no longer listed.`
+                ) : (
+                  `${first} has not finished setting up their profile yet, so they are not listed.`
+                )}
               </p>
             )}
           </Panel>
