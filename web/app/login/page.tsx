@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth, type LoginStep } from "@/lib/auth";
 import { passwordProblem, pwnedCount } from "@/lib/password";
+import { safeReturnTo } from "@/lib/return-to";
 
 type Step =
   | "signin"
@@ -27,6 +28,17 @@ const BTN_LABEL: Record<Step, string> = {
   forgotconfirm: "Reset password",
 };
 
+/* Where to go once signed in: the page that sent us here (the portal
+   layout's ?returnTo=, lib/return-to.ts), or the root. Read off the URL
+   rather than through useSearchParams, which forces a Suspense boundary
+   under `output: "export"` — and read at the moment of use, never during
+   render: when this page arrives by client-side navigation the router
+   commits the new URL after the first render, so a render-time read would
+   still see the page that sent us here and find no returnTo at all. */
+function requestedReturnTo() {
+  return safeReturnTo(new URLSearchParams(window.location.search).get("returnTo"));
+}
+
 export default function LoginPage() {
   const auth = useAuth();
   const router = useRouter();
@@ -41,27 +53,29 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (auth.status === "signedIn") router.replace("/");
+    if (auth.status === "signedIn") router.replace(requestedReturnTo());
   }, [auth.status, router]);
 
   /* Under AuthKit the credential screens live on WorkOS's domain, so this page
      is a staging post rather than a form: bounce straight out to the hosted
-     sign-in. The ref keeps a re-render — or React's development double-invoke —
-     from starting a second authorization while the first is still navigating,
+     sign-in, with the page to come back to riding along as OAuth `state`.
+     The ref keeps a re-render — or React's development double-invoke — from
+     starting a second authorization while the first is still navigating,
      which would leave a stale PKCE verifier behind and fail the exchange. */
   const { hostedSignIn, status } = auth;
   const redirecting = useRef(false);
   useEffect(() => {
     if (!hostedSignIn || status !== "signedOut" || redirecting.current) return;
     redirecting.current = true;
-    hostedSignIn().catch(() => {
+    const returnTo = requestedReturnTo();
+    hostedSignIn(returnTo === "/" ? undefined : returnTo).catch(() => {
       redirecting.current = false;
     });
   }, [hostedSignIn, status]);
 
   const applyStep = (next: LoginStep) => {
     if (next === "DONE") {
-      router.replace("/");
+      router.replace(requestedReturnTo());
       return;
     }
     if (next === "NEW_PASSWORD_REQUIRED") setStep("newpw");

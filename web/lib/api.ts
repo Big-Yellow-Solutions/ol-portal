@@ -35,14 +35,18 @@ export async function api<T = unknown>(
   path: string,
   opts: RequestInit & { skipActAs?: boolean } = {}
 ): Promise<T> {
+  /* Three answers from the token source (lib/session.ts): a token, null for
+     a session that is conclusively gone, or a rejection for a renewal that
+     failed for now and may succeed next time — that last one propagates as
+     an ordinary error, never as a sign-out. */
   const token = await getAuthToken();
 
-  /* No token means the session is gone: a refresh that cannot be renewed
-     resolves to null rather than throwing. Sending the request anyway is not
+  /* No token means the session is gone. Sending the request anyway is not
      harmless — the Authorization header is the API's declared identity
      source, so API Gateway rejects a request without one with a 401 before
      the authorizer ever runs, and the 401 branch below then does exactly what
-     this does, one pointless round trip later. */
+     this does, one pointless round trip later. endSession is a no-op when
+     the provider is already on its way to sign-in with the page in hand. */
   if (!token) {
     await endSession();
     throw new ApiError("Unauthorized", 401);

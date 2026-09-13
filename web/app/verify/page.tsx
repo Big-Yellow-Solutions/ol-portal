@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { VerifyCard } from "@/components/verify-card";
 import { useAuth } from "@/lib/auth";
 import { CONFIG } from "@/lib/config";
+import { currentPath, loginPath } from "@/lib/return-to";
 import { safeReturnTo } from "@/lib/verify";
 
 /* Where a fresh sign-in lands before the portal: AuthKit has signed the
@@ -18,7 +19,10 @@ export default function VerifyPage() {
 
   useEffect(() => {
     if (CONFIG.authProvider !== "workos") router.replace("/");
-    else if (status === "signedOut") router.replace("/login");
+    /* Carry this page, returnTo and all, so a session recovered on the far
+       side of sign-in comes back to enter its code and then goes on to
+       where it was originally headed. */
+    else if (status === "signedOut") router.replace(loginPath(currentPath()));
   }, [status, router]);
 
   const done = useCallback(() => {
