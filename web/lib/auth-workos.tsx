@@ -115,6 +115,24 @@ export function WorkosAuthProvider({
     <AuthKitProvider
       clientId={CONFIG.workosClientId}
       redirectUri={`${origin}${WORKOS_CALLBACK_PATH}`}
+      /* authkit-js's own default off localhost is devMode={false}, which
+         keeps the refresh token in an HttpOnly cookie on api.workos.com —
+         cross-site from this origin, so Safari's ITP and any browser with
+         third-party cookies blocked (a default in several) refuse to send it
+         on the silent background refresh. That refresh then fails for real,
+         which onRefreshFailure below correctly reads as "session's dead" and
+         answers with a full re-authentication redirect — losing whatever the
+         page was in the middle of. WorkOS's own docs are explicit about this:
+         devMode={true} is what you're supposed to set until a custom AuthKit
+         domain is configured (see workos.com/docs/custom-domains/authkit),
+         which moves the refresh token to localStorage instead — same-origin,
+         so no browser cookie policy touches it. The trade a custom domain
+         buys back is an HttpOnly cookie that JavaScript can't read at all;
+         until one is set up, the token sits in localStorage, so an XSS bug
+         elsewhere in the app could exfiltrate it. Revert this — and add
+         apiHostname pointing at the verified custom domain — once one
+         exists. */
+      devMode={true}
       onRedirectCallback={({ state }) => {
         /* `state` round-trips as plaintext in the URL and WorkOS does not
            integrity-protect it, so it is treated as attacker-controlled:
