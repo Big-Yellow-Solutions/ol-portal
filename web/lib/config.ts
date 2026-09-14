@@ -17,6 +17,13 @@ export const CONFIG = {
   authProvider:
     process.env.NEXT_PUBLIC_AUTH_PROVIDER === "workos" ? "workos" : "cognito",
   workosClientId: process.env.NEXT_PUBLIC_WORKOS_CLIENT_ID ?? "",
+  /* AuthKit's default api.workos.com makes the session-refresh cookie
+     third-party from this origin's point of view, which Safari (by default)
+     and several browsers' privacy settings simply refuse to send — see the
+     comment on AuthKitProvider in auth-workos.tsx. Empty falls back to
+     AuthKit's own api.workos.com; only production has a verified custom
+     domain so far. */
+  workosApiHostname: process.env.NEXT_PUBLIC_WORKOS_API_HOSTNAME ?? "",
 } as const;
 
 /* Where AuthKit sends the browser back after a hosted sign-in.
