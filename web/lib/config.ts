@@ -17,6 +17,12 @@ export const CONFIG = {
   authProvider:
     process.env.NEXT_PUBLIC_AUTH_PROVIDER === "workos" ? "workos" : "cognito",
   workosClientId: process.env.NEXT_PUBLIC_WORKOS_CLIENT_ID ?? "",
+  /* WorkOS's "Authentication API" custom domain (Dashboard → Domains →
+     Authentication API) — distinct from the AuthKit domain, which only
+     serves the hosted sign-in pages. See the comment on AuthKitProvider in
+     auth-workos.tsx. Empty falls back to authkit-js's own api.workos.com;
+     only production has one configured so far. */
+  workosApiHostname: process.env.NEXT_PUBLIC_WORKOS_API_HOSTNAME ?? "",
 } as const;
 
 /* Where AuthKit sends the browser back after a hosted sign-in.

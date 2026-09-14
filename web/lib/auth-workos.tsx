@@ -128,26 +128,25 @@ export function WorkosAuthProvider({
          cause of "the portal keeps refreshing and I lose my work": not
          random, but tied to switching away from the tab and back.
 
-         WorkOS's own docs say devMode={true} is what to set until a custom
-         AuthKit domain is configured — it moves the refresh token to
-         localStorage instead, same-origin and untouched by any browser
-         cookie policy. The trade: an HttpOnly cookie can't be read by
-         JavaScript at all; localStorage can, so an XSS bug elsewhere in the
-         app could exfiltrate the token until a custom domain replaces this.
+         A first attempt at fixing this properly pointed apiHostname at
+         login.optimisticlabs.com and broke sign-in outright: that domain is
+         WorkOS's *AuthKit* custom domain (Dashboard → Domains → AuthKit),
+         which only serves the hosted sign-in pages. authkit-js builds the
+         interactive authorize redirect as
+         `${apiHostname}/user_management/authorize`, and that path doesn't
+         exist there — 404 on every sign-in attempt.
 
-         This was briefly swapped for a custom AuthKit domain
-         (login.optimisticlabs.com, apiHostname) instead, on the reasoning
-         that it would restore the HttpOnly-cookie property while still
-         being first-party. That broke sign-in outright in production:
-         authkit-js builds the interactive authorize redirect as
-         `${apiHostname}/user_management/authorize`, and the custom AuthKit
-         domain apparently doesn't serve that path — 404. Reverted. Do not
-         retry apiHostname without first confirming directly with WorkOS
-         (support, or a working example from their own SDKs) that a custom
-         AuthKit domain is meant to receive the full user_management API
-         surface from a client-side app, not just something their own
-         backend redirects through internally. */
-      devMode={true}
+         WorkOS Dashboard → Domains has a *third*, separate entry —
+         "Authentication API" — specifically for this: "Domain to use for
+         WorkOS authentication requests." auth.optimisticlabs.com is that
+         one, confirmed (before this was ever deployed) by hitting
+         `${apiHostname}/user_management/authorize` directly and getting the
+         same redirect api.workos.com itself gives, not a 404. Because it's
+         a subdomain of this app's own registrable domain, the refresh
+         cookie set there counts as same-site to a browser — sidestepping
+         third-party-cookie blocking — while staying HttpOnly, unlike the
+         devMode={true}/localStorage stopgap this replaces. */
+      apiHostname={CONFIG.workosApiHostname || undefined}
       onRedirectCallback={({ state }) => {
         /* `state` round-trips as plaintext in the URL and WorkOS does not
            integrity-protect it, so it is treated as attacker-controlled:
