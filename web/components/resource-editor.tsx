@@ -12,7 +12,7 @@
    record exists before the bytes land, so an upload that fails leaves a
    visible draft to retry rather than a silent nothing. */
 
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { readCover } from "@/lib/photo";
 import { Markdown } from "@/lib/markdown";
+import { ResourcePostImage } from "@/components/resources/post-image";
 import { usePortalData } from "@/lib/portal-data";
 import {
   MAX_DESCRIPTION_CHARS,
@@ -54,6 +55,17 @@ import type {
 const NO_LAB = "__all__";
 const DOC_ACCEPT = ".pdf,.pptx,.docx,application/pdf";
 const VIDEO_ACCEPT = "video/mp4,video/webm,video/quicktime";
+const MAX_POST_IMAGE_BYTES = 8 * 1024 * 1024;
+
+/** A picture chosen for the post body before it has anywhere to live yet —
+ *  the record it belongs to might not even exist until Save. `token`
+ *  identifies it inside the markdown as `embed:pending:{token}` until Save
+ *  uploads it and rewrites that into the real `embed:{fileName}`. */
+interface PendingImage {
+  token: string;
+  file: File;
+  previewUrl: string;
+}
 
 interface ResourceEditorProps {
   /** Editing an existing item, or null when creating one of `createType`. */
@@ -98,9 +110,12 @@ export function ResourceEditor({
   );
   const [transcript, setTranscript] = useState(resource?.transcript ?? "");
   const [file, setFile] = useState<File | null>(null);
+  const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const coverRef = useRef<HTMLInputElement>(null);
+  const postImageRef = useRef<HTMLInputElement>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const needsFile = type === "file" || (type === "video" && source === "upload");
   const existingFile = resource?.fileName;
@@ -120,6 +135,55 @@ export function ResourceEditor({
       toast.error(err instanceof Error ? err.message : "Could not read that image.");
     }
   };
+
+  /* Drops a `![name](embed:pending:{token})` marker at the cursor (or at the
+     end, with no textarea to ask) and puts the cursor back after it, so
+     inserting a second image doesn't land on top of the first. The alt text
+     defaults to the file's own name — worth having something there over
+     nothing, and easy to edit by hand afterward. */
+  const insertPostImage = (f: File | undefined) => {
+    if (!f) return;
+    if (!f.type.startsWith("image/")) return toast.error("Choose an image file.");
+    if (f.size > MAX_POST_IMAGE_BYTES)
+      return toast.error(`Images can be up to ${Math.round(MAX_POST_IMAGE_BYTES / 1048576)} MB.`);
+
+    const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    setPendingImages((xs) => [...xs, { token, file: f, previewUrl: URL.createObjectURL(f) }]);
+
+    const alt = f.name.replace(/\.[^.]+$/, "");
+    const marker = `![${alt}](embed:pending:${token})`;
+    const el = bodyRef.current;
+    const start = el?.selectionStart ?? body.length;
+    const end = el?.selectionEnd ?? body.length;
+    const next = `${body.slice(0, start)}${marker}${body.slice(end)}`;
+    setBody(next);
+    requestAnimationFrame(() => {
+      const pos = start + marker.length;
+      el?.focus();
+      el?.setSelectionRange(pos, pos);
+    });
+  };
+
+  /* Preview needs to show a picture that hasn't been uploaded yet (a pending
+     one, from its local object URL) right alongside ones already saved on
+     this post (resolved through the API, same as the live viewer does). */
+  const resolvePreviewImage = useCallback(
+    (name: string, alt: string) => {
+      const token = name.match(/^pending:(.+)$/)?.[1];
+      if (token) {
+        const pending = pendingImages.find((p) => p.token === token);
+        if (!pending) return <span className="text-xs text-ink-mute">Image removed</span>;
+        // eslint-disable-next-line @next/next/no-img-element -- local object URL, not a static asset
+        return <img src={pending.previewUrl} alt={alt} className="my-3 max-w-full rounded-lg border border-hair" />;
+      }
+      return resource ? (
+        <ResourcePostImage resourceId={resource.id} fileName={name} alt={alt} />
+      ) : (
+        <span className="text-xs text-ink-mute">{alt || "image"}</span>
+      );
+    },
+    [pendingImages, resource]
+  );
 
   const save = async (publish?: boolean) => {
     if (!title.trim()) return toast.error("Give this resource a title.");
@@ -152,7 +216,7 @@ export function ResourceEditor({
       if (needsFile && file)
         payload.file = { name: file.name, size: file.size, type: file.type || "application/octet-stream" };
 
-      const saved = await api<ResourceItem & { uploadUrl?: string }>(
+      let saved = await api<ResourceItem & { uploadUrl?: string }>(
         resource ? `/resources/${resource.id}` : "/resources",
         { method: resource ? "PATCH" : "POST", body: JSON.stringify(payload) }
       );
@@ -164,6 +228,40 @@ export function ResourceEditor({
           body: file,
         });
         if (!put.ok) throw new Error(`Upload to storage failed (${put.status})`);
+      }
+
+      /* The record now has an id, which is what a pending image needed
+         before it could go anywhere. Upload each one still referenced in the
+         body, then rewrite those `embed:pending:{token}` markers into the
+         real `embed:{fileName}` and save the corrected body — a second,
+         short PATCH, only when there was actually a pending image to fold in. */
+      const used = pendingImages.filter((p) => body.includes(`embed:pending:${p.token})`));
+      if (used.length > 0) {
+        let finalBody = body;
+        for (const pending of used) {
+          const { fileName, uploadUrl } = await api<{ fileName: string; uploadUrl: string }>(
+            `/resources/${saved.id}/images`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                name: pending.file.name,
+                size: pending.file.size,
+                type: pending.file.type || "application/octet-stream",
+              }),
+            }
+          );
+          const put = await fetch(uploadUrl, {
+            method: "PUT",
+            headers: { "content-type": pending.file.type || "application/octet-stream" },
+            body: pending.file,
+          });
+          if (!put.ok) throw new Error(`Image upload failed (${put.status})`);
+          finalBody = finalBody.split(`embed:pending:${pending.token})`).join(`embed:${fileName})`);
+        }
+        saved = await api<ResourceItem>(`/resources/${saved.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ body: finalBody }),
+        });
       }
 
       toast.success(`${saved.title} saved.`);
@@ -266,7 +364,31 @@ export function ResourceEditor({
                   <TabsTrigger value="preview">Preview</TabsTrigger>
                 </TabsList>
                 <TabsContent value="write">
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => postImageRef.current?.click()}
+                    >
+                      Insert image
+                    </Button>
+                    <span className="text-xs text-ink-mute">
+                      PNG, JPEG, WebP, or GIF, up to {Math.round(MAX_POST_IMAGE_BYTES / 1048576)} MB.
+                    </span>
+                    <input
+                      ref={postImageRef}
+                      type="file"
+                      hidden
+                      accept="image/*"
+                      onChange={(e) => {
+                        insertPostImage(e.target.files?.[0]);
+                        e.target.value = "";
+                      }}
+                    />
+                  </div>
                   <Textarea
+                    ref={bodyRef}
                     value={body}
                     onChange={(e) => setBody(e.target.value)}
                     rows={14}
@@ -275,13 +397,14 @@ export function ResourceEditor({
                   />
                   <p className="mt-1 text-xs text-ink-mute">
                     Markdown: <code>## heading</code>, <code>**bold**</code>, <code>- list</code>,{" "}
-                    <code>[link](https://…)</code>, <code>![image](https://…)</code>. Put{" "}
-                    <code>@[resource](RS-003)</code> on its own line to embed another resource inline.
+                    <code>[link](https://…)</code>. Use Insert image above for a picture from your
+                    device, or <code>![image](https://…)</code> to link one already hosted elsewhere.
+                    Put <code>@[resource](RS-003)</code> on its own line to embed another resource inline.
                   </p>
                 </TabsContent>
                 <TabsContent value="preview">
                   <div className="rounded-lg border border-hair p-4">
-                    <Markdown text={body} />
+                    <Markdown text={body} resolveEmbedImage={resolvePreviewImage} />
                   </div>
                 </TabsContent>
               </Tabs>

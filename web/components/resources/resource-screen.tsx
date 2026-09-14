@@ -111,7 +111,13 @@ export function ResourceScreen({
         )}
       </main>
 
-      <aside className="flex flex-col gap-4">
+      {/* Sticky rather than static: the sidebar's own content (Details, and
+          Related/Admin only when there's anything to say) is almost always
+          shorter than the article next to it. Static, it would end partway
+          down the page and leave the rest of the scroll looking like a blank
+          gutter next to the body text; pinned below the top nav, it stays in
+          view instead. */}
+      <aside className="sticky top-[84px] flex flex-col gap-4 self-start">
         <DetailPanel
           title="Details"
           rows={[

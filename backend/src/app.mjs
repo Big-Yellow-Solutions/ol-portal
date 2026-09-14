@@ -496,13 +496,17 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/templates") return await templates.createTemplate(ctx, body);
   if (method === "PATCH" && seg[0] === "templates" && seg[1]) return await templates.updateTemplate(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "templates" && seg[1]) return await templates.deleteTemplate(ctx, seg[1]);
-  /* Resource Library and Courses. The `/download` and `/progress` sub-routes
-     are matched before the bare `{id}` forms, which the sequential router
-     would otherwise swallow. */
+  /* Resource Library and Courses. The `/download`, `/images`, and `/progress`
+     sub-routes are matched before the bare `{id}` forms, which the sequential
+     router would otherwise swallow. */
   if (method === "GET" && path === "/resources") return await resources.listResources(ctx);
   if (method === "POST" && path === "/resources") return await resources.createResource(ctx, body);
   if (method === "GET" && seg[0] === "resources" && seg[1] && seg[2] === "download")
     return await resources.downloadResource(ctx, seg[1], ctx.query);
+  if (method === "POST" && seg[0] === "resources" && seg[1] && seg[2] === "images")
+    return await resources.addPostImage(ctx, seg[1], body);
+  if (method === "GET" && seg[0] === "resources" && seg[1] && seg[2] === "images" && seg[3])
+    return await resources.getPostImage(ctx, seg[1], decodeURIComponent(seg[3]));
   if (method === "GET" && seg[0] === "resources" && seg[1]) return await resources.getResource(ctx, seg[1]);
   if (method === "PATCH" && seg[0] === "resources" && seg[1]) return await resources.updateResource(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "resources" && seg[1]) return await resources.deleteResource(ctx, seg[1]);

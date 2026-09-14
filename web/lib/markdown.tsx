@@ -9,13 +9,24 @@
    through (javascript: hrefs and data: URLs that aren't images).
 
    The dialect is deliberately small — headings, emphasis, code, links,
-   images, lists, quotes, rules — plus one addition the PRD asks for:
+   images, lists, quotes, rules — plus two additions:
 
      @[resource](RS-003)
 
    embeds another Resource Item inline, which is how a post becomes the
    connective narrative around a downloadable checklist (PRD 3.2) instead of
-   just linking away to it. */
+   just linking away to it.
+
+     ![alt](embed:name)
+
+   is what the editor's "Insert image" button writes for a picture uploaded
+   straight into the post (see resource-editor.tsx and post-image.tsx) — the
+   image lives in the resource's own private S3 prefix rather than at some
+   URL the author had to go host it at themselves. `resolveEmbedImage` turns
+   the reference into the actual `<img>`; without one it falls back to the alt
+   text, the same shape as an unresolved @[resource] embed. A plain
+   `![alt](https://…)` still works exactly as before for a picture that
+   really is hosted elsewhere. */
 
 import React from "react";
 
@@ -23,12 +34,17 @@ export interface MarkdownProps {
   text: string;
   /** Renders an @[resource](ID) embed. Omit and the embed falls back to a link. */
   renderEmbed?: (id: string) => React.ReactNode;
+  /** Resolves an `![alt](embed:name)` image — one uploaded straight into this
+   *  post rather than linked from elsewhere. Omit and it falls back to the alt
+   *  text, same as any other embed with no resolver wired up. */
+  resolveEmbedImage?: (name: string, alt: string) => React.ReactNode;
   className?: string;
 }
 
 const SAFE_HREF = /^(https?:|mailto:)/i;
 const SAFE_IMAGE = /^(https:|data:image\/)/i;
 const EMBED_LINE = /^@\[resource\]\(\s*([A-Za-z0-9-]+)\s*\)$/;
+const EMBED_IMAGE = /^embed:(.+)$/;
 
 /* Inline pass. Ordered so that code spans win over emphasis (backticks are
    literal inside them) and links win over bare images.
@@ -45,7 +61,11 @@ const INLINE = [
   { kind: "em", re: /(?:\*([^*\n]+)\*|_([^_\n]+)_)/ },
 ] as const;
 
-function inline(text: string, keyBase: string): React.ReactNode[] {
+function inline(
+  text: string,
+  keyBase: string,
+  resolveEmbedImage?: (name: string, alt: string) => React.ReactNode
+): React.ReactNode[] {
   const out: React.ReactNode[] = [];
   let rest = text;
   let n = 0;
@@ -73,8 +93,17 @@ function inline(text: string, keyBase: string): React.ReactNode[] {
         </code>
       );
     } else if (best.kind === "image") {
+      const embedded = b.match(EMBED_IMAGE);
       out.push(
-        SAFE_IMAGE.test(b) ? (
+        embedded ? (
+          <React.Fragment key={key}>
+            {resolveEmbedImage ? (
+              resolveEmbedImage(embedded[1], a)
+            ) : (
+              <span className="text-xs text-ink-mute">{a || "image"}</span>
+            )}
+          </React.Fragment>
+        ) : SAFE_IMAGE.test(b) ? (
           /* Author-supplied URLs can't be enumerated for next/image's
              remotePatterns allowlist, and the export is unoptimized anyway. */
           // eslint-disable-next-line @next/next/no-img-element
@@ -100,9 +129,13 @@ function inline(text: string, keyBase: string): React.ReactNode[] {
         )
       );
     } else if (best.kind === "strong") {
-      out.push(<strong key={key} className="font-semibold text-ink">{inline(a, key)}</strong>);
+      out.push(
+        <strong key={key} className="font-semibold text-ink">
+          {inline(a, key, resolveEmbedImage)}
+        </strong>
+      );
     } else {
-      out.push(<em key={key}>{inline(a ?? b, key)}</em>);
+      out.push(<em key={key}>{inline(a ?? b, key, resolveEmbedImage)}</em>);
     }
 
     rest = rest.slice(best.index + whole.length);
@@ -112,7 +145,7 @@ function inline(text: string, keyBase: string): React.ReactNode[] {
 
 /* Block pass. Consumes the source line by line, grouping runs of list items,
    fenced code, and quotes rather than re-scanning with multiline regexes. */
-export function Markdown({ text, renderEmbed, className }: MarkdownProps) {
+export function Markdown({ text, renderEmbed, resolveEmbedImage, className }: MarkdownProps) {
   const lines = (text ?? "").replace(/\r\n/g, "\n").split("\n");
   const blocks: React.ReactNode[] = [];
   let i = 0;
@@ -169,8 +202,8 @@ export function Markdown({ text, renderEmbed, className }: MarkdownProps) {
         level === 1 ? "text-xl" : level === 2 ? "text-lg" : "text-base";
       const Tag = `h${Math.min(level + 1, 6)}` as "h2";
       blocks.push(
-        <Tag key={k()} className={`mt-5 mb-2 font-serif ${size} text-ink first:mt-0`}>
-          {inline(heading[2], k())}
+        <Tag key={k()} className={`mt-5 mb-2 font-sans font-semibold ${size} text-ink first:mt-0`}>
+          {inline(heading[2], k(), resolveEmbedImage)}
         </Tag>
       );
       i++;
@@ -186,7 +219,7 @@ export function Markdown({ text, renderEmbed, className }: MarkdownProps) {
           key={k()}
           className="my-3 border-l-2 border-violet-light pl-4 text-sm text-ink-soft italic"
         >
-          {inline(body.join(" "), k())}
+          {inline(body.join(" "), k(), resolveEmbedImage)}
         </blockquote>
       );
       continue;
@@ -209,7 +242,7 @@ export function Markdown({ text, renderEmbed, className }: MarkdownProps) {
           }`}
         >
           {items.map((item, idx) => (
-            <li key={idx}>{inline(item, `${k()}-${idx}`)}</li>
+            <li key={idx}>{inline(item, `${k()}-${idx}`, resolveEmbedImage)}</li>
           ))}
         </List>
       );
@@ -222,7 +255,7 @@ export function Markdown({ text, renderEmbed, className }: MarkdownProps) {
       para.push(lines[i++].trim());
     blocks.push(
       <p key={k()} className="my-3 text-sm leading-relaxed text-ink-soft first:mt-0">
-        {inline(para.join(" "), k())}
+        {inline(para.join(" "), k(), resolveEmbedImage)}
       </p>
     );
   }

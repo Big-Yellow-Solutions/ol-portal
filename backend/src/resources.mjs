@@ -49,6 +49,9 @@ export const VISIBILITIES = ["library", "course-only"];
    as-is, so a 20-minute screen recording has to fit whole. */
 const MAX_DOC_BYTES = 50 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
+/* A post can hold any number of these, unlike the one-per-resource file/video
+   attachment, so the ceiling is per-image rather than sized for a whole deck. */
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_BODY_CHARS = 100_000;
 /* Exported because the editor prints it under the field. A description that
    silently lost its tail was the whole complaint, so the number the browser
@@ -227,6 +230,7 @@ export async function deleteResource(ctx, id) {
     return resp(409, { error: `Still used by ${used.map(c => c.title).join(", ")}. Remove it from those courses first.` });
 
   await discard(r.key);
+  await Promise.all((r.images || []).map(discard));
   await del("RESOURCE", id);
   await writeAudit(ctx.me.sk, "resource.deleted", `${id} · ${r.title}`);
   return resp(200, { deleted: id });
@@ -361,6 +365,58 @@ async function attachUpload(next, file, maxBytes) {
     Bucket: BUCKET, Key: next.key, ContentType: mime, ContentLength: size
   }), { expiresIn: 900 });
   return { uploadUrl };
+}
+
+/* ---------- inline post images ---------- */
+
+/* A post can hold any number of these — unlike the single file/video
+   attachment there's no one slot on the record to overwrite, so each call
+   mints a fresh key and appends it to `images`. That list exists purely so
+   deleteResource knows what to clean up in S3; the markdown body (an
+   `![alt](embed:name)` per lib/markdown.tsx) is the only place a name is
+   actually read back from. */
+export async function addPostImage(ctx, id, body) {
+  if (ctx.role !== "Admin") return resp(403, { error: "Editing resources is admin-only" });
+  const r = await get("RESOURCE", id);
+  if (!r) return resp(404, { error: "resource not found" });
+  if (r.type !== "post") return resp(400, { error: "only a post can hold inline images" });
+
+  const size = body?.size;
+  const mime = str(body?.type, 120);
+  if (!str(body?.name, 200)) return resp(400, { error: "file name is required" });
+  if (!mime.startsWith("image/")) return resp(400, { error: "must be an image" });
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_IMAGE_BYTES)
+    return resp(400, { error: `image must be 1 byte to ${Math.round(MAX_IMAGE_BYTES / 1048576)} MB` });
+
+  // No spaces (unlike s3Key below): this name round-trips through a URL path
+  // segment on every render, and it's never shown to a reader the way an
+  // attachment's original file name is.
+  const fileName = `${Date.now()}-${str(body.name, 100).replace(/[^\w.-]/g, "_") || "image"}`;
+  const key = `resources/${id}/images/${fileName}`;
+  const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
+    Bucket: BUCKET, Key: key, ContentType: mime, ContentLength: size
+  }), { expiresIn: 900 });
+
+  await put({ ...r, images: [...(r.images || []), key], updated: now() });
+  return resp(201, { fileName, uploadUrl });
+}
+
+/* Same idea as downloadResource's inline path below — a short-lived presigned
+   GET minted fresh on every render, so an article's pictures can show up
+   without the bucket ever going public. `resourceAccess` is the same gate the
+   post itself renders behind, so a picture inside a lab-restricted post stays
+   exactly as restricted as the words around it. */
+export async function getPostImage(ctx, id, fileName) {
+  const r = await get("RESOURCE", id);
+  if (!r) return resp(404, { error: "resource not found" });
+  if (!(await resourceAccess(ctx, r))) return resp(403, { error: "Not allowed to view this resource" });
+  const key = `resources/${id}/images/${fileName}`;
+  if (!(r.images || []).includes(key)) return resp(404, { error: "image not found" });
+
+  const url = await getSignedUrl(s3, new GetObjectCommand({
+    Bucket: BUCKET, Key: key, ResponseContentDisposition: "inline"
+  }), { expiresIn: 3600 });
+  return resp(200, { url });
 }
 
 /* ---------- download / playback ---------- */
