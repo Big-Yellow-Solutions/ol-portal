@@ -267,12 +267,24 @@ Resources:
         AllowHeaders: [Authorization, Content-Type, X-Act-As]
       Auth:
         # THE CUTOVER LINE. Change to WorkosLambda and redeploy with
-        # AuthProvider=workos; change back to revert. It cannot be driven by
-        # the AuthProvider parameter directly — SAM resolves this at transform
-        # time and rejects an intrinsic here — so the switch is deliberately
-        # two coordinated edits rather than one, and Cognito stays untouched
-        # until both are made.
-        DefaultAuthorizer: WorkosLambda
+        # AuthProvider=workos (samconfig.toml's parameter_overrides); change
+        # back to revert. It cannot be driven by the AuthProvider parameter
+        # directly — SAM resolves this at transform time and rejects an
+        # intrinsic here — so the switch is deliberately two coordinated edits
+        # rather than one, and Cognito stays untouched until both are made.
+        #
+        # Both edits had been made here (this line read WorkosLambda, and
+        # samconfig.toml's override read AuthProvider=workos) with neither the
+        # deployed stack nor the deployed frontend actually moved over yet:
+        # the live site still runs Cognito end to end, and the WorkOS Lambda
+        # authorizer verifies WorkOS tokens only, with no Cognito fallback —
+        # so the next `sam deploy` from this file, for any reason, would have
+        # cut every signed-in user off mid-migration. Reverted back to the
+        # matching, actually-live state until someone deliberately restarts
+        # the cutover — as a single deploy that also rebuilds and redeploys
+        # the frontend with NEXT_PUBLIC_AUTH_PROVIDER=workos in the same
+        # window, not as a silent side effect of an unrelated backend change.
+        DefaultAuthorizer: CognitoJwt
         Authorizers:
           CognitoJwt:
             JwtConfiguration:

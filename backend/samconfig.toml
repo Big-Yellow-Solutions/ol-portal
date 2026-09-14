@@ -7,6 +7,12 @@ region = "us-east-1"
 resolve_s3 = true
 capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
-# Pinned so a bare `sam deploy` cannot silently reset these to the template's
-# defaults — AuthProvider falling back to "cognito" would take sign-in down.
-parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCE1QJW4DH3XRNDG6EEFZ WorkosSecretId=WorkOs"
+# AuthProvider=cognito matches what's actually deployed and what the live
+# frontend is built for (see the DefaultAuthorizer comment in template.yaml).
+# It's the template's own default already, so this override exists only to
+# carry the WorkOS-side values a resumed cutover will need — WorkosClientId
+# is staging's; production's is client_01M10FCEF9TX4N3XTVRZYJV1NR (see
+# web/.env.example). Do not flip AuthProvider to workos here on its own: it
+# has to move together with template.yaml's DefaultAuthorizer AND a frontend
+# rebuild with NEXT_PUBLIC_AUTH_PROVIDER=workos, in one coordinated deploy.
+parameter_overrides = "AuthProvider=cognito WorkosClientId=client_01M10FCE1QJW4DH3XRNDG6EEFZ WorkosSecretId=WorkOs"
