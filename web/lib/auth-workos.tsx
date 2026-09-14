@@ -115,6 +115,26 @@ export function WorkosAuthProvider({
     <AuthKitProvider
       clientId={CONFIG.workosClientId}
       redirectUri={`${origin}${WORKOS_CALLBACK_PATH}`}
+      /* Without this, authkit-js talks to api.workos.com directly, which
+         makes the session-refresh cookie third-party from this origin's
+         point of view — Safari's ITP, Firefox's Enhanced Tracking
+         Protection, and a common Chrome privacy setting all refuse to send
+         it on the silent background refresh authkit-js attempts every time
+         the tab regains focus after being hidden long enough for the access
+         token to need renewing. That refresh then fails for real, which
+         onRefreshFailure below correctly reads as "the session is dead" and
+         answers with a full re-authentication redirect — a real page
+         navigation, discarding whatever was mid-typing. This was the actual
+         cause of "the portal keeps refreshing and I lose my work": not
+         random, but tied to switching away from the tab and back.
+
+         login.optimisticlabs.com is a verified custom AuthKit domain
+         (WorkOS Dashboard → Domains), CNAMEd to WorkOS, so the refresh
+         cookie is set on this app's own registrable domain instead —
+         first-party, and untouched by any of the above. Empty in an
+         environment with no custom domain configured (CONFIG.workosApiHostname)
+         falls back to authkit-js's own api.workos.com default. */
+      apiHostname={CONFIG.workosApiHostname || undefined}
       onRedirectCallback={({ state }) => {
         /* `state` round-trips as plaintext in the URL and WorkOS does not
            integrity-protect it, so it is treated as attacker-controlled:
