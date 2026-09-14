@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Markdown } from "@/lib/markdown";
 import { api } from "@/lib/api";
 import { VideoPlayer } from "@/components/video-player";
+import { ResourcePostImage } from "@/components/resources/post-image";
 import type { ResourceItem } from "@/lib/types";
 
 const PREVIEWABLE = ["application/pdf"];
@@ -99,6 +100,13 @@ export function ResourceViewer({ resource, onViewed, lookup, compact }: Resource
     [lookup]
   );
 
+  const embedImage = useCallback(
+    (fileName: string, alt: string) => (
+      <ResourcePostImage resourceId={resource.id} fileName={fileName} alt={alt} />
+    ),
+    [resource.id]
+  );
+
   return (
     <div className="flex flex-col gap-4">
       {isVideo && (
@@ -106,7 +114,12 @@ export function ResourceViewer({ resource, onViewed, lookup, compact }: Resource
       )}
 
       {resource.type === "post" && (
-        <Markdown text={resource.body ?? ""} renderEmbed={embed} className="max-w-prose" />
+        <Markdown
+          text={resource.body ?? ""}
+          renderEmbed={embed}
+          resolveEmbedImage={embedImage}
+          className="max-w-prose"
+        />
       )}
 
       {resource.type === "file" && (
