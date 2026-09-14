@@ -9,4 +9,13 @@ capabilities = "CAPABILITY_IAM"
 confirm_changeset = false
 # Pinned so a bare `sam deploy` cannot silently reset these to the template's
 # defaults — AuthProvider falling back to "cognito" would take sign-in down.
-parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCE1QJW4DH3XRNDG6EEFZ WorkosSecretId=WorkOs"
+#
+# WorkosClientId is the Production client (client_01M10FCEF9TX4N3XTVRZYJV1NR)
+# as of the Staging->Production cutover — this app had been running its real
+# users against WorkOS's Staging environment (client_01M10FCE1QJW4DH3XRNDG6EEFZ),
+# which cannot have a custom auth domain and isn't meant to hold live user
+# data long-term. WorkosSecretId's secret ("WorkOs" in Secrets Manager) was
+# updated in place to hold a Production API key to match — deploying this
+# without that secret update first would mint account-invite calls against
+# Production using a Staging key, which WorkOS would reject.
+parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs"
