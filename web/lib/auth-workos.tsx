@@ -115,12 +115,12 @@ export function WorkosAuthProvider({
     <AuthKitProvider
       clientId={CONFIG.workosClientId}
       redirectUri={`${origin}${WORKOS_CALLBACK_PATH}`}
-      /* Without this, authkit-js talks to api.workos.com directly, which
-         makes the session-refresh cookie third-party from this origin's
-         point of view — Safari's ITP, Firefox's Enhanced Tracking
-         Protection, and a common Chrome privacy setting all refuse to send
-         it on the silent background refresh authkit-js attempts every time
-         the tab regains focus after being hidden long enough for the access
+      /* authkit-js's own default off localhost is devMode={false}, which
+         keeps the refresh token in an HttpOnly cookie on api.workos.com —
+         cross-site from this origin, so Safari's ITP and any browser with
+         third-party cookies blocked (a default in several) refuse to send it
+         on the silent background refresh authkit-js attempts every time the
+         tab regains focus after being hidden long enough for the access
          token to need renewing. That refresh then fails for real, which
          onRefreshFailure below correctly reads as "the session is dead" and
          answers with a full re-authentication redirect — a real page
@@ -128,13 +128,26 @@ export function WorkosAuthProvider({
          cause of "the portal keeps refreshing and I lose my work": not
          random, but tied to switching away from the tab and back.
 
-         login.optimisticlabs.com is a verified custom AuthKit domain
-         (WorkOS Dashboard → Domains), CNAMEd to WorkOS, so the refresh
-         cookie is set on this app's own registrable domain instead —
-         first-party, and untouched by any of the above. Empty in an
-         environment with no custom domain configured (CONFIG.workosApiHostname)
-         falls back to authkit-js's own api.workos.com default. */
-      apiHostname={CONFIG.workosApiHostname || undefined}
+         WorkOS's own docs say devMode={true} is what to set until a custom
+         AuthKit domain is configured — it moves the refresh token to
+         localStorage instead, same-origin and untouched by any browser
+         cookie policy. The trade: an HttpOnly cookie can't be read by
+         JavaScript at all; localStorage can, so an XSS bug elsewhere in the
+         app could exfiltrate the token until a custom domain replaces this.
+
+         This was briefly swapped for a custom AuthKit domain
+         (login.optimisticlabs.com, apiHostname) instead, on the reasoning
+         that it would restore the HttpOnly-cookie property while still
+         being first-party. That broke sign-in outright in production:
+         authkit-js builds the interactive authorize redirect as
+         `${apiHostname}/user_management/authorize`, and the custom AuthKit
+         domain apparently doesn't serve that path — 404. Reverted. Do not
+         retry apiHostname without first confirming directly with WorkOS
+         (support, or a working example from their own SDKs) that a custom
+         AuthKit domain is meant to receive the full user_management API
+         surface from a client-side app, not just something their own
+         backend redirects through internally. */
+      devMode={true}
       onRedirectCallback={({ state }) => {
         /* `state` round-trips as plaintext in the URL and WorkOS does not
            integrity-protect it, so it is treated as attacker-controlled:
