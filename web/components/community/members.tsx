@@ -8,7 +8,7 @@ import { PersonCard } from "@/components/bench/person-card";
 import { toast } from "sonner";
 import { startActingAs } from "@/lib/act-as";
 import { ApiError } from "@/lib/api";
-import { EVERYONE } from "@/lib/community";
+import { EVERYONE, type CommunityLab } from "@/lib/community";
 import type { BenchPerson } from "@/lib/data";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
@@ -21,18 +21,21 @@ import { cn } from "@/lib/utils";
  * conversation the Directory opens are what this renders: two screens, one
  * roster, no second idea of who a colleague is.
  *
- * Three filters compose — the search box, a tag chip on a card, and whichever
- * lab is selected in the rail. Only the first two are named in the result
- * line, because the lab filter is already drawn as the highlighted row in
- * "Your labs" a few inches away; repeating it would be the only filter stated
- * twice.
+ * Three filters compose — the search box, a tag chip on a card, and this
+ * tab's own lab chips. The lab filter lives here rather than being shared
+ * with the Feed, so filtering Members never changes what the Feed tab shows,
+ * and vice versa.
  */
 export function CommunityMembers({
   roster,
+  labs,
   lab,
+  onPickLab,
 }: {
   roster: BenchPerson[];
+  labs: CommunityLab[];
   lab: string;
+  onPickLab: (name: string) => void;
 }) {
   const { people, me, role, refresh } = usePortalData();
 
@@ -65,10 +68,11 @@ export function CommunityMembers({
     });
   }, [roster, query, tag, lab]);
 
-  const filtering = query.trim().length > 0 || !!tag;
+  const filtering = query.trim().length > 0 || !!tag || lab !== EVERYONE;
   const clearAll = () => {
     setQuery("");
     setTag(null);
+    onPickLab(EVERYONE);
   };
 
   const editingPerson = editingKey ? people[editingKey] : null;
@@ -101,11 +105,34 @@ export function CommunityMembers({
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2">
+        {labs.map((l) => {
+          const on = lab === l.name;
+          return (
+            <button
+              key={l.name}
+              type="button"
+              aria-pressed={on}
+              onClick={() => onPickLab(l.name)}
+              className={cn(
+                "cursor-pointer rounded-full border px-3.5 py-[7px] text-[13px] transition-colors",
+                on
+                  ? "border-violet-deep bg-violet-deep font-semibold text-white"
+                  : "border-hair-strong bg-white font-medium text-ink-soft hover:bg-wash"
+              )}
+            >
+              {l.name}
+            </button>
+          );
+        })}
+      </div>
+
       {filtering && (
         <span className="flex items-center gap-2.5 text-[13px] text-warm-gray">
           <span>
             {shown.length} {shown.length === 1 ? "person" : "people"}
             {tag ? ` · ${tag}` : ""}
+            {lab !== EVERYONE ? ` · ${lab}` : ""}
           </span>
           <button
             type="button"
