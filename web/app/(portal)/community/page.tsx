@@ -4,18 +4,14 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { StarGlyph } from "@/components/shell/top-nav";
-import { ColumnsIcon, PlusIcon } from "@/components/community/icons";
+import { PlusIcon } from "@/components/community/icons";
 import { Eyebrow, Panel, TogglePill } from "@/components/community/primitives";
 import { CommunityFeed } from "@/components/community/feed";
 import { CommunityMembers } from "@/components/community/members";
 import { PostDetail } from "@/components/community/post-detail";
 import { EventDetail } from "@/components/community/event-detail";
 import { CommunityDialog } from "@/components/community/community-dialog";
-import {
-  CommunityRail,
-  EventDateBlock,
-  LabList,
-} from "@/components/community/rail";
+import { CommunityRail, EventDateBlock } from "@/components/community/rail";
 import {
   COMMUNITY_EVENTS,
   EVERYONE,
@@ -67,8 +63,11 @@ function Community() {
   const [tab, setTab] = useState<Tab>(
     TABS.includes(askedFor as Tab) ? (askedFor as Tab) : "feed"
   );
-  const [rail, setRail] = useState(true);
-  const [filter, setFilter] = useState(EVERYONE);
+  /* Feed and Members each keep their own lab filter — filtering one tab must
+     not silently filter the other. Picking a lab from the rail or Groups is a
+     navigation shortcut into the Feed's filter, not a global one. */
+  const [feedFilter, setFeedFilter] = useState(EVERYONE);
+  const [membersFilter, setMembersFilter] = useState(EVERYONE);
   /* Home's digest links straight at a story: /community?post=p1 opens that
      post's thread on arrival, the way Resources' ?r= does, and survives the
      static export. */
@@ -152,7 +151,8 @@ function Community() {
   }, [role, labs, myLabs]);
 
   const visiblePosts = allPosts.filter(
-    (p) => filter === EVERYONE || p.lab === filter || p.lab === EVERYONE
+    (p) =>
+      feedFilter === EVERYONE || p.lab === feedFilter || p.lab === EVERYONE
   );
 
   const commentsFor = (p: CommunityPost) => p.comments.concat(threads[p.id] ?? []);
@@ -166,9 +166,12 @@ function Community() {
   const setRsvp = (id: string, choice: RsvpChoice) =>
     setRsvps((s) => ({ ...s, [id]: s[id] === choice ? null : choice }));
 
-  const pickLab = (name: string) => {
-    setFilter(name);
-    setTab((t) => (t === "members" ? "members" : "feed"));
+  /* The rail's "Your labs" and Groups' "View feed" are shortcuts into the
+     Feed, not a filter shared with whatever tab is open — so they always set
+     the Feed's own filter and jump to it. */
+  const goToLabFeed = (name: string) => {
+    setFeedFilter(name);
+    setTab("feed");
   };
 
   /* Every way into a conversation lands here: a post's author, a member card,
@@ -278,27 +281,17 @@ function Community() {
 
   return (
     <>
-      <div className="flex flex-wrap items-end justify-between gap-6">
-        <div className="min-w-0">
-          <span className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
-            <StarGlyph className="text-violet-deep" />
-            Community
+      <div className="min-w-0">
+        <span className="inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
+          <StarGlyph className="text-violet-deep" />
+          Community
+        </span>
+        <h1 className="mt-1.5 mb-0 text-[34px] leading-[1.1] font-bold tracking-[-0.015em]">
+          What is happening{" "}
+          <span className="font-serif font-normal text-violet-deep italic">
+            across the labs
           </span>
-          <h1 className="mt-1.5 mb-0 text-[34px] leading-[1.1] font-bold tracking-[-0.015em]">
-            What is happening{" "}
-            <span className="font-serif font-normal text-violet-deep italic">
-              across the labs
-            </span>
-          </h1>
-        </div>
-        <button
-          type="button"
-          onClick={() => setRail((r) => !r)}
-          className="flex flex-none cursor-pointer items-center gap-2 rounded-full border border-hair-strong px-3.5 py-2 text-[13px] font-semibold text-violet-deep transition-colors hover:bg-violet-pale"
-        >
-          <ColumnsIcon size={14} />
-          {rail ? "Sidebar layout" : "Rail layout"}
-        </button>
+        </h1>
       </div>
 
       <div className="flex items-center gap-[26px] overflow-x-auto border-b border-hair">
@@ -333,39 +326,13 @@ function Community() {
         })}
       </div>
 
-      <div
-        className={cn(
-          "grid items-start gap-[26px]",
-          rail
-            ? "lg:grid-cols-[minmax(0,1fr)_340px]"
-            : "lg:grid-cols-[236px_minmax(0,1fr)]"
-        )}
-      >
-        {!rail && (
-          <aside className="flex min-w-0 flex-col gap-2">
-            <span className="px-1 pb-1 text-[11px] font-semibold tracking-[0.14em] text-warm-gray uppercase">
-              Your labs
-            </span>
-            <LabList labs={labList} filter={filter} onPick={pickLab} />
-            <button
-              type="button"
-              onClick={() => setTab("groups")}
-              className="mt-2 block cursor-pointer rounded-[12px] border border-dashed border-hair-strong p-3 text-left text-[13px] leading-[1.45] text-violet-deep transition-colors hover:bg-wash"
-            >
-              Browse groups
-              <span className="mt-[3px] block text-xs text-warm-gray">
-                Cross-lab working groups are coming
-              </span>
-            </button>
-          </aside>
-        )}
-
+      <div className="grid items-start gap-[26px] lg:grid-cols-[minmax(0,1fr)_340px]">
         <main className="flex min-w-0 flex-col gap-4">
           {tab === "feed" && (
             <CommunityFeed
               labs={labList}
               postLabs={postLabs}
-              filter={filter}
+              filter={feedFilter}
               posts={visiblePosts}
               loading={postsLoading}
               error={postsError}
@@ -374,7 +341,7 @@ function Community() {
               likes={likesFor}
               comments={(p) => commentsFor(p).length}
               canEdit={(p) => canEditPost(p, role, me)}
-              onPickLab={pickLab}
+              onPickLab={setFeedFilter}
               onPost={submitPost}
               onLike={(p) => toggleLike(p.id)}
               onOpen={(p) => setPickedPost(p.id)}
@@ -486,7 +453,7 @@ function Community() {
                       <div className="flex items-center gap-3.5 border-t border-hair-soft pt-3">
                         <button
                           type="button"
-                          onClick={() => pickLab(l.name)}
+                          onClick={() => goToLabFeed(l.name)}
                           className="cursor-pointer text-[13px] font-semibold text-violet-deep hover:text-violet"
                         >
                           View feed →
@@ -520,25 +487,28 @@ function Community() {
           )}
 
           {tab === "members" && (
-            <CommunityMembers roster={members} lab={filter} />
+            <CommunityMembers
+              roster={members}
+              labs={labList}
+              lab={membersFilter}
+              onPickLab={setMembersFilter}
+            />
           )}
         </main>
 
-        {rail && (
-          <CommunityRail
-            events={COMMUNITY_EVENTS}
-            labs={labList}
-            filter={filter}
-            rsvps={rsvps}
-            goingLabel={goingLabel}
-            onPickLab={pickLab}
-            onOpenEvent={setOpenEventId}
-            onQuickRsvp={(id) => setRsvp(id, "Going")}
-            onAllEvents={() => setTab("events")}
-            onBrowseGroups={() => setTab("groups")}
-            onOpenMessages={openList}
-          />
-        )}
+        <CommunityRail
+          events={COMMUNITY_EVENTS}
+          labs={labList}
+          filter={feedFilter}
+          rsvps={rsvps}
+          goingLabel={goingLabel}
+          onPickLab={goToLabFeed}
+          onOpenEvent={setOpenEventId}
+          onQuickRsvp={(id) => setRsvp(id, "Going")}
+          onAllEvents={() => setTab("events")}
+          onBrowseGroups={() => setTab("groups")}
+          onOpenMessages={openList}
+        />
       </div>
 
       <CommunityDialog
