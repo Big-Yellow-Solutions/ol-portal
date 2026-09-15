@@ -18,4 +18,9 @@ confirm_changeset = false
 # updated in place to hold a Production API key to match — deploying this
 # without that secret update first would mint account-invite calls against
 # Production using a Staging key, which WorkOS would reject.
-parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs"
+# WorkosTokenIssuer is the custom Authentication API domain the frontend has
+# used since #27 (NEXT_PUBLIC_WORKOS_API_HOSTNAME=auth.optimisticlabs.com):
+# tokens minted through it carry that host in `iss`. Without this every token
+# was rejected at the authorizer, so /auth/verify/send never ran and no
+# sign-in code was emailed (2026-09-15).
+parameter_overrides = "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs WorkosTokenIssuer=https://auth.optimisticlabs.com/user_management/client_01M10FCEF9TX4N3XTVRZYJV1NR"
