@@ -151,11 +151,38 @@ function SelectValue({
   )
 }
 
+/* Radix's Dialog locks page scroll by capturing every wheel/touch event and
+   preventing it unless the event's target sits inside the dialog's own DOM
+   subtree (react-remove-scroll's "shard" check). HeroUI portals this popover
+   to <body>, outside that subtree, so a select opened from inside a dialog
+   or drawer has that prevention applied to it too — the list never scrolls,
+   and anything past whatever fits in the available height is unreachable by
+   wheel or trackpad. There's no public hook to add this popover as a shard,
+   so the fix is to stop depending on the browser's native scroll here: a
+   non-passive listener (React's onWheel is passive for "wheel", so it can't
+   preventDefault) drives scrollTop itself, which works whether or not
+   something upstream already canceled the native scroll. */
+function useWheelScroll() {
+  const cleanup = React.useRef<() => void>(undefined);
+  return React.useCallback((el: HTMLDivElement | null) => {
+    cleanup.current?.();
+    cleanup.current = undefined;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      el.scrollTop += e.deltaY;
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    cleanup.current = () => el.removeEventListener("wheel", onWheel);
+  }, []);
+}
+
 function SelectContent({
   className,
   children,
   ...props
 }: React.ComponentProps<typeof HeroSelect.Popover>) {
+  const wheelRef = useWheelScroll();
   return (
     <HeroSelect.Popover
       data-slot="select-content"
@@ -186,7 +213,7 @@ function SelectContent({
           room below the trigger; without inheriting it the list keeps its full
           height, overflows a shorter panel, and the options past the fold
           cannot be reached at all. */}
-      <ListBox className="max-h-[inherit] overflow-y-auto">{children}</ListBox>
+      <ListBox ref={wheelRef} className="max-h-[inherit] overflow-y-auto">{children}</ListBox>
     </HeroSelect.Popover>
   )
 }
