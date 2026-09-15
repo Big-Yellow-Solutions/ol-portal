@@ -519,9 +519,15 @@ async function route(ctx, method, path, seg, body) {
   if (method === "PATCH" && seg[0] === "courses" && seg[1]) return await courses.updateCourse(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "courses" && seg[1]) return await courses.deleteCourse(ctx, seg[1]);
   /* Community feed. The `{id}` forms sit after the bare `/posts` ones, which
-     the sequential router would otherwise never reach. */
+     the sequential router would otherwise never reach. `/like` and
+     `/comments` are POST-only, so they never compete with the bare-id GET —
+     but sit up here anyway, next to the rest of the sub-routes. */
   if (method === "GET" && path === "/posts") return await community.listPosts(ctx);
   if (method === "POST" && path === "/posts") return await community.createPost(ctx, body);
+  if (method === "POST" && seg[0] === "posts" && seg[1] && seg[2] === "like" && !seg[3])
+    return await community.toggleLike(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "posts" && seg[1] && seg[2] === "comments" && !seg[3])
+    return await community.addComment(ctx, seg[1], body);
   if (method === "GET" && seg[0] === "posts" && seg[1]) return await community.getPost(ctx, seg[1]);
   if (method === "PATCH" && seg[0] === "posts" && seg[1]) return await community.updatePost(ctx, seg[1], body);
   if (method === "DELETE" && seg[0] === "posts" && seg[1]) return await community.deletePost(ctx, seg[1]);

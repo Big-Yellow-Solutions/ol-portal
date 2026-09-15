@@ -25,11 +25,15 @@
                 the scope: absent is visible to everyone, set is visible to
                 that lab (and to Admins).
      tags       free tags, same shape and ceiling as a resource's.
-     likes      reserved on the record so the shape is stable; there is no
-                like route yet and the feed still counts likes in the browser.
-     comments   same standing as likes — the thread is client-side until a
-                comment route exists, and this keeps the stored shape honest
-                about where it will go.
+     likedBy    PERSON keys who have liked this post. The count the browser
+                shows (`likes`) and whether the caller is one of them
+                (`likedByMe`) are both derived from this at read time, in
+                publicView — never stored as their own fields, so there is
+                only one thing that can disagree with itself.
+     comments   [{ id, author, authorName, text, created }], oldest first.
+                Same snapshot-name convention as the post itself: authorName
+                is taken at write time so a comment still reads correctly for
+                an author who is later renamed or removed.
      created    ISO write time.
      updated    ISO of the last edit; equal to `created` until one happens.
 
@@ -48,6 +52,10 @@ export const POST_KINDS = ["Update", "Ask", "Win", "Link", "Introduction"];
 const MAX_TEXT = 5000;
 const MAX_TAGS = 10;
 const MAX_TAG_CHARS = 30;
+const MAX_COMMENT_CHARS = 2000;
+// A ceiling on pile-on rather than a real limit anyone should hit — the same
+// role proposals.mjs's MAX_VERSION_SNAPSHOTS plays for that array.
+const MAX_COMMENTS = 500;
 
 const str = (v, max) => String(v ?? "").trim().slice(0, max);
 const now = () => new Date().toISOString();
@@ -102,12 +110,19 @@ const canPostToLab = (ctx, lab) =>
   !lab || ctx.role === "Admin" || (ctx.me.labs || []).includes(lab);
 
 /* The record as the browser reads it. `pk` is internal; the id moves to `id`
-   the way every other list route here returns it.
+   the way every other list route here returns it. `likedBy` is internal too
+   — the browser gets the count and its own yes/no, never the roster of who
+   else liked it.
 
    `authorName` ships alongside `author` deliberately: the portal resolves the
    live name from its own roster (a renamed person should read as renamed),
    and falls back to this snapshot for an author who has since left. */
-const publicView = ({ pk, sk, ...rest }) => ({ id: sk, ...rest });
+const publicView = ({ pk, sk, likedBy, ...rest }, viewerKey) => ({
+  id: sk,
+  ...rest,
+  likes: (likedBy || []).length,
+  likedByMe: !!viewerKey && (likedBy || []).includes(viewerKey)
+});
 
 /* ---------- validation ---------- */
 
@@ -221,14 +236,14 @@ export async function listPosts(ctx) {
     actor: ctx.me.sk, role: ctx.role, stored: items.length, visible: visible.length
   });
   metric("PostsListed");
-  return resp(200, visible.map(publicView));
+  return resp(200, visible.map(p => publicView(p, ctx.me.sk)));
 }
 
 export async function getPost(ctx, id) {
   const p = await get("POST", id);
   if (!p) return resp(404, { error: "post not found" });
   if (!canSee(ctx, p)) return resp(403, { error: "Not allowed to view this post" });
-  return resp(200, publicView(p));
+  return resp(200, publicView(p, ctx.me.sk));
 }
 
 /* Anyone with a portal account can post. Community is the one surface where
@@ -239,7 +254,7 @@ export async function createPost(ctx, body) {
   const base = {
     pk: "POST", sk: null,
     author: ctx.me.sk, authorName: fullName(ctx.me) || ctx.me.sk,
-    kind: "Update", tags: [], likes: 0, comments: [],
+    kind: "Update", tags: [], likedBy: [], comments: [],
     created: now(), updated: now()
   };
   const applied = await applyFields(ctx, base, b, true);
@@ -259,7 +274,7 @@ export async function createPost(ctx, body) {
   });
   metric("PostCreated");
   await tellMentioned(ctx, applied.item, applied.item.text);
-  return resp(201, publicView(applied.item));
+  return resp(201, publicView(applied.item, ctx.me.sk));
 }
 
 export async function updatePost(ctx, id, body) {
@@ -277,7 +292,7 @@ export async function updatePost(ctx, id, body) {
      a mention becomes noise, and the people already told have already read
      the row that pointed here. */
   await tellMentioned(ctx, applied.item, applied.item.text, p.text);
-  return resp(200, publicView(applied.item));
+  return resp(200, publicView(applied.item, ctx.me.sk));
 }
 
 export async function deletePost(ctx, id) {
@@ -298,4 +313,56 @@ export async function deletePost(ctx, id) {
         level: "warn", message: "audit write failed", detail: err.message
       })));
   return resp(200, { deleted: id });
+}
+
+/* ---------- likes ---------- */
+
+/* One toggle rather than a like/unlike pair: the caller either is or isn't in
+   likedBy, and the request always means "make it the other one" — the same
+   shape a checkbox click has, with no client-side state to get out of sync
+   with the store. Liking is reading with an opinion, so it needs canSee and
+   nothing more; a Lab Leader liking a Contributor's post is not moderation. */
+export async function toggleLike(ctx, id) {
+  const p = await get("POST", id);
+  if (!p) return resp(404, { error: "post not found" });
+  if (!canSee(ctx, p)) return resp(403, { error: "Not allowed to view this post" });
+
+  const likedBy = p.likedBy || [];
+  const already = likedBy.includes(ctx.me.sk);
+  const next = {
+    ...p,
+    likedBy: already ? likedBy.filter(k => k !== ctx.me.sk) : [...likedBy, ctx.me.sk]
+  };
+  await put(next);
+  metric(already ? "PostUnliked" : "PostLiked");
+  return resp(200, publicView(next, ctx.me.sk));
+}
+
+/* ---------- comments ---------- */
+
+export async function addComment(ctx, id, body) {
+  const p = await get("POST", id);
+  if (!p) return resp(404, { error: "post not found" });
+  if (!canSee(ctx, p)) return resp(403, { error: "Not allowed to view this post" });
+
+  const text = str(body?.text, MAX_COMMENT_CHARS);
+  if (!text) return resp(400, { error: "a comment needs something to say" });
+  const comments = p.comments || [];
+  if (comments.length >= MAX_COMMENTS)
+    return resp(409, { error: "This post has reached its comment limit" });
+
+  const comment = {
+    // Scoped to the post, the same way a proposal's version numbers are —
+    // there is no cross-post id space for a comment to collide in.
+    id: `c${comments.length + 1}`,
+    author: ctx.me.sk,
+    authorName: fullName(ctx.me) || ctx.me.sk,
+    text,
+    created: now()
+  };
+  const next = { ...p, comments: [...comments, comment] };
+  await put(next);
+  log("community.comment.created", { actor: ctx.me.sk, post: id, chars: text.length });
+  metric("CommentCreated");
+  return resp(201, publicView(next, ctx.me.sk));
 }

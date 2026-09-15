@@ -29,20 +29,17 @@ import { registerTokenSource } from "@/lib/session";
  Nothing here reaches a deployed build — the guard below is the same one
  /dev/deal-drawer-footer uses.
 */
-
-/* Same stand-in /dev/pipeline registers, for the same reason: api() reads a
-   null token as a dead session and bounces to /login before any request is
-   made, and this page mounts outside <AuthProvider>. dev-api.mjs ignores the
-   header and injects the identity itself. */
+/* Same stand-in as /dev/pipeline: api() reads a null token as a dead session
+   and bounces to /login before the request is made, and dev-api.mjs ignores
+   the header anyway — it injects the identity the authorizer would supply.
+   (This harness predates that change, which is why it was missing until now —
+   see the long note in /dev/pipeline for why registration is a microtask.) */
 const HARNESS_TOKEN = {
   getToken: async () => "dev-harness",
   endSession: async () => {},
 };
 
 export default function DevCommunityPage() {
-  /* Registered from a microtask so it lands after the root layout's
-     <AuthProvider> has registered its own source — see /dev/pipeline for
-     the full account of why an effect alone loses that race. */
   const [ready, setReady] = useState(false);
   useEffect(() => {
     queueMicrotask(() => {
