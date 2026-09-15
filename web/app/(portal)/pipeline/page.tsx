@@ -360,9 +360,9 @@ function PipelineBoard() {
           )}
           {isAdmin && view === "board" && (
             <Select value={ownerFilter} onValueChange={setOwnerChoice}>
-              <SelectTrigger className="w-44"><SelectValue placeholder="All owners" /></SelectTrigger>
+              <SelectTrigger className="w-44"><SelectValue placeholder="All originators" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All owners</SelectItem>
+                <SelectItem value="all">All originators</SelectItem>
                 {leaders.map((p) => <PersonItem key={p.id} person={p} />)}
               </SelectContent>
             </Select>
