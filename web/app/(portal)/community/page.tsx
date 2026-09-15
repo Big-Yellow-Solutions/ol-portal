@@ -17,13 +17,14 @@ import {
   EVERYONE,
   INITIAL_RSVPS,
   RSVP_CHOICES,
+  addComment as addPostComment,
   canEditPost,
   createPost,
   deletePost,
   listPosts,
   toCommunityPost,
+  toggleLike,
   updatePost,
-  type CommunityComment,
   type CommunityEvent,
   type CommunityLab,
   type CommunityPost,
@@ -33,7 +34,7 @@ import {
 import { ApiError } from "@/lib/api";
 import { useMessages } from "@/lib/messages";
 import { usePortalData } from "@/lib/portal-data";
-import { benchRoster, fullName, initials } from "@/lib/data";
+import { benchRoster, initials } from "@/lib/data";
 import { cn } from "@/lib/utils";
 
 type Tab = "feed" | "events" | "groups" | "members";
@@ -53,7 +54,6 @@ function Community() {
   const { bench, labs, myLabs, people, me, role } = usePortalData();
   const { openWith, openList, roster: chatRoster } = useMessages();
   const meRecord = me ? people[me] : undefined;
-  const meName = fullName(meRecord) || me || "You";
   const meInitials = initials(meRecord);
 
   /* Pipeline's Companies/People footnote points at the roster, so which tab
@@ -74,10 +74,8 @@ function Community() {
   const linkedPost = params.get("post");
   const [pickedPost, setPickedPost] = useState<string | null>(null);
   const [openEventId, setOpenEventId] = useState<string | null>(null);
-  const [liked, setLiked] = useState<Record<string, boolean>>({});
   const [rsvps, setRsvps] =
     useState<Record<string, RsvpChoice | null>>(INITIAL_RSVPS);
-  const [threads, setThreads] = useState<Record<string, CommunityComment[]>>({});
 
   /* The feed is the server's, always. It is held here rather than in
      usePortalData because only this page and Home read it, and Home reads it
@@ -155,13 +153,29 @@ function Community() {
       feedFilter === EVERYONE || p.lab === feedFilter || p.lab === EVERYONE
   );
 
-  const commentsFor = (p: CommunityPost) => p.comments.concat(threads[p.id] ?? []);
-  const likesFor = (p: CommunityPost) => p.likes + (liked[p.id] ? 1 : 0);
+  const commentsFor = (p: CommunityPost) => p.comments;
+  const likesFor = (p: CommunityPost) => p.likes;
   const goingLabel = (e: CommunityEvent) =>
     `${e.base + (rsvps[e.id] === "Going" ? 1 : 0)} of ${e.cap} going`;
 
-  const toggleLike = (id: string) =>
-    setLiked((s) => ({ ...s, [id]: !s[id] }));
+  /* Like, then re-read, the same shape every other write on this page
+     follows: what is on screen after this returns is what the store holds,
+     for everyone — not an optimistic flip that could disagree with a second
+     tab or a second person looking at the same post. */
+  const handleLike = async (id: string) => {
+    try {
+      await toggleLike(id);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not update your like.");
+      return;
+    }
+    try {
+      await loadPosts();
+    } catch {
+      // The like itself succeeded; a feed that fails to reload here is the
+      // same "refresh to see it" case every other write on this page has.
+    }
+  };
 
   const setRsvp = (id: string, choice: RsvpChoice) =>
     setRsvps((s) => ({ ...s, [id]: s[id] === choice ? null : choice }));
@@ -255,16 +269,22 @@ function Community() {
     }
   };
 
-  const addComment = (id: string, text: string) =>
-    setThreads((s) => ({
-      ...s,
-      [id]: (s[id] ?? []).concat({
-        who: meName,
-        initials: meInitials,
-        time: "just now",
-        text,
-      }),
-    }));
+  /* Awaited by PostDetail's submit, the same way PostEditor's onSave is: a
+     failed comment leaves the draft in the box instead of silently eating
+     what was typed. */
+  const addComment = async (id: string, text: string) => {
+    try {
+      await addPostComment(id, text);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not post that comment.");
+      throw err;
+    }
+    try {
+      await loadPosts();
+    } catch {
+      toast.error("Posted, but the feed could not be reloaded. Refresh to see it.");
+    }
+  };
 
   const openPost = allPosts.find((p) => p.id === openId);
   const openEvent = COMMUNITY_EVENTS.find((e) => e.id === openEventId);
@@ -337,13 +357,13 @@ function Community() {
               loading={postsLoading}
               error={postsError}
               meInitials={meInitials}
-              liked={(p) => !!liked[p.id]}
+              liked={(p) => p.likedByMe}
               likes={likesFor}
               comments={(p) => commentsFor(p).length}
               canEdit={(p) => canEditPost(p, role, me)}
               onPickLab={setFeedFilter}
               onPost={submitPost}
-              onLike={(p) => toggleLike(p.id)}
+              onLike={(p) => handleLike(p.id)}
               onOpen={(p) => setPickedPost(p.id)}
               onAuthor={dmAuthor}
               onEdit={editPost}
@@ -522,11 +542,11 @@ function Community() {
           <PostDetail
             post={openPost}
             comments={commentsFor(openPost)}
-            liked={!!liked[openPost.id]}
+            liked={openPost.likedByMe}
             likes={likesFor(openPost)}
             meInitials={meInitials}
             canEdit={canEditPost(openPost, role, me)}
-            onLike={() => toggleLike(openPost.id)}
+            onLike={() => handleLike(openPost.id)}
             onComment={(text) => addComment(openPost.id, text)}
             onAuthor={() => dmAuthor(openPost.who)}
             onEdit={(text) => editPost(openPost, text)}

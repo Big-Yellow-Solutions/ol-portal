@@ -32,7 +32,8 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 
 const { doc } = await import("../src/util.mjs");
 const {
-  listPosts, getPost, createPost, updatePost, deletePost, canSee, POST_KINDS
+  listPosts, getPost, createPost, updatePost, deletePost, canSee, POST_KINDS,
+  toggleLike, addComment
 } = await import("../src/community.mjs");
 
 /* ---------- the table, in memory ----------
@@ -269,4 +270,106 @@ test("only the author or an Admin can delete", async () => {
 
 test("deleting a post that isn't there is a 404, not a silent success", async () => {
   assert.equal((await deletePost(teddy, "PS-404")).statusCode, 404);
+});
+
+/* ---------- likes ----------
+
+   The same regression as the very first test above, one layer over: a like
+   toggled in the browser's own state is gone the moment somebody else loads
+   the feed. The assertion that matters is a SECOND caller seeing the count
+   and a THIRD caller's own yes/no being independent of it. */
+
+test("a like is there for the next caller, and only that caller's own", async () => {
+  const p = await post(nora, { text: "Two new sponsors said yes this week." });
+  const liked = body(await toggleLike(omar, p.id));
+  assert.equal(liked.likes, 1);
+  assert.equal(liked.likedByMe, true);
+
+  // Nora reads it back cold: the like is on the record, not on Omar's session.
+  const asNora = body(await getPost(nora, p.id));
+  assert.equal(asNora.likes, 1);
+  // But Nora never liked it herself.
+  assert.equal(asNora.likedByMe, false);
+
+  const inFeed = (await feed(cass)).find(x => x.id === p.id);
+  assert.equal(inFeed.likes, 1);
+});
+
+test("liking twice is a toggle, not a double count", async () => {
+  const p = await post(nora, { text: "Kickoff moved to Friday" });
+  assert.equal(body(await toggleLike(cass, p.id)).likes, 1);
+  const unliked = body(await toggleLike(cass, p.id));
+  assert.equal(unliked.likes, 0);
+  assert.equal(unliked.likedByMe, false);
+});
+
+test("likes from different people all count, independently of each caller's own", async () => {
+  const p = await post(nora, { text: "Fall season launch is a go" });
+  await toggleLike(cass, p.id);
+  await toggleLike(omar, p.id);
+  const asTeddy = body(await toggleLike(teddy, p.id));
+  assert.equal(asTeddy.likes, 3);
+  assert.equal(asTeddy.likedByMe, true);
+});
+
+test("liking a post you cannot see is refused, the same as reading it", async () => {
+  const p = await post(nora, { text: "Sports Lab only", lab: "sports" });
+  assert.equal((await toggleLike(omar, p.id)).statusCode, 403);
+  assert.equal((await toggleLike(cass, p.id)).statusCode, 200);
+});
+
+test("liking a post that isn't there is a 404", async () => {
+  assert.equal((await toggleLike(teddy, "PS-404")).statusCode, 404);
+});
+
+/* ---------- comments ---------- */
+
+test("a comment is there for the next caller, oldest first", async () => {
+  const p = await post(nora, { text: "Looking for a co-coach" });
+  const c1 = body(await addComment(cass, p.id, { text: "I can help Tuesdays" }));
+  assert.equal(c1.comments.length, 1);
+  assert.equal(c1.comments[0].author, "cass");
+  assert.equal(c1.comments[0].authorName, "Cass Ito");
+  assert.equal(c1.comments[0].text, "I can help Tuesdays");
+  assert.ok(!Number.isNaN(Date.parse(c1.comments[0].created)));
+
+  const c2 = body(await addComment(teddy, p.id, { text: "Loop in Marcus too" }));
+  assert.deepEqual(c2.comments.map(c => c.text), ["I can help Tuesdays", "Loop in Marcus too"]);
+
+  // A cold read by someone who wrote none of them sees both, in order.
+  const asOmar = body(await getPost(omar, p.id));
+  assert.deepEqual(asOmar.comments.map(c => c.author), ["cass", "teddy"]);
+});
+
+test("a comment needs something to say", async () => {
+  const p = await post(nora, { text: "Something" });
+  for (const text of [undefined, "", "   ", null]) {
+    const res = await addComment(cass, p.id, { text });
+    assert.equal(res.statusCode, 400);
+    assert.match(body(res).error, /needs something to say/);
+  }
+});
+
+test("a very long comment is cut to the ceiling rather than stored whole", async () => {
+  const p = await post(nora, { text: "Something" });
+  const c = body(await addComment(cass, p.id, { text: "x".repeat(3000) }));
+  assert.equal(c.comments[0].text.length, 2000);
+});
+
+test("the author of a comment is the caller, never the body", async () => {
+  const p = await post(nora, { text: "Something" });
+  const c = body(await addComment(cass, p.id, { text: "hi", author: "teddy", authorName: "Teddy Schwarz" }));
+  assert.equal(c.comments[0].author, "cass");
+  assert.equal(c.comments[0].authorName, "Cass Ito");
+});
+
+test("commenting on a post you cannot see is refused, the same as reading it", async () => {
+  const p = await post(nora, { text: "Sports Lab only", lab: "sports" });
+  const res = await addComment(omar, p.id, { text: "hi" });
+  assert.equal(res.statusCode, 403);
+  assert.equal((await addComment(cass, p.id, { text: "hi" })).statusCode, 201);
+});
+
+test("commenting on a post that isn't there is a 404", async () => {
+  assert.equal((await addComment(teddy, "PS-404", { text: "hi" })).statusCode, 404);
 });

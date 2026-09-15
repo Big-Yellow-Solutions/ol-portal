@@ -3,22 +3,28 @@
  * Posts have a backend now (backend/src/community.mjs, `GET|POST /posts`),
  * so the feed no longer holds them: this module is the client for that API
  * plus the small amount of translation the surfaces need between what the
- * store keeps and what the design draws.
+ * store keeps and what the design draws. Likes and comments followed the
+ * same path (`POST /posts/{id}/like`, `POST /posts/{id}/comments`) — until
+ * then a like or a comment lived in this page's React state and was gone on
+ * the next reload, exactly the bug the post itself used to have.
  *
  * The two shapes, and why there are two:
  *
  *   PostRecord    what the API stores and returns — an author key, a lab key,
- *                 ISO timestamps. Stable, and safe to persist.
+ *                 ISO timestamps, and comments as raw {author, authorName,
+ *                 text, created} snapshots. Stable, and safe to persist.
  *   CommunityPost what a card renders — a person's name and initials, a lab's
  *                 name, "3h ago". All of it derived, none of it stored, so a
  *                 renamed person or a renamed lab reads correctly on a post
- *                 written a year earlier.
+ *                 written a year earlier. A comment gets the same treatment,
+ *                 through `toCommunityComment` — the live roster wins over
+ *                 the snapshot for anyone still on it.
  *
  * `toCommunityPost` is the join between them, and the portal's own roster
  * (usePortalData) is what it joins against.
  *
- * Events, RSVPs and threads still have no API. They stay empty here, and each
- * surface has an empty state for the state they are in.
+ * Events and RSVPs still have no API. They stay empty here, and each surface
+ * has an empty state for the state they are in.
  */
 
 import { api } from "@/lib/api";
@@ -31,6 +37,17 @@ export interface CommunityComment {
   online?: boolean;
   time: string;
   text: string;
+}
+
+/* One comment as the API stores and returns it — the same snapshot shape a
+   post's own author/authorName carries, for the same reason: a renamed or
+   removed commenter should not turn their words into an orphan. */
+export interface CommentRecord {
+  id: string;
+  author: string;
+  authorName: string;
+  text: string;
+  created: string;
 }
 
 export interface CommunityPost {
@@ -48,6 +65,10 @@ export interface CommunityPost {
   edited: boolean;
   kind: string;
   likes: number;
+  /* Whether the signed-in reader is one of the people counted in `likes` —
+     decided server-side (publicView), never derived here, so it agrees with
+     the count it is drawn next to no matter whose browser is asking. */
+  likedByMe: boolean;
   text: string;
   linkSource?: string;
   linkTitle?: string;
@@ -112,7 +133,8 @@ export interface PostRecord {
   lab?: string;
   tags: string[];
   likes: number;
-  comments: CommunityComment[];
+  likedByMe: boolean;
+  comments: CommentRecord[];
   created: string;
   updated: string;
 }
@@ -134,6 +156,18 @@ export const updatePost = (id: string, input: Partial<NewPost>) =>
 
 export const deletePost = (id: string) =>
   api<{ deleted: string }>(`/posts/${id}`, { method: "DELETE" });
+
+/* Toggle, not like/unlike: the caller is either already counted or is not,
+   and this always means "make it the other one" — see toggleLike's own
+   comment in community.mjs for why that is the whole action. */
+export const toggleLike = (id: string) =>
+  api<PostRecord>(`/posts/${id}/like`, { method: "POST" });
+
+export const addComment = (id: string, text: string) =>
+  api<PostRecord>(`/posts/${id}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
 
 /* Mirrors canEdit in backend/src/community.mjs exactly: the author, or an
    Admin for moderation. A Lab Leader does not own other people's posts in
@@ -183,6 +217,23 @@ export function initialsOfName(name: string): string {
    `online` is deliberately not set. There is no presence backend, and a dot
    that always says "away" is worse than no dot — AvatarWithPresence draws
    none when this is undefined. */
+/* A comment gets the same author resolution a post does: the live roster
+   wins over the stored snapshot for anyone still on it, and the snapshot
+   carries a commenter who has since left. */
+export function toCommunityComment(
+  record: CommentRecord,
+  people: Record<string, Person>,
+  now: Date
+): CommunityComment {
+  const person = people[record.author];
+  return {
+    who: fullName(person) || record.authorName || record.author,
+    initials: person ? initials(person) : initialsOfName(record.authorName),
+    time: postTime(record.created, now),
+    text: record.text,
+  };
+}
+
 export function toCommunityPost(
   record: PostRecord,
   people: Record<string, Person>,
@@ -200,8 +251,9 @@ export function toCommunityPost(
     edited: !!record.updated && record.updated !== record.created,
     kind: record.kind,
     likes: record.likes ?? 0,
+    likedByMe: !!record.likedByMe,
     text: record.text,
-    comments: record.comments ?? [],
+    comments: (record.comments ?? []).map((c) => toCommunityComment(c, people, now)),
   };
 }
 

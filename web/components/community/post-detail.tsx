@@ -42,20 +42,30 @@ export function PostDetail({
   meInitials: string;
   canEdit: boolean;
   onLike: () => void;
-  onComment: (text: string) => void;
+  onComment: (text: string) => Promise<void>;
   onAuthor: () => void;
   onEdit: (text: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
+  const [posting, setPosting] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  /* Awaited, the same way PostEditor's save is: a failed comment leaves the
+     draft in the box rather than clearing it on a request that never landed. */
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = draft.trim();
-    if (!text) return;
-    onComment(text);
-    setDraft("");
+    if (!text || posting) return;
+    setPosting(true);
+    try {
+      await onComment(text);
+      setDraft("");
+    } catch {
+      // The page has already said what went wrong; the draft stays put.
+    } finally {
+      setPosting(false);
+    }
   };
 
   return (
@@ -151,11 +161,12 @@ export function PostDetail({
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add a comment"
           aria-label="Add a comment"
+          disabled={posting}
           className={cn(FIELD, "min-w-0 flex-1 rounded-full px-3.5 py-2.5 text-sm")}
         />
         <button
           type="submit"
-          disabled={!draft.trim()}
+          disabled={!draft.trim() || posting}
           className="flex-none cursor-pointer rounded-full bg-violet-deep px-[18px] py-2.5 text-[13px] font-semibold text-white transition-colors hover:bg-violet disabled:cursor-not-allowed disabled:opacity-50"
         >
           Reply
