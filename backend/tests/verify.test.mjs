@@ -189,3 +189,28 @@ test("when the email cannot be sent the claim is dropped so a retry is not throt
   verify.mailer.send = async m => { outbox.push(m); };
   assert.equal((await verify.send(teddy)).statusCode, 200);
 });
+
+/* The accepted issuers. The custom Authentication API domain (#27) mints
+   tokens with its own host in `iss`; the default api.workos.com issuer has to
+   keep working alongside it, or a frontend build without the custom hostname
+   signs nobody in. (2026-09-15: the override alone rejected every token and
+   no sign-in code went out.) */
+test("issuers: the custom domain is added to the default, not swapped in", async () => {
+  const { issuers } = await import("../src/authz.mjs");
+  const id = "client_test";
+  const base = `https://api.workos.com/user_management/${id}`;
+  const custom = `https://auth.optimisticlabs.com/user_management/${id}`;
+  const saved = { c: process.env.WORKOS_CLIENT_ID, i: process.env.WORKOS_TOKEN_ISSUER };
+  try {
+    process.env.WORKOS_CLIENT_ID = id;
+    delete process.env.WORKOS_TOKEN_ISSUER;
+    assert.deepEqual(issuers(), [base]);
+    process.env.WORKOS_TOKEN_ISSUER = ` ${custom} `;
+    assert.deepEqual(issuers(), [base, custom]);
+    process.env.WORKOS_TOKEN_ISSUER = `${custom},${base}`;
+    assert.deepEqual(issuers(), [base, custom]);
+  } finally {
+    if (saved.c === undefined) delete process.env.WORKOS_CLIENT_ID; else process.env.WORKOS_CLIENT_ID = saved.c;
+    if (saved.i === undefined) delete process.env.WORKOS_TOKEN_ISSUER; else process.env.WORKOS_TOKEN_ISSUER = saved.i;
+  }
+});

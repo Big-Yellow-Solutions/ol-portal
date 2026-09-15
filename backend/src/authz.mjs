@@ -30,15 +30,22 @@ import { doc, TABLE } from "./util.mjs";
    for another WorkOS application no longer matches the expected issuer, on
    top of already failing the client-scoped JWKS below.
 
-   WORKOS_TOKEN_ISSUER still overrides, for a custom auth domain. */
+   WORKOS_TOKEN_ISSUER adds the issuer a custom Authentication API domain
+   signs with (https://auth.optimisticlabs.com/user_management/<client id>
+   in production, since #27 pointed authkit-js's apiHostname there). It is
+   ADDED to the default, not swapped in for it: the same client mints tokens
+   under whichever hostname the browser called, so a build without the custom
+   hostname (the dev harness, a rollback of the frontend) still signs in. Both
+   hostnames front one WorkOS environment and one key pair, so accepting both
+   is no looser than accepting either. Comma-separated for more than one. */
 const issuerFor = clientId => `https://api.workos.com/user_management/${clientId}`;
 
-const issuers = () => {
-  const configured = (process.env.WORKOS_TOKEN_ISSUER || "").trim();
-  if (configured) return [configured];
+export const issuers = () => {
   const clientId = (process.env.WORKOS_CLIENT_ID || "").trim();
   if (!clientId) throw new Error("WORKOS_CLIENT_ID is not set");
-  return [issuerFor(clientId)];
+  const extra = (process.env.WORKOS_TOKEN_ISSUER || "")
+    .split(",").map(s => s.trim()).filter(Boolean);
+  return [...new Set([issuerFor(clientId), ...extra])];
 };
 
 /* Cached across invocations: jose fetches the keys on demand and holds them

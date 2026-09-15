@@ -13,7 +13,7 @@
 
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { decodeJwt } from "jose";
-import { verifyWorkosToken, sessionVerified, isVerifyRoute } from "./authz.mjs";
+import { verifyWorkosToken, sessionVerified, isVerifyRoute, issuers } from "./authz.mjs";
 import { doc, TABLE, writeAudit, AUDIT_TTL_DAYS } from "./util.mjs";
 
 const DENY = { isAuthorized: false };
@@ -83,7 +83,7 @@ export const handler = async event => {
     try { sawIssuer = decodeJwt(token).iss; } catch { sawIssuer = "undecodable"; }
     log("token rejected", err.message, {
       issuerSeen: sawIssuer,
-      issuerExpected: process.env.WORKOS_TOKEN_ISSUER || "(default)"
+      issuersExpected: (() => { try { return issuers(); } catch { return "(unset)"; } })()
     });
     return DENY;
   }

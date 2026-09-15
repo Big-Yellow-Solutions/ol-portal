@@ -30,10 +30,11 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Overrides the expected `iss` claim. Leave empty: it is derived from
-      WorkosClientId as https://api.workos.com/user_management/<client id>,
-      which is what AuthKit actually signs tokens with. Set it only for a
-      custom auth domain.
+      Extra accepted `iss` claim(s), comma-separated, on top of the default
+      derived from WorkosClientId (https://api.workos.com/user_management/
+      <client id>). Needed once the frontend sets a custom Authentication API
+      domain (NEXT_PUBLIC_WORKOS_API_HOSTNAME): tokens minted through it carry
+      https://<that domain>/user_management/<client id> instead.
 
 Globals:
   Function:
