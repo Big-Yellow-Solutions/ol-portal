@@ -46,19 +46,47 @@ const GUIDES = [
     page: "pipeline",
     order: 1,
     title: "Pipeline",
-    summary: "The deal board: create, move, and close deals across every stage.",
+    summary: "The deal board: every stage, what each one requires, and how to move a deal through them.",
     sections: [
       {
-        heading: "How the board works",
-        body: "Each column is a stage: Lead, Discovery, Proposal Sent, Negotiating, and Closed. Drag a card to a new column to move it forward or back. Use the search box and the Lab and Owner filters above the board to narrow what you see."
+        heading: "The board and its four tabs",
+        body: "Board is the Kanban view: one column per stage, one card per deal. Companies and People are directories of every billing entity in your pipeline, each linked deal's total value, and how many are open. Documents is every proposal, contract, invoice and Lab Leader Assignment across all your deals in one filterable, sortable list — not to be confused with a single deal's own Documents tab, covered below, which only shows that one deal's three uploads. Use the search box, and (Admins only) the Lab and Owner pickers, to narrow the Board."
+      },
+      {
+        heading: "The seven stages",
+        body: "Lead, Discovery, Proposal Sent, Negotiating, Contracted, Closed, and Closed Lost. Drag a card to a new column to move it forward or back, or change Stage inside the deal itself. Closed Lost sits apart from the rest: a deal can be marked lost from any stage, at any time, with nothing required first."
+      },
+      {
+        heading: "What Closed and Contracted each mean",
+        body: "Contracted means the contract is signed and nothing else. Closed (shown as \"Closed Won\") is reserved for a contracted deal that's also been paid — signing and getting paid are two different moments, and the board now has a column for each. A deal can sit at Contracted, invoiced and waiting on payment, for as long as it needs to before someone moves it the rest of the way to Closed."
+      },
+      {
+        heading: "The four requirements, in the order you'll hit them",
+        body: "1) A billing entity — a linked company or person — is required from Proposal Sent onward. 2) A proposal document uploaded to the deal is required from Proposal Sent onward. 3) A signed contract is required from Contracted onward. 4) An invoice uploaded to the deal is required to reach Closed — there's no separate payment tracker, so an invoice on file is the portal's stand-in for \"paid.\" Each one only has to be true once you reach that stage or later; a deal already sitting past a requirement when it was added is never retroactively blocked."
+      },
+      {
+        heading: "Meeting a requirement",
+        body: "Every requirement above is cleared by uploading the actual document to the deal's Documents tab, in the Upload Proposal, Upload Contract, or Upload Invoice box. A proposal counts if a version was marked Final and sent from the (now retired) drafting tool; a contract counts if it was generated, signed and countersigned right on the Contracts page — either way, once it's on file the matching upload box shows it and the gate is cleared."
+      },
+      {
+        heading: "Meeting a requirement while creating a brand-new deal",
+        body: "A new deal has no Documents tab yet — it only appears once the deal is saved. If you pick a stage that needs a document you don't have yet, the matching upload box appears right there in the New Deal form instead. If the deal hasn't been saved at all, a \"Save deal to attach a…\" button saves what you've filled in so far so the upload box has somewhere real to attach to; the deal isn't created twice — clicking Create Deal afterward finishes that same record."
+      },
+      {
+        heading: "Dragging a card into a stage it isn't ready for",
+        body: "The drop still happens, but the deal's drawer opens straight to whatever's missing — a company or person to link, a proposal, or a signed contract — with a message naming exactly what's needed. Fix it there and the deal lands in the stage you dragged it to."
+      },
+      {
+        heading: "The Lab Leader Assignment form",
+        body: "Once a deal reaches Contracted, its card and its drawer flag that an Assignment is needed: who did the work, their fee split (must add to 100%), and any subcontractor or hard costs. This does not block the stage move — it's a nudge, not a gate — but finance won't release payouts without it. One named approver signs off on what's filed; the filer can revise it freely until then, and only the approver can reopen it after."
+      },
+      {
+        heading: "Recurring deals",
+        body: "Check \"Recurring engagement\" on a deal and the portal generates one invoice-eligible instance every month once the deal reaches Contracted — it keeps billing straight through Closed too. Pause or resume it any time from the deal's drawer."
       },
       {
         heading: "Adding and editing a deal",
-        body: "Click + New Deal to open a blank deal, or click any card to edit it: client, lab, stage, amount, expected close date, source, owner, deal owner, and whether it recurs monthly."
-      },
-      {
-        heading: "Closing a deal isn't a drag",
-        body: "You can't just drag a card into Closed. Dropping it there opens a required Assignment Notice first: pick Won or Lost, name which Lab Leader(s) did the work and their fee split (has to add up to 100%), and log subcontractor and hard costs. Once that's saved, each named Lab Leader, and an Admin for Optimistic Labs' own line, signs it by typing their name in the deal dialog."
+        body: "Click + New Deal for a blank one, or click any card to edit it: client, lab, stage, amount, expected close date (a real close date once you're at Closed), source, owner, deal owner, and whether it recurs monthly."
       },
       {
         heading: "Owner vs. deal owner",
