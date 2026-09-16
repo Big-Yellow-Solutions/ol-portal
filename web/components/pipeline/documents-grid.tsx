@@ -23,7 +23,7 @@ import { billingOf } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
 import type { BadgeVariant } from "@/lib/data";
-import type { Deal } from "@/lib/types";
+import type { Deal, FileRecord } from "@/lib/types";
 
 /* Pipeline v2, fourth view: every proposal, signed contract and invoice in the
    pipeline with its current version — the aggregate the Proposals tab only
@@ -36,7 +36,18 @@ import type { Deal } from "@/lib/types";
  * status from the record rather than from a file. Where a record has no
  * version concept (an invoice request does not), the card says nothing rather
  * than inventing "v1".
- */
+ *
+ * That held until deals started collecting proposals and contracts as plain
+ * uploaded files instead (the deal drawer's Documents tab) — the now-usual
+ * path, since the in-portal drafting tool that produced PROPOSAL records was
+ * retired. A deal with only an uploaded file and no PROPOSAL/CONTRACT record
+ * used to have nothing here at all. The loops below add one card per deal for
+ * an uploaded proposal or contract file, but only where no structured record
+ * already covers that deal — the two are alternate ways of clearing the same
+ * pipeline gate (backend/src/app.mjs), not two separate documents. An
+ * uploaded invoice file is different: it stands in for "paid" at the Closed
+ * gate, a separate thing from an INVOICE billing request, so it always gets
+ * its own card. */
 
 const PAGE_SIZE = 9;
 
@@ -83,6 +94,10 @@ interface DocCard {
   href?: string;
   /** A finished document reads green rather than violet. */
   done: boolean;
+  /** Which tab of the deal drawer "Open deal" should land on. Everything
+   *  keeps landing on Details except a raw uploaded file, which belongs on
+   *  the tab it actually lives on. */
+  openTab?: "details" | "documents";
 }
 
 function shortDate(iso: string | undefined): string {
@@ -99,9 +114,9 @@ export function DocumentsGrid({
 }: {
   search: string;
   lab: string;
-  onOpenDeal: (dealId: string) => void;
+  onOpenDeal: (dealId: string, tab?: "details" | "documents") => void;
 }) {
-  const { deals, proposals, contracts, invoices, companies, contacts, people } =
+  const { deals, proposals, contracts, invoices, files, companies, contacts, people } =
     usePortalData();
   const [kind, setKind] = useState<Kind>("all");
   const [sort, setSort] = useState<Sort>("newest");
@@ -172,6 +187,46 @@ export function DocumentsGrid({
       });
     }
 
+    /* A deal with no PROPOSAL record at all might still have a proposal
+       attached as a plain uploaded file — the now-usual path. One card per
+       deal, its latest version; earlier ones fold into the same
+       versionNote treatment the structured records get above. */
+    const proposalFilesByDeal = new Map<string, FileRecord[]>();
+    for (const f of files) {
+      if (f.kind !== "proposal" || !f.deal || latestByDeal.has(f.deal)) continue;
+      const list = proposalFilesByDeal.get(f.deal) ?? [];
+      list.push(f);
+      proposalFilesByDeal.set(f.deal, list);
+    }
+    for (const [dealId, list] of proposalFilesByDeal) {
+      const deal = dealMap[dealId];
+      const sorted = [...list].sort(
+        (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
+      );
+      const current = sorted[0];
+      const earlier = sorted.length - 1;
+      out.push({
+        id: `proposal-file:${current.id}`,
+        kind: "proposals",
+        tag: "Proposal",
+        name: current.name,
+        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+        status: "On file",
+        variant: "secondary",
+        version: current.version,
+        when: `Uploaded ${shortDate(current.date)}`,
+        at: current.date || "",
+        amount: deal?.amount ?? 0,
+        sub: deal ? `${deal.client} · ${deal.stage}` : "",
+        versionNote:
+          earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
+        action: "Open deal — view proposal",
+        deal,
+        done: true,
+        openTab: "documents",
+      });
+    }
+
     for (const c of contracts) {
       const deal = c.deal ? dealMap[c.deal] : undefined;
       const signed = c.status === "Signed";
@@ -200,6 +255,50 @@ export function DocumentsGrid({
       });
     }
 
+    /* Same fallback as proposals: a deal whose signed contract is a plain
+       uploaded file rather than a generated CONTRACT record still gets a
+       card, but only where no CONTRACT record already covers that deal —
+       the two are alternate ways of clearing the same gate, not two
+       documents. */
+    const dealsWithContractRecord = new Set(
+      contracts.map((c) => c.deal).filter((d): d is string => !!d)
+    );
+    const contractFilesByDeal = new Map<string, FileRecord[]>();
+    for (const f of files) {
+      if (f.kind !== "contract" || !f.deal || dealsWithContractRecord.has(f.deal)) continue;
+      const list = contractFilesByDeal.get(f.deal) ?? [];
+      list.push(f);
+      contractFilesByDeal.set(f.deal, list);
+    }
+    for (const [dealId, list] of contractFilesByDeal) {
+      const deal = dealMap[dealId];
+      const sorted = [...list].sort(
+        (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
+      );
+      const current = sorted[0];
+      const earlier = sorted.length - 1;
+      out.push({
+        id: `contract-file:${current.id}`,
+        kind: "contracts",
+        tag: "Contract",
+        name: current.name,
+        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+        status: "On file",
+        variant: "secondary",
+        version: current.version,
+        when: `Uploaded ${shortDate(current.date)}`,
+        at: current.date || "",
+        amount: deal?.amount ?? 0,
+        sub: deal ? `${deal.client} · ${deal.stage}` : "",
+        versionNote:
+          earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
+        action: "Open deal — view contract",
+        deal,
+        done: true,
+        openTab: "documents",
+      });
+    }
+
     for (const i of invoices) {
       const deal = dealMap[i.deal];
       out.push({
@@ -223,6 +322,31 @@ export function DocumentsGrid({
         deal,
         href: deal ? undefined : "/invoices",
         done: i.status === "Paid",
+      });
+    }
+
+    /* Uploaded invoice files are additive, not an alternate to an INVOICE
+       billing request — one stands in for "paid" at the Closed gate, the
+       other tracks Admin Review → Sent → Paid, and a deal can carry both. */
+    for (const f of files) {
+      if (f.kind !== "invoice" || !f.deal) continue;
+      const deal = dealMap[f.deal];
+      out.push({
+        id: `invoice-file:${f.id}`,
+        kind: "invoices",
+        tag: "Invoice",
+        name: f.name,
+        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+        status: "On file",
+        variant: "secondary",
+        when: `Uploaded ${shortDate(f.date)}`,
+        at: f.date || "",
+        amount: deal?.amount ?? 0,
+        sub: deal ? deal.client : "",
+        action: "Open deal — view invoice",
+        deal,
+        done: true,
+        openTab: "documents",
       });
     }
 
@@ -253,7 +377,7 @@ export function DocumentsGrid({
     }
 
     return out;
-  }, [proposals, contracts, invoices, deals, people, dealMap, companyMap, contactMap]);
+  }, [proposals, contracts, invoices, files, deals, people, dealMap, companyMap, contactMap]);
 
   const q = search.trim().toLowerCase();
 
@@ -394,7 +518,7 @@ export function DocumentsGrid({
               {d.deal ? (
                 <button
                   type="button"
-                  onClick={() => onOpenDeal(d.deal!.id)}
+                  onClick={() => onOpenDeal(d.deal!.id, d.openTab)}
                   className="mt-3.5 w-full cursor-pointer rounded-full border border-hair-strong bg-white py-2 text-xs font-semibold text-violet-deep transition-colors hover:border-violet-deep hover:bg-[#F4F2FF]"
                 >
                   {d.action}

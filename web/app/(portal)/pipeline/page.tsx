@@ -39,7 +39,7 @@ import { DealCard } from "@/components/pipeline/deal-card";
 
 type ViewKey = "board" | "companies" | "people" | "documents";
 const VIEWS: { key: ViewKey; label: string }[] = [
-  { key: "board", label: "Board" },
+  { key: "board", label: "Deals" },
   { key: "companies", label: "Companies" },
   { key: "people", label: "People" },
   { key: "documents", label: "Documents" },
@@ -65,6 +65,7 @@ function PipelineBoard() {
   const [search, setSearch] = useState("");
   const [labChoice, setLabChoice] = useState("all");
   const [ownerChoice, setOwnerChoice] = useState("all");
+  const [dealOwnerChoice, setDealOwnerChoice] = useState("all");
   const [onlyUnlinked, setOnlyUnlinked] = useState(false);
 
   /* Who this pipeline belongs to.
@@ -86,6 +87,7 @@ function PipelineBoard() {
   const isAdmin = role === "Admin";
   const labFilter = isAdmin ? labChoice : "all";
   const ownerFilter = isAdmin ? ownerChoice : "all";
+  const dealOwnerFilter = isAdmin ? dealOwnerChoice : "all";
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
 
@@ -173,12 +175,13 @@ function PipelineBoard() {
     return deals.filter((d) => {
       if (labFilter !== "all" && d.lab !== labFilter) return false;
       if (ownerFilter !== "all" && d.owner !== ownerFilter) return false;
+      if (dealOwnerFilter !== "all" && d.dealOwner !== dealOwnerFilter) return false;
       if (onlyUnlinked && (d.companyId || d.contactId || !billingRequiredAt(d.stage))) return false;
       if (!q) return true;
       const bill = billingOf(d, companyMap, contactMap);
       return `${d.client} ${bill.name} ${d.owner}`.toLowerCase().includes(q);
     });
-  }, [deals, labFilter, ownerFilter, onlyUnlinked, search, companyMap, contactMap]);
+  }, [deals, labFilter, ownerFilter, dealOwnerFilter, onlyUnlinked, search, companyMap, contactMap]);
 
   const nUnlinked = useMemo(
     () => deals.filter((d) => !d.companyId && !d.contactId && billingRequiredAt(d.stage)).length,
@@ -385,6 +388,15 @@ function PipelineBoard() {
               </SelectContent>
             </Select>
           )}
+          {isAdmin && view === "board" && (
+            <Select value={dealOwnerFilter} onValueChange={setDealOwnerChoice}>
+              <SelectTrigger className="w-40"><SelectValue placeholder="All owners" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All owners</SelectItem>
+                {leaders.map((p) => <PersonItem key={p.id} person={p} />)}
+              </SelectContent>
+            </Select>
+          )}
           {/* What the pickers would have said, for a reader who has nothing to
               pick: the scope stated next to the search box, which is where the
               question "what am I searching?" gets asked. */}
@@ -486,9 +498,9 @@ function PipelineBoard() {
       )}
 
       {view === "documents" && (
-        <DocumentsGrid search={search} lab={labFilter} onOpenDeal={(dealId) => {
+        <DocumentsGrid search={search} lab={labFilter} onOpenDeal={(dealId, tab) => {
           const d = deals.find((x) => x.id === dealId);
-          if (d) openDeal(d);
+          if (d) openDeal(d, undefined, tab);
         }} />
       )}
 
