@@ -227,9 +227,10 @@ function waitingOn(
   contract: Contract | null
 ): { waitingOn: string; stalled: boolean } {
   if (contract?.status === "Signed") {
-    if (deal.stage !== "Closed")
-      return { waitingOn: "Signed — not marked Closed Won yet", stalled: true };
-    return { waitingOn: "Done", stalled: false };
+    if (deal.stage === "Closed") return { waitingOn: "Done", stalled: false };
+    if (deal.stage === "Contracted")
+      return { waitingOn: "Contracted — awaiting payment", stalled: false };
+    return { waitingOn: "Signed — not marked Contracted yet", stalled: true };
   }
   if (contract?.status === "Out for Signature") {
     if (!contract.signatures?.client) {

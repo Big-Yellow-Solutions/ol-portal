@@ -6,11 +6,16 @@ export type Role = "Admin" | "Lab Leader" | "Contributor";
 // is its own stage. `outcome` is still on the record but is now derived from
 // the stage server-side rather than chosen separately, so the two cannot
 // disagree.
+//
+// Pipeline v4 splits "Closed" itself in two: "Contracted" is a signed
+// contract with payment still outstanding, and "Closed" now specifically
+// means paid — see contractRequiredAt/invoiceRequiredAt in lib/pipeline.ts.
 export type Stage =
   | "Lead"
   | "Discovery"
   | "Proposal Sent"
   | "Negotiating"
+  | "Contracted"
   | "Closed"
   | "Closed Lost";
 /** Derived from the stage server-side since Pipeline v3 — "Closed" is Won and
@@ -753,6 +758,7 @@ export const STAGES: Stage[] = [
   "Discovery",
   "Proposal Sent",
   "Negotiating",
+  "Contracted",
   "Closed",
   "Closed Lost",
 ];
@@ -764,6 +770,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
   Discovery: "Discovery",
   "Proposal Sent": "Proposal Sent",
   Negotiating: "Negotiating",
+  Contracted: "Contracted",
   Closed: "Closed Won",
   "Closed Lost": "Closed Lost",
 };

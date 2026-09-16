@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { fmtDollars } from "@/lib/data";
-import { companyForContact, initialsOf } from "@/lib/pipeline";
+import { companyForContact, initialsOf, websiteLabel } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 
 /* Pipeline v2 (design handoff), sections 2 & 3: Companies and People share one
@@ -38,6 +38,9 @@ export function ContactsTable({
               value: deals.filter((d) => d.contactId === c.id).reduce((sum, d) => sum + (d.amount || 0), 0),
               link: company ? company.name : "Individual — no company",
               linked: !!company,
+              website: "",
+              email: c.email || "",
+              phone: c.phone || "",
             };
           })
         : companies.map((c) => ({
@@ -49,6 +52,9 @@ export function ContactsTable({
             value: deals.filter((d) => d.companyId === c.id).reduce((sum, d) => sum + (d.amount || 0), 0),
             link: c.contactId ? (contacts.find((p) => p.id === c.contactId)?.name ?? "") : "No primary contact",
             linked: !!c.contactId,
+            website: c.website || "",
+            email: "",
+            phone: "",
           }));
     return base
       .filter((r) => !q || `${r.name} ${r.sub} ${r.link}`.toLowerCase().includes(q))
@@ -63,7 +69,16 @@ export function ContactsTable({
       <div className="flex flex-col gap-px overflow-hidden rounded-2xl border border-hair bg-hair-soft">
         <div className="flex items-center gap-3.5 bg-white px-4.5 py-2.5">
           <span className="flex-1 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">{recordCol}</span>
+          {view === "companies" && (
+            <span className="w-[170px] shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Website</span>
+          )}
           <span className="w-[190px] shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">{linkCol}</span>
+          {view === "people" && (
+            <>
+              <span className="w-[190px] shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Email</span>
+              <span className="w-[130px] shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Phone</span>
+            </>
+          )}
           <span className="w-[110px] shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Open deals</span>
           <span className="w-[100px] shrink-0 text-right text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Value</span>
         </div>
@@ -83,7 +98,18 @@ export function ContactsTable({
                 <span className="block truncate text-xs text-ink-mute">{r.sub}</span>
               </span>
             </span>
+            {view === "companies" && (
+              <span className={`w-[170px] shrink-0 truncate text-sm ${r.website ? "text-ink" : "text-ink-mute"}`}>
+                {r.website ? websiteLabel(r.website) : "—"}
+              </span>
+            )}
             <span className={`w-[190px] shrink-0 truncate text-sm ${r.linked ? "text-ink" : "text-ink-mute"}`}>{r.link}</span>
+            {view === "people" && (
+              <>
+                <span className={`w-[190px] shrink-0 truncate text-sm ${r.email ? "text-ink" : "text-ink-mute"}`}>{r.email || "—"}</span>
+                <span className={`w-[130px] shrink-0 truncate text-sm ${r.phone ? "text-ink" : "text-ink-mute"}`}>{r.phone || "—"}</span>
+              </>
+            )}
             <span className="w-[110px] shrink-0 text-sm text-ink">{r.count || "—"}</span>
             <span className="w-[100px] shrink-0 text-right text-sm font-bold text-ink">{r.count ? fmtDollars(r.value) : "—"}</span>
           </button>

@@ -24,7 +24,9 @@ import {
   billingOf,
   billingRequiredAt,
   proposalRequiredAt,
-  CLOSED_WON,
+  contractRequiredAt,
+  invoiceRequiredAt,
+  CONTRACT_GATE_STAGE,
   SHOW_COLUMN_TOTALS,
 } from "@/lib/pipeline";
 import { STAGES, STAGE_LABELS } from "@/lib/types";
@@ -154,6 +156,13 @@ function PipelineBoard() {
     [files]
   );
 
+  /* Closed now means paid, and an uploaded invoice is the portal's stand-in
+     for that — mirrors backend/src/app.mjs's invoice gate. */
+  const dealsWithInvoiceFile = useMemo(
+    () => new Set(files.filter((f) => f.kind === "invoice" && f.deal).map((f) => f.deal!)),
+    [files]
+  );
+
   const leaders = useMemo(
     () => personOptions(people, { labs, filter: (p) => p.role === "Admin" || p.role === "Lab Leader" }),
     [people, labs]
@@ -215,23 +224,32 @@ function PipelineBoard() {
         return;
       }
     }
-    /* Winning still needs the paperwork: no signed contract, no close. The
-       assignment does NOT block it — a won deal is won, and the form is
-       chased afterwards, which is the change v3 makes. */
-    if (targetStage === CLOSED_WON) {
+    /* Contracted needs the signed paperwork; Closed (paid) needs an invoice
+       on file too. The assignment does NOT block either — a contracted deal
+       is basically won, and the form is chased afterwards, which is the
+       change v3 makes (v4 just moves the moment earlier, to signing). */
+    if (contractRequiredAt(targetStage)) {
       const hasContract = !!deal.contractSigned || dealsWithContractFile.has(deal.id);
       if (!hasContract) {
-        toast.info("Set the close date and add the signed contract.");
-        openDeal(deal, CLOSED_WON, "documents");
+        toast.info(`${STAGE_LABELS[targetStage]} needs a signed contract — upload one on this deal`);
+        openDeal(deal, targetStage, "documents");
         return;
       }
-      if (!deal.assignment) {
-        // A nudge, not a gate: the move goes through, then the drawer opens
-        // on the deal so the form is one click away.
-        await moveTo(deal, targetStage, "Closed Won — a Lab Leader Assignment form is needed");
-        openDeal({ ...deal, stage: targetStage }, undefined, "details");
+    }
+    if (invoiceRequiredAt(targetStage)) {
+      const hasInvoice = dealsWithInvoiceFile.has(deal.id);
+      if (!hasInvoice) {
+        toast.info(`${STAGE_LABELS[targetStage]} needs an invoice — upload one on this deal`);
+        openDeal(deal, targetStage, "documents");
         return;
       }
+    }
+    if (targetStage === CONTRACT_GATE_STAGE && !deal.assignment) {
+      // A nudge, not a gate: the move goes through, then the drawer opens
+      // on the deal so the form is one click away.
+      await moveTo(deal, targetStage, "Contracted — a Lab Leader Assignment form is needed");
+      openDeal({ ...deal, stage: targetStage }, undefined, "details");
+      return;
     }
 
     await moveTo(deal, targetStage);

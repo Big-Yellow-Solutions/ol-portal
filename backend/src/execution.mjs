@@ -43,22 +43,28 @@ export async function generateExecutedPdf(c) {
   return payload;
 }
 
-/* FR18. An executed contract closes the deal. Until Pipeline v3 this had to
-   wait on an Assignment Notice — the deal was parked at "ready to close" until
-   somebody filled one in — but closing no longer depends on the assignment
-   (assignments.mjs): a won deal is won, and the assignment is chased after the
-   fact by the drawer's Assignment tab. */
+/* FR18. An executed contract moves the deal to Contracted. Until Pipeline v3
+   this had to wait on an Assignment Notice — the deal was parked at "ready to
+   close" until somebody filled one in — but that no longer depends on the
+   assignment (assignments.mjs): a signed deal is basically won, and the
+   assignment is chased after the fact by the drawer's Assignment tab.
+   Pipeline v4 moved the actual close (now: paid) out from under this — a
+   contract being executed says nothing about payment, so it can no longer be
+   what sets stage: "Closed" and outcome: "Won". If the deal has already moved
+   past this (Closed, paid by hand; or Closed Lost, however that happened
+   alongside an execution event) its stage is left alone rather than dragged
+   back to Contracted. */
 export async function rollUpDeal(c) {
   if (!c.deal) return;
   const deal = await get("DEAL", c.deal);
   if (!deal) return;
+  const settled = deal.stage === "Closed" || deal.stage === "Closed Lost";
   await put({
     ...deal,
     contractSigned: true,
     contractSignedAt: c.executedAt,
     contract: c.sk,
-    stage: "Closed",
-    outcome: "Won"
+    stage: settled ? deal.stage : "Contracted"
   });
 }
 

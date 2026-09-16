@@ -191,18 +191,24 @@ test("the fields finance cannot work without are required", () => {
 
 /* ---------- filing ---------- */
 
-test("an assignment can only be filed once the deal is Closed Won", async () => {
+test("an assignment can only be filed once the deal is Contracted or Closed Won", async () => {
   deal("D-1", { stage: "Negotiating", outcome: undefined });
   const open = await call("marcus", "POST", "/deals/D-1/assignment", FORM);
   assert.equal(open.status, 400);
-  assert.match(open.body.error, /Closed Won/);
+  assert.match(open.body.error, /Contracted or Closed Won/);
 
   deal("D-2", { stage: "Closed Lost", outcome: "Lost" });
   const lost = await call("marcus", "POST", "/deals/D-2/assignment", FORM);
   assert.equal(lost.status, 400, "a lost deal never needs one");
 
-  deal("D-3");
-  const won = await call("marcus", "POST", "/deals/D-3/assignment", FORM);
+  // Pipeline v4: the assignment unlocks at Contracted, not just at Closed Won —
+  // the paperwork it needs (a signed contract) is already done by then.
+  deal("D-3", { stage: "Contracted", outcome: undefined });
+  const contracted = await call("marcus", "POST", "/deals/D-3/assignment", FORM);
+  assert.equal(contracted.status, 200, contracted.body?.error);
+
+  deal("D-4");
+  const won = await call("marcus", "POST", "/deals/D-4/assignment", FORM);
   assert.equal(won.status, 200);
   assert.equal(won.body.assignment.pool, 32900);
   assert.equal(won.body.assignment.filedBy, "marcus");
@@ -274,12 +280,63 @@ test("reopening is the approver's alone, and hands the figures back as a draft",
 test("closing a won deal no longer waits on an assignment", async () => {
   deal("D-1", { stage: "Negotiating", outcome: undefined, contractSigned: true });
   rows.set(rowKey("PROPOSAL", "P-1"), { pk: "PROPOSAL", sk: "P-1", deal: "D-1", sentAt: "2026-08-01" });
+  // Pipeline v4: Closed now also needs an invoice on file (the portal's
+  // stand-in for "paid"), on top of the signed contract this deal already has.
+  rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "invoice" });
 
   const res = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
   assert.equal(res.status, 200, res.body?.error);
   assert.equal(res.body.stage, "Closed");
   assert.equal(res.body.outcome, "Won", "outcome comes from the stage now");
   assert.equal(res.body.assignment, undefined, "and nothing was filed to get there");
+});
+
+/* ---------- Pipeline v4: Contracted and the split Closed gate ---------- */
+
+test("Contracted needs a signed contract; an uploaded file clears it the same way a proposal file does", async () => {
+  deal("D-1", { stage: "Negotiating", outcome: undefined, contractSigned: false });
+  rows.set(rowKey("FILE", "F-PROP"), { pk: "FILE", sk: "F-PROP", deal: "D-1", kind: "proposal" });
+
+  const blocked = await call("liz", "PATCH", "/deals/D-1", { stage: "Contracted" });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.body.error, /Contracted needs a signed contract/);
+
+  rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "contract" });
+  const cleared = await call("liz", "PATCH", "/deals/D-1", { stage: "Contracted" });
+  assert.equal(cleared.status, 200, cleared.body?.error);
+  assert.equal(cleared.body.outcome, undefined, "Contracted is not a won outcome — only Closed is");
+});
+
+test("Closed needs an invoice on file even when the contract is already signed", async () => {
+  deal("D-1", { stage: "Contracted", outcome: undefined, contractSigned: true });
+  rows.set(rowKey("FILE", "F-PROP"), { pk: "FILE", sk: "F-PROP", deal: "D-1", kind: "proposal" });
+
+  const blocked = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
+  assert.equal(blocked.status, 400);
+  assert.match(blocked.body.error, /Closed needs an invoice/);
+
+  rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "invoice" });
+  const cleared = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
+  assert.equal(cleared.status, 200, cleared.body?.error);
+  assert.equal(cleared.body.outcome, "Won");
+});
+
+test("jumping straight from Negotiating to Closed still needs the contract and the invoice", async () => {
+  deal("D-1", { stage: "Negotiating", outcome: undefined, contractSigned: false });
+  rows.set(rowKey("FILE", "F-PROP"), { pk: "FILE", sk: "F-PROP", deal: "D-1", kind: "proposal" });
+
+  const noContract = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
+  assert.equal(noContract.status, 400);
+  assert.match(noContract.body.error, /signed contract/);
+
+  rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "contract" });
+  const noInvoice = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
+  assert.equal(noInvoice.status, 400);
+  assert.match(noInvoice.body.error, /invoice/);
+
+  rows.set(rowKey("FILE", "F-2"), { pk: "FILE", sk: "F-2", deal: "D-1", kind: "invoice" });
+  const ok = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
+  assert.equal(ok.status, 200, ok.body?.error);
 });
 
 test("a lost deal is gated on nothing — no billing entity, no proposal, no contract", async () => {

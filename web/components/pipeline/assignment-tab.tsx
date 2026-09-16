@@ -163,7 +163,7 @@ export function AssignmentTab({
         <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] leading-relaxed text-ink-mute">
           {deal.stage === "Closed Lost"
             ? "A lost deal is never assigned — there is no engagement to deliver and no pool to split."
-            : "The Lab Leader Assignment form opens once this deal is Closed Won with a signed contract on file."}
+            : "The Lab Leader Assignment form opens once this deal is Contracted, with a signed contract on file."}
         </p>
       </div>
     );
