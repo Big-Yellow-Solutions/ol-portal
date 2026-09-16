@@ -35,6 +35,22 @@ export const billingRequiredAt = (stage: Stage): boolean =>
 export const proposalRequiredAt = (stage: Stage): boolean =>
   !isLost(stage) && stageIndex(stage) >= stageIndex("Proposal Sent");
 
+/* Pipeline v4: the signed contract used to be what "Closed" itself required.
+   It now gates entry to "Contracted" instead — Closed is reserved for a
+   contract that has also been paid — but the ordinal check still reaches
+   "Closed" too, since its index sits past Contracted's: nothing can skip
+   straight from an earlier stage to Closed without a contract along the way. */
+export const CONTRACT_GATE_STAGE: Stage = "Contracted";
+export const contractRequiredAt = (stage: Stage): boolean =>
+  !isLost(stage) && stageIndex(stage) >= stageIndex(CONTRACT_GATE_STAGE);
+
+/* Closed now specifically means paid, and the portal's proxy for "paid" is an
+   invoice uploaded onto the deal — there's no separate payment ledger to ask
+   instead. Mirrors backend/src/app.mjs's own invoice gate. */
+export const INVOICE_GATE_STAGE: Stage = CLOSED_WON;
+export const invoiceRequiredAt = (stage: Stage): boolean =>
+  !isLost(stage) && stageIndex(stage) >= stageIndex(INVOICE_GATE_STAGE);
+
 /* A company's website is stored as typed (see backend/src/contacts.mjs's
    cleanWebsite): the HubSpot import wrote bare domains, and a person may
    paste a full URL. Either becomes a link by assuming https when there is no
@@ -222,9 +238,11 @@ export function splitEvenly(keys: string[]): Record<string, number> {
 export type AssignmentState = "locked" | "needed" | "filed" | "approved";
 
 /** Which of the Assignment tab's three faces a deal should show. A lost deal
- *  never needs one, which is the whole reason the stage exists. */
+ *  never needs one, which is the whole reason the stage exists. Unlocks at
+ *  Contracted rather than waiting for Closed (paid) — the paperwork finance
+ *  needs to plan the payout is done as soon as the contract is signed. */
 export function assignmentState(deal: Pick<Deal, "stage" | "assignment">): AssignmentState {
-  if (deal.stage !== CLOSED_WON) return "locked";
+  if (!contractRequiredAt(deal.stage)) return "locked";
   const a = deal.assignment;
   if (!a) return "needed";
   return a.approved ? "approved" : "filed";

@@ -352,7 +352,7 @@ async function recordView(p, meta) {
    card. Only ever moves forward, and never touches a Closed deal — closing is
    gated on an Assignment Notice the pipeline collects separately, and quietly
    reopening a closed deal would be worse than leaving the stage alone. */
-const STAGE_ORDER = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed"];
+const STAGE_ORDER = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed"];
 
 async function advanceDeal(dealId, stage) {
   try {

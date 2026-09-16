@@ -26,7 +26,15 @@ import { can } from "@/lib/can";
 import { cn } from "@/lib/utils";
 import { DealDrawerFooter } from "@/components/pipeline/deal-drawer-footer";
 import { fmtDollars, fullName } from "@/lib/data";
-import { assignmentState, billingRequiredAt, proposalRequiredAt, BILLING_GATE_STAGE, CLOSED_WON } from "@/lib/pipeline";
+import {
+  assignmentState,
+  billingRequiredAt,
+  proposalRequiredAt,
+  contractRequiredAt,
+  invoiceRequiredAt,
+  BILLING_GATE_STAGE,
+  CLOSED_WON,
+} from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
 import type { Deal, Source, Stage } from "@/lib/types";
@@ -148,15 +156,27 @@ export function DealDrawer({
     [files, persisted]
   );
 
+  /* Closed now specifically means paid, and an uploaded invoice is the
+     portal's stand-in for that — there's no separate payment ledger to check
+     instead. Mirrors backend/src/app.mjs's invoice gate. */
+  const hasInvoice = useMemo(
+    () => !!persisted && files.some((f) => f.deal === persisted.id && f.kind === "invoice"),
+    [files, persisted]
+  );
+
   const isClosed = stage === "Closed";
   const gated = billingRequiredAt(stage);
   const linked = !!companyId || !!contactId;
   const propGated = proposalRequiredAt(stage);
+  const contractGated = contractRequiredAt(stage);
+  const invoiceGated = invoiceRequiredAt(stage);
   const canSave =
     !!title.trim() &&
     (linked || !gated) &&
     (!propGated || hasProposal) &&
-    (!isClosed || (hasContract && !!close));
+    (!contractGated || hasContract) &&
+    (!invoiceGated || hasInvoice) &&
+    (!isClosed || !!close);
 
   const hint = !title.trim()
     ? "A deal name is required"
@@ -164,13 +184,15 @@ export function DealDrawer({
       ? `Link a company or a person to save this deal at ${stage}`
       : propGated && !hasProposal
         ? `Upload a proposal before saving this deal at ${stage}`
-        : isClosed && !hasContract
-          ? "Upload the signed contract before closing this deal"
-          : isClosed && !close
-            ? "Set the date this deal closed"
-            : !linked
-              ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
-              : "Ready to save";
+        : contractGated && !hasContract
+          ? `Upload the signed contract before saving this deal at ${stage}`
+          : invoiceGated && !hasInvoice
+            ? "Upload an invoice before closing this deal"
+            : isClosed && !close
+              ? "Set the date this deal closed"
+              : !linked
+                ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
+                : "Ready to save";
 
   const buildBody = () => ({
     client: title,
@@ -329,12 +351,10 @@ export function DealDrawer({
                     </p>
                     <p className="mt-1 text-xs leading-relaxed text-amber">
                       {!hasContract
-                        ? "Add the signed contract and close date first, then the assignment form unlocks the payout schedule."
-                        : !close
-                          ? "Set the close date, then fill out the assignment form — finance needs it before any payment is released."
-                          : "Finance needs this completed before work begins and payments are released."}
+                        ? "Add the signed contract first, then the assignment form unlocks the payout schedule."
+                        : "Finance needs this completed before work begins and payments are released."}
                     </p>
-                    {hasContract && !!close && (
+                    {hasContract && (
                       <Button size="sm" className="mt-3 rounded-full bg-amber text-white hover:bg-amber/90" onClick={() => setTab("assignment")}>
                         Go to the assignment form →
                       </Button>
@@ -434,7 +454,7 @@ export function DealDrawer({
               )
             )}
 
-            {isClosed && !hasContract && (
+            {contractGated && !hasContract && (
               persisted ? (
                 <DocumentUploadPanel
                   deal={persisted}
@@ -446,7 +466,7 @@ export function DealDrawer({
               ) : (
                 <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
                   <p className="mb-2 text-xs text-ink-mute">
-                    Closing this deal needs a signed contract on file. Save it now to attach one.
+                    {stage} needs a signed contract uploaded to the deal. Save it now to attach one.
                   </p>
                   <Button
                     type="button"
@@ -456,6 +476,33 @@ export function DealDrawer({
                     disabled={creatingDraft || !title.trim() || !editable}
                   >
                     {creatingDraft ? "Saving…" : "Save deal to attach a contract"}
+                  </Button>
+                </div>
+              )
+            )}
+
+            {invoiceGated && !hasInvoice && (
+              persisted ? (
+                <DocumentUploadPanel
+                  deal={persisted}
+                  kind="invoice"
+                  label="Upload Invoice"
+                  hint="Attach an invoice for this deal. Uploads are saved immediately."
+                  editable={editable}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
+                  <p className="mb-2 text-xs text-ink-mute">
+                    {stage} needs an invoice uploaded to the deal. Save it now to attach one.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={ensureDraft}
+                    disabled={creatingDraft || !title.trim() || !editable}
+                  >
+                    {creatingDraft ? "Saving…" : "Save deal to attach an invoice"}
                   </Button>
                 </div>
               )
@@ -561,7 +608,7 @@ export function DealDrawer({
               editable={editable}
             />
 
-            {isClosed && (
+            {contractGated && (
               <div className="rounded-2xl border border-hair bg-warm-panel p-4">
                 <div className="mb-1 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Signed contract</div>
                 <p className="text-xs text-ink-mute">
@@ -569,7 +616,7 @@ export function DealDrawer({
                     ? "On file — a signed client contract is attached to this deal."
                     : hasContract
                       ? "On file — a signed contract is uploaded above."
-                      : "Required to close. Upload the signed contract above, or build and sign one on the Contracts page."}
+                      : "Required at Contracted. Upload the signed contract above, or build and sign one on the Contracts page."}
                 </p>
                 {existing?.contractSigned && (
                   <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>

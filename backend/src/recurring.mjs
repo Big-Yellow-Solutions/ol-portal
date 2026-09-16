@@ -1,8 +1,15 @@
 /* OL Portal · recurring deal engine (PRD 3.9-3.10). Runs daily on a schedule.
-   For each Closed-Won recurring deal that isn't paused, generates one RECUR
-   instance per month (linked to the parent deal, amount = deal.amount / 12 —
-   the portal's convention is that deal.amount is annual) and, when the deal
-   opted in, an invoice request in Admin review. Idempotent per deal+month. */
+   For each recurring deal that has reached Contracted and isn't paused,
+   generates one RECUR instance per month (linked to the parent deal, amount =
+   deal.amount / 12 — the portal's convention is that deal.amount is annual)
+   and, when the deal opted in, an invoice request in Admin review. Idempotent
+   per deal+month.
+
+   Pipeline v4 moved "Closed" to mean paid rather than signed, but billing
+   still starts at signing — a recurring engagement doesn't wait on the first
+   invoice being marked paid to start invoicing the next one — so this reads
+   Contracted rather than Closed, and keeps billing after the deal is later
+   marked Closed too. */
 
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { TABLE, doc, resp, today, listType, nextId } from "./util.mjs";
@@ -12,7 +19,7 @@ const monthKey = () => new Date().toISOString().slice(0, 7); // YYYY-MM
 async function generateForMonth(month) {
   const deals = await listType("DEAL");
   const due = deals.filter(d =>
-    d.recurring && d.stage === "Closed" && d.outcome === "Won" && !d.recurPaused &&
+    d.recurring && (d.stage === "Contracted" || d.stage === "Closed") && !d.recurPaused &&
     (!d.recurEnd || d.recurEnd.slice(0, 7) >= month));
 
   const created = [];

@@ -52,14 +52,18 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
 
-const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Closed", "Closed Lost"];
+const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed", "Closed Lost"];
 /* Pipeline v3 splits the board's final column in two. The won stage keeps the
    stored value "Closed": every rule and report that already reads it means
    "won", so renaming would have churned thirty-odd call sites to say the same
    thing. The lost stage is new, and skips every gate — a deal can be lost from
    anywhere, and losing one needs no billing entity, no sent proposal, no
    signed contract and no assignment. Outcome is derived from the stage now
-   rather than picked separately; the two can no longer disagree. */
+   rather than picked separately; the two can no longer disagree.
+   Pipeline v4 splits "Closed" again: "Contracted" is a signed contract with
+   payment still outstanding, and "Closed" now specifically means paid — see
+   CONTRACT_GATE_STAGE/INVOICE_GATE_STAGE below. Outcome is unaffected: it is
+   still only "Won" at Closed, not at Contracted. */
 const CLOSED_WON = "Closed";
 const CLOSED_LOST = "Closed Lost";
 const outcomeOf = stage => (stage === CLOSED_WON ? "Won" : stage === CLOSED_LOST ? "Lost" : null);
@@ -72,6 +76,12 @@ const INVOICE_STATUSES = ["Admin review", "Sent to client", "Paid", "Overdue"];
 // billingGateError below — so it never retroactively blocks a deal that
 // reached this stage before companies/contacts existed.
 const BILLING_GATE_STAGE = "Proposal Sent";
+// Pipeline v4: a signed contract is required from here on, and an uploaded
+// invoice — the portal's stand-in for "paid" — from Closed on. Both are
+// ordinal like the two gates above, so skipping straight to Closed from
+// anywhere earlier still asks for everything a deal at Closed needs.
+const CONTRACT_GATE_STAGE = "Contracted";
+const INVOICE_GATE_STAGE = CLOSED_WON;
 
 const resp = (status, body) => ({
   statusCode: status,
@@ -153,9 +163,10 @@ async function createDeal(ctx, body) {
   const dealOwnerKey = dealOwner || ownerKey;
   if (!(await isValidDealOwner(dealOwnerKey))) return resp(400, { error: "unknown deal owner" });
   // Pipeline v2 billing entity: optional at any stage, but a deal can't be
-  // *created* at or past the gate stage without one — a proposal/contract
-  // can't exist yet either (the deal itself doesn't exist until this call
-  // returns), so those two gates only apply on later transitions (updateDeal).
+  // *created* at or past the gate stage without one — a proposal/contract/
+  // invoice can't exist yet either (the deal itself doesn't exist until this
+  // call returns), so those three gates only apply on later transitions
+  // (updateDeal).
   const companyId = body.companyId || null;
   const contactId = body.contactId || null;
   /* A billing entity outside the caller's own pipeline is "unknown" to them.
@@ -214,30 +225,14 @@ async function updateDeal(ctx, id, body) {
       (!(await get("CONTACT", patch.contactId)) || !contacts.inScope(entityScope, "contacts", patch.contactId)))
     return resp(400, { error: "unknown contact" });
 
-  /* Winning a deal still needs the signed contract; v3 dropped the Assignment
-     Notice half of this gate, so an assignment is chased after the close
-     rather than blocking it (see assignments.mjs). Losing a deal is not a
-     close in this sense and is never gated. */
-  const closingNow = patch.stage === CLOSED_WON && deal.stage !== CLOSED_WON;
-  // rollUpDeal (execution.mjs) already closes a deal automatically once the
-  // contract is executed, so the only way to hit this is closing one by hand
-  // ahead of that. `contractSigned` isn't in `editable`, so it always
-  // reflects what rollUpDeal itself set, never a client-supplied value.
-  //
-  // A contract uploaded onto the deal clears this too, the same way an
-  // uploaded proposal clears the Proposal Sent gate below: paper signed
-  // outside the portal never reaches rollUpDeal, and a deal whose signed
-  // contract is sitting in its own Documents tab should not be unclosable.
-  if (closingNow && !deal.contractSigned) {
-    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract");
-    if (!uploaded) return resp(400, { error: "A signed contract is required to close a deal" });
-  }
-
-  // Billing-entity and sent-proposal gates only fire on the transition that
-  // actually crosses the gate (or when the billing link itself is being
-  // touched) — never a blanket re-check on every save — so a deal that
-  // reached a gated stage before this existed can still be edited freely
-  // until someone changes its stage or its billing entity.
+  // Billing-entity, sent-proposal, signed-contract and uploaded-invoice gates
+  // only fire on the transition that actually crosses each one (or, for
+  // billing, when the link itself is being touched) — never a blanket
+  // re-check on every save — so a deal that reached a gated stage before this
+  // existed can still be edited freely until someone changes its stage or its
+  // billing entity. Losing a deal is not a close in this sense and is never
+  // gated: CLOSED_LOST sits past every gate by index, so each check excludes
+  // it explicitly.
   if ("stage" in patch || "companyId" in patch || "contactId" in patch) {
     const nextStage = patch.stage ?? deal.stage;
     const nextCompany = "companyId" in patch ? patch.companyId : deal.companyId;
@@ -256,6 +251,33 @@ async function updateDeal(ctx, id, body) {
     const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "proposal");
     const sent = uploaded || (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
     if (!sent) return resp(400, { error: `${patch.stage} needs a proposal uploaded to the deal` });
+  }
+  if ("stage" in patch && patch.stage !== CLOSED_LOST &&
+      STAGES.indexOf(patch.stage) >= STAGES.indexOf(CONTRACT_GATE_STAGE) &&
+      STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
+    // rollUpDeal (execution.mjs) already moves a deal to Contracted
+    // automatically once its contract is executed, so the only way to hit
+    // this is moving one by hand ahead of that. `contractSigned` isn't in
+    // `editable`, so it always reflects what rollUpDeal itself set, never a
+    // client-supplied value.
+    //
+    // A contract uploaded onto the deal clears this too, the same way an
+    // uploaded proposal clears the gate above: paper signed outside the
+    // portal never reaches rollUpDeal, and a deal whose signed contract is
+    // sitting in its own Documents tab should not be stuck before Contracted.
+    if (!deal.contractSigned) {
+      const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract");
+      if (!uploaded) return resp(400, { error: `${patch.stage} needs a signed contract uploaded to the deal` });
+    }
+  }
+  if ("stage" in patch && patch.stage !== CLOSED_LOST &&
+      STAGES.indexOf(patch.stage) >= STAGES.indexOf(INVOICE_GATE_STAGE) &&
+      STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
+    // Closed now specifically means paid, and an uploaded invoice is the
+    // portal's stand-in for that — there's no separate payment ledger to
+    // check instead.
+    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "invoice");
+    if (!uploaded) return resp(400, { error: `${patch.stage} needs an invoice uploaded to the deal` });
   }
 
   const next = { ...deal, ...patch, updated: today() };
