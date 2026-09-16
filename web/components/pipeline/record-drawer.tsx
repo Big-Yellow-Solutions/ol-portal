@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Mail, Phone, Link2, Globe, MapPin, AlertTriangle } from "lucide-react";
+import { Mail, Phone, Link2, Globe, MapPin, AlertTriangle, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +63,7 @@ export function RecordDrawer({
   const [address, setAddress] = useState(company?.address ?? "");
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [settingPrimary, setSettingPrimary] = useState(false);
 
   if (!record) return null;
 
@@ -135,6 +136,28 @@ export function RecordDrawer({
 
   const linked = company ? (company.contactId ? contactMap[company.contactId] : undefined) : derived?.company;
 
+  /* The company a contact is shown linked to (their own, or one inferred from
+     a deal) doubles as the only place to name them its primary contact —
+     the backend has always taken contactId on PATCH /companies/:id, there
+     was just nowhere in the UI to send it. */
+  const contactsCompany = !isCompany ? derived?.company : undefined;
+  const isPrimaryContact = !!contactsCompany && contactsCompany.contactId === id;
+  const setPrimaryContact = async (companyId: string, nextContactId: string | null) => {
+    setSettingPrimary(true);
+    try {
+      const saved = await api<Company>(`/companies/${companyId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ contactId: nextContactId }),
+      });
+      setCompanies((prev) => prev.map((c) => (c.id === companyId ? saved : c)));
+      toast.success(nextContactId ? `${record.name} is now the primary contact` : "Primary contact removed");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not update the primary contact.");
+    } finally {
+      setSettingPrimary(false);
+    }
+  };
+
   const recordDeals = deals.filter((d) => (isCompany ? d.companyId === id : d.contactId === id));
   const totalValue = recordDeals.reduce((sum, d) => sum + (d.amount || 0), 0);
 
@@ -197,15 +220,29 @@ export function RecordDrawer({
                 <span className={row}>
                   <Globe size={15} className="shrink-0 text-violet-deep" />
                   {editable ? (
-                    <div className="min-w-0 flex-1">
-                      <Input
-                        value={website}
-                        onChange={(e) => setWebsite(e.target.value)}
-                        placeholder="Website, e.g. example.org"
-                        className={cn("h-8 text-sm", websiteErr && "border-red")}
-                      />
-                      {websiteErr && <p className="mt-1 text-xs text-red">{websiteErr}</p>}
-                    </div>
+                    <>
+                      <div className="min-w-0 flex-1">
+                        <Input
+                          value={website}
+                          onChange={(e) => setWebsite(e.target.value)}
+                          placeholder="Website, e.g. example.org"
+                          className={cn("h-8 text-sm", websiteErr && "border-red")}
+                        />
+                        {websiteErr && <p className="mt-1 text-xs text-red">{websiteErr}</p>}
+                      </div>
+                      {website.trim() && !websiteErr && (
+                        <a
+                          href={websiteHref(website.trim())}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Open website"
+                          title="Open website"
+                          className="shrink-0 text-ink-mute hover:text-violet-deep"
+                        >
+                          <ExternalLink size={15} />
+                        </a>
+                      )}
+                    </>
                   ) : company.website ? (
                     <a
                       href={websiteHref(company.website)}
@@ -268,8 +305,43 @@ export function RecordDrawer({
               <span className={row}>
                 <Link2 size={15} className="shrink-0 text-violet-deep" />
                 <span className="min-w-0 flex-1 truncate text-sm font-medium text-violet-deep">{linked.name}</span>
-                <span className="shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">
-                  {isCompany ? "Primary contact" : derived?.viaDeal ? "Company · via deal" : "Company"}
+                {isCompany || isPrimaryContact ? (
+                  <span className="flex shrink-0 items-center gap-2">
+                    <span className="text-[11px] font-semibold tracking-wide text-warm-gray uppercase">
+                      Primary contact
+                    </span>
+                    {!isCompany && editable && contactsCompany && (
+                      <button
+                        type="button"
+                        className="text-xs font-semibold text-ink-mute hover:text-red disabled:opacity-50"
+                        disabled={settingPrimary}
+                        onClick={() => setPrimaryContact(contactsCompany.id, null)}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                ) : editable && contactsCompany ? (
+                  <button
+                    type="button"
+                    className="shrink-0 text-xs font-semibold text-violet-deep hover:text-violet disabled:opacity-50"
+                    disabled={settingPrimary}
+                    onClick={() => setPrimaryContact(contactsCompany.id, id)}
+                  >
+                    Make primary contact
+                  </button>
+                ) : (
+                  <span className="shrink-0 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">
+                    {derived?.viaDeal ? "Company · via deal" : "Company"}
+                  </span>
+                )}
+              </span>
+            )}
+            {isCompany && !company?.contactId && (
+              <span className={row}>
+                <Link2 size={15} className="shrink-0 text-warm-gray" />
+                <span className="min-w-0 flex-1 text-sm text-ink-mute">
+                  No primary contact — open a person linked here and use &ldquo;Make primary contact&rdquo; to set one.
                 </span>
               </span>
             )}
