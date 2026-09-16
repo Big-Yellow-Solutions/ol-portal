@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { fmtDollars } from "@/lib/data";
-import { companyForContact, initialsOf, websiteLabel } from "@/lib/pipeline";
+import { companyForContact, initialsOf, websiteHref, websiteLabel } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 
 /* Pipeline v2 (design handoff), sections 2 & 3: Companies and People share one
@@ -83,11 +83,21 @@ export function ContactsTable({
           <span className="w-[100px] shrink-0 text-right text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Value</span>
         </div>
         {rows.map((r) => (
-          <button
+          // A real <a> for the website needs to nest inside this row, and an
+          // <a> can't validly nest inside a <button> — so the row is a <div>
+          // that behaves like one (role, tabIndex, Enter/Space) instead, and
+          // the link stops its click from also opening the record.
+          <div
             key={r.id}
-            type="button"
-            className="flex items-center gap-3.5 bg-white px-4.5 py-3 text-left hover:bg-[#FBFAFF]"
+            role="button"
+            tabIndex={0}
+            className="flex cursor-pointer items-center gap-3.5 bg-white px-4.5 py-3 text-left hover:bg-[#FBFAFF]"
             onClick={() => onOpenRecord(r.kind === "contact" ? "contact" : "company", r.id)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter" && e.key !== " ") return;
+              e.preventDefault();
+              onOpenRecord(r.kind === "contact" ? "contact" : "company", r.id);
+            }}
           >
             <span className="flex min-w-0 flex-1 items-center gap-3">
               <span className={`flex size-8.5 shrink-0 items-center justify-center bg-violet-pale text-xs font-semibold text-violet-deep ${r.kind === "company" ? "rounded-lg" : "rounded-full"}`}>
@@ -99,8 +109,20 @@ export function ContactsTable({
               </span>
             </span>
             {view === "companies" && (
-              <span className={`w-[170px] shrink-0 truncate text-sm ${r.website ? "text-ink" : "text-ink-mute"}`}>
-                {r.website ? websiteLabel(r.website) : "—"}
+              <span className="w-[170px] shrink-0 truncate text-sm">
+                {r.website ? (
+                  <a
+                    href={websiteHref(r.website)}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="font-medium text-violet-deep hover:text-violet hover:underline"
+                  >
+                    {websiteLabel(r.website)}
+                  </a>
+                ) : (
+                  <span className="text-ink-mute">—</span>
+                )}
               </span>
             )}
             <span className={`w-[190px] shrink-0 truncate text-sm ${r.linked ? "text-ink" : "text-ink-mute"}`}>{r.link}</span>
@@ -112,7 +134,7 @@ export function ContactsTable({
             )}
             <span className="w-[110px] shrink-0 text-sm text-ink">{r.count || "—"}</span>
             <span className="w-[100px] shrink-0 text-right text-sm font-bold text-ink">{r.count ? fmtDollars(r.value) : "—"}</span>
-          </button>
+          </div>
         ))}
         {rows.length === 0 && (
           <div className="bg-white px-4.5 py-8 text-center text-sm text-ink-mute">No {view} match this search.</div>
