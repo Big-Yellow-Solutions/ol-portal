@@ -73,21 +73,21 @@ export function DealCard({
 
       <div className="mb-2.5 flex items-center gap-1.5">
         <span className="inline-flex min-w-0 items-center gap-1.5 rounded-full bg-violet-pale px-2.5 py-1 text-[10px] font-bold tracking-[0.09em] text-violet-deep uppercase">
-          <span aria-hidden className="size-1.5 rounded-full bg-violet" />
-          {labName}
+          <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-violet" />
+          <span className="min-w-0 truncate">{labName}</span>
         </span>
-        <span className="flex-1" />
+        <span className="min-w-1.5 flex-1" />
         {deal.stage === "Closed" && deal.outcome === "Won" && (
-          <span className="rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
+          <span className="shrink-0 rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
         )}
         {deal.stage === "Closed Lost" && (
-          <span className="rounded-full bg-warm-panel px-2.5 py-0.5 text-[11px] font-semibold text-warm-gray">Lost</span>
+          <span className="shrink-0 rounded-full bg-warm-panel px-2.5 py-0.5 text-[11px] font-semibold text-warm-gray">Lost</span>
         )}
         {/* Pipeline v3: a won deal with no assignment on file says so on the
             board, so the work finance is waiting on is visible without
             opening anything. */}
         {assignmentState(deal) === "needed" && (
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-pale px-2.5 py-0.5 text-[11px] font-semibold text-amber">
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-pale px-2.5 py-0.5 text-[11px] font-semibold text-amber">
             <span aria-hidden className="size-1.5 rounded-full bg-amber" />
             Assignment
           </span>
