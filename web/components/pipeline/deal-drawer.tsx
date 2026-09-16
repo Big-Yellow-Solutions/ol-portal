@@ -115,7 +115,14 @@ export function DealDrawer({
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [pausing, setPausing] = useState(false);
-
+  /* A brand-new deal has no id to attach a document to. Picking "Save deal to
+     attach a proposal" below creates the record early (PATCHed with the rest
+     of the form on the real Save), so the same upload box that already works
+     for an existing deal works here too, without waiting for the drawer to
+     close and reopen in edit mode. */
+  const [draft, setDraft] = useState<Deal | null>(null);
+  const [creatingDraft, setCreatingDraft] = useState(false);
+  const persisted = existing ?? draft;
 
   /* Proposals are written outside the portal and uploaded onto the deal, so
      an uploaded proposal document is what clears the stage gate. A proposal
@@ -124,10 +131,10 @@ export function DealDrawer({
      document nobody kept — backend/src/app.mjs accepts the same two. */
   const hasProposal = useMemo(
     () =>
-      !!existing &&
-      (files.some((f) => f.deal === existing.id && f.kind === "proposal") ||
-        proposals.some((p) => p.deal === existing.id && !!p.sentAt)),
-    [files, proposals, existing]
+      !!persisted &&
+      (files.some((f) => f.deal === persisted.id && f.kind === "proposal") ||
+        proposals.some((p) => p.deal === persisted.id && !!p.sentAt)),
+    [files, proposals, persisted]
   );
 
   /* The signed contract works the same way: rollUpDeal sets `contractSigned`
@@ -135,10 +142,10 @@ export function DealDrawer({
      covers paper signed outside it — backend/src/app.mjs accepts either. */
   const hasContract = useMemo(
     () =>
-      !!existing &&
-      (!!existing.contractSigned ||
-        files.some((f) => f.deal === existing.id && f.kind === "contract")),
-    [files, existing]
+      !!persisted &&
+      (!!persisted.contractSigned ||
+        files.some((f) => f.deal === persisted.id && f.kind === "contract")),
+    [files, persisted]
   );
 
   const isClosed = stage === "Closed";
@@ -183,15 +190,41 @@ export function DealDrawer({
     setSaving(true);
     try {
       const body = buildBody();
-      const saved = isNew
-        ? await api<Deal>("/deals", { method: "POST", body: JSON.stringify(body) })
-        : await api<Deal>(`/deals/${existing!.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      /* A draft created early (to unlock a document upload before the real
+         Save) already has an id — finish it with a PATCH instead of minting
+         a second deal. */
+      const recordId = existing?.id ?? draft?.id;
+      const saved = recordId
+        ? await api<Deal>(`/deals/${recordId}`, { method: "PATCH", body: JSON.stringify(body) })
+        : await api<Deal>("/deals", { method: "POST", body: JSON.stringify(body) });
       toast.success(isNew ? "Deal created and linked" : "Deal saved");
       onSaved(saved);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not save this deal.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  /* Creates the deal early, with whatever is filled in so far, so a document
+     can be uploaded onto it before the drawer's own Save is clicked. Save
+     later PATCHes this same record rather than creating another one. */
+  const ensureDraft = async (): Promise<Deal | null> => {
+    if (persisted) return persisted;
+    if (!title.trim()) {
+      toast.error("Add a deal name first");
+      return null;
+    }
+    setCreatingDraft(true);
+    try {
+      const saved = await api<Deal>("/deals", { method: "POST", body: JSON.stringify(buildBody()) });
+      setDraft(saved);
+      return saved;
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not save this deal.");
+      return null;
+    } finally {
+      setCreatingDraft(false);
     }
   };
 
@@ -368,6 +401,65 @@ export function DealDrawer({
                 </Select>
               </div>
             </div>
+
+            {/* Same document requirement the Documents tab enforces on an
+                existing deal, surfaced right here instead: a brand-new deal
+                has no tab strip yet (it only appears once there is a record
+                to browse), so without this the stage gate below has no way
+                to be cleared during creation at all. */}
+            {propGated && !hasProposal && (
+              persisted ? (
+                <DocumentUploadPanel
+                  deal={persisted}
+                  kind="proposal"
+                  label="Upload Proposal"
+                  hint="Attach the proposal document for this deal. Uploading again supersedes it — earlier versions stay on record."
+                  editable={editable}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
+                  <p className="mb-2 text-xs text-ink-mute">
+                    {stage} needs a proposal uploaded to the deal. Save it now to attach one.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={ensureDraft}
+                    disabled={creatingDraft || !title.trim() || !editable}
+                  >
+                    {creatingDraft ? "Saving…" : "Save deal to attach a proposal"}
+                  </Button>
+                </div>
+              )
+            )}
+
+            {isClosed && !hasContract && (
+              persisted ? (
+                <DocumentUploadPanel
+                  deal={persisted}
+                  kind="contract"
+                  label="Upload Contract"
+                  hint="Attach the signed contract for this deal. Uploading again supersedes it — earlier versions stay on record."
+                  editable={editable}
+                />
+              ) : (
+                <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
+                  <p className="mb-2 text-xs text-ink-mute">
+                    Closing this deal needs a signed contract on file. Save it now to attach one.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="rounded-full"
+                    onClick={ensureDraft}
+                    disabled={creatingDraft || !title.trim() || !editable}
+                  >
+                    {creatingDraft ? "Saving…" : "Save deal to attach a contract"}
+                  </Button>
+                </div>
+              )
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <div className="flex flex-col gap-1.5">
