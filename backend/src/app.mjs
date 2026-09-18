@@ -207,7 +207,7 @@ async function updateDeal(ctx, id, body) {
   if ("autoInvoice" in patch) patch.autoInvoice = !!patch.autoInvoice;
   if ("recurEnd" in patch && patch.recurEnd && !/^\d{4}-\d{2}-\d{2}$/.test(patch.recurEnd))
     return resp(400, { error: "invalid recurEnd date" });
-  if ("lab" in patch) {
+  if ("lab" in patch && patch.lab !== deal.lab) {
     if (!ctx.can.changeLab()) return resp(403, { error: "Lab reassignment is admin-only" });
     if (!(await get("LAB", patch.lab))) return resp(400, { error: "unknown lab" });
   }
