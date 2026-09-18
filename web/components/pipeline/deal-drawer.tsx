@@ -196,7 +196,11 @@ export function DealDrawer({
 
   const buildBody = () => ({
     client: title,
-    lab,
+    /* Only send lab when it actually changed (or on create) — the backend
+       treats the mere presence of this key as a reassignment attempt, and
+       a Lab Leader saving unrelated fields must not trip the admin-only
+       check just because the form always carries the current lab. */
+    ...(!existing || lab !== existing.lab ? { lab } : {}),
     owner,
     dealOwner,
     stage,

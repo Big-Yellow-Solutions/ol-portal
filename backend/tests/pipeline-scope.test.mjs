@@ -252,6 +252,22 @@ test("an Admin may still link any client to any deal in either lab", async () =>
   assert.equal(res.body.companyId, "CO-002");
 });
 
+/* A Lab Leader's Save resends every field, `lab` included, whether or not
+   the Lab dropdown was touched. Re-sending the deal's own lab must not read
+   as a reassignment attempt — only an actual change is admin-only. */
+test("a Lab Leader re-sending a deal's own lab is not an admin-only reassignment", async () => {
+  const res = await call("nora", "PATCH", "/deals/D-001", { lab: "sports", contactId: "CT-003" });
+  assert.equal(res.status, 200, res.body?.error);
+  assert.equal(res.body.lab, "sports");
+});
+
+test("a Lab Leader still cannot actually reassign a deal to another lab", async () => {
+  const res = await call("nora", "PATCH", "/deals/D-001", { lab: "philanthropy" });
+  assert.equal(res.status, 403);
+  assert.match(res.body.error, /admin-only/i);
+  assert.equal(rows.get(rowKey("DEAL", "D-001")).lab, "sports");
+});
+
 /* ---------- the refusal that names other people's deals ---------- */
 
 test("a delete refusal counts every blocking deal but only names the caller's", async () => {
