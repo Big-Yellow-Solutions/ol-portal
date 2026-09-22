@@ -1,0 +1,65 @@
+name: Deploy backend
+
+# The frontend (web/) already redeploys itself on every push to main, via
+# Amplify's own build hook (see amplify.yml). The backend had no equivalent —
+# it was a manual `sam deploy` from someone's machine — which let a merged
+# fix sit undeployed for days while the frontend shipped immediately. That
+# skew is exactly what produced the pipeline's contradictory stage-gate
+# errors (frontend offering "Contracted", backend Lambda still running the
+# pre-Contracted rules). This closes that gap: any push to main touching
+# backend/ redeploys the ol-portal-backend stack the same way samconfig.toml
+# does locally, minus its `profile` (OIDC replaces that here).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # AWS_DEPLOY_ROLE_ARN is a repo secret pointing at an IAM role that
+      # trusts GitHub's OIDC provider for this repo/branch only — no long-
+      # lived AWS keys stored in GitHub. See the setup notes in this PR/commit
+      # for how to create it.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - uses: aws-actions/setup-sam@v2
+
+      # --use-container avoids depending on the runner's own Node version
+      # matching the Lambda runtime (nodejs24.x) — SAM builds inside a
+      # matching Lambda-like image instead via Docker, which GitHub's
+      # ubuntu-latest runners have preinstalled.
+      - name: sam build
+        working-directory: backend
+        run: sam build --use-container
+
+      # Mirrors backend/samconfig.toml's [default.deploy.parameters] exactly
+      # (stack_name, region, resolve_s3, capabilities, parameter_overrides),
+      # dropping only `profile`, which the OIDC role above replaces.
+      # --no-fail-on-empty-changeset keeps a push that didn't actually change
+      # the backend (e.g. a docs-only PR that still touched backend/) from
+      # failing the workflow.
+      - name: sam deploy
+        working-directory: backend
+        run: |
+          sam deploy \
+            --stack-name ol-portal-backend \
+            --region us-east-1 \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs WorkosTokenIssuer=https://auth.optimisticlabs.com/user_management/client_01M10FCEF9TX4N3XTVRZYJV1NR"
