@@ -58,26 +58,26 @@ jobs:
         working-directory: backend
         run: sam build
 
-      # Mirrors backend/samconfig.toml's [default.deploy.parameters] exactly
-      # (stack_name, region, resolve_s3, capabilities, parameter_overrides),
-      # dropping only `profile`, which the OIDC role above replaces.
-      # --config-file points at a path that doesn't exist (there's no
-      # --no-config-file flag — a prior version of this workflow tried that
-      # and sam rejected it outright). This is required: sam deploy reads
-      # samconfig.toml for defaults even when every parameter is passed
-      # explicitly on the command line, so without this it still picks up
-      # the file's `profile = "ol-portal"` and fails looking for a local AWS
-      # CLI profile that doesn't exist in this environment ("The config
-      # profile (ol-portal) could not be found"). Pointing at a nonexistent
-      # file makes sam find no config to merge and use only these CLI flags.
+      # sam deploy reads backend/samconfig.toml for defaults even when every
+      # parameter is already passed explicitly on the command line, so it
+      # picks up the file's `profile = "ol-portal"` (meant for a local
+      # machine's AWS CLI config) and fails looking for a profile that
+      # doesn't exist in this environment ("The config profile (ol-portal)
+      # could not be found"). There's no flag to disable config-file loading
+      # outright (--no-config-file isn't real, and --config-file rejects a
+      # path that doesn't exist rather than treating it as "no config") — so
+      # this writes a throwaway config file with no profile in it and points
+      # --config-file there instead, keeping every other parameter below the
+      # same as backend/samconfig.toml's [default.deploy.parameters].
       # --no-fail-on-empty-changeset keeps a push that didn't actually change
       # the backend (e.g. a docs-only PR that still touched backend/) from
       # failing the workflow.
       - name: sam deploy
         working-directory: backend
         run: |
+          echo 'version = 0.1' > ci-samconfig.toml
           sam deploy \
-            --config-file ci-no-local-samconfig.toml \
+            --config-file ci-samconfig.toml \
             --stack-name ol-portal-backend \
             --region us-east-1 \
             --resolve-s3 \
