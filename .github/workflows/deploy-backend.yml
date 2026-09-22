@@ -27,18 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # TEMPORARY — every AssumeRoleWithWebIdentity attempt against the
-      # ol-portal-backend-deploy role has failed with a generic AccessDenied
-      # despite the role's trust policy, the OIDC provider, and its audience
-      # all checking out repeatedly. This prints GitHub's actual token claims
-      # (iss/aud/sub only, never the signed token itself) so they can be
-      # diffed against the trust policy directly instead of guessed at.
-      # Remove this step once the mismatch is found.
-      - name: Debug OIDC token claims
-        run: |
-          TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{iss, aud, sub, repository, repository_owner, ref, ref_type, event_name}'
-
       # AWS_DEPLOY_ROLE_ARN is a repo secret pointing at an IAM role that
       # trusts GitHub's OIDC provider for this repo/branch only — no long-
       # lived AWS keys stored in GitHub. See the setup notes in this PR/commit
@@ -50,13 +38,25 @@ jobs:
 
       - uses: aws-actions/setup-sam@v2
 
-      # --use-container avoids depending on the runner's own Node version
-      # matching the Lambda runtime (nodejs24.x) — SAM builds inside a
-      # matching Lambda-like image instead via Docker, which GitHub's
-      # ubuntu-latest runners have preinstalled.
+      # Matches the Lambda runtime (nodejs24.x) so a plain `npm install` on
+      # the runner behaves the same as it would inside Lambda, without
+      # needing a container build.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      # Every function here is plain Node.js with no native/compiled
+      # dependencies (even ContractPdfFunction's @sparticuz/chromium ships a
+      # prebuilt binary rather than compiling one at install time), so there's
+      # nothing architecture-sensitive to build. `--use-container` was tried
+      # first to match the Lambda runtime more closely, but every function
+      # here is arm64 (backend/template.yaml, for Graviton cost/perf) while
+      # GitHub's runners are x86_64 — forcing Docker to emulate arm64 via
+      # QEMU, which hung indefinitely rather than completing. A plain build
+      # sidesteps the emulation entirely and finishes in seconds.
       - name: sam build
         working-directory: backend
-        run: sam build --use-container
+        run: sam build
 
       # Mirrors backend/samconfig.toml's [default.deploy.parameters] exactly
       # (stack_name, region, resolve_s3, capabilities, parameter_overrides),
