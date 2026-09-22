@@ -27,6 +27,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # TEMPORARY — every AssumeRoleWithWebIdentity attempt against the
+      # ol-portal-backend-deploy role has failed with a generic AccessDenied
+      # despite the role's trust policy, the OIDC provider, and its audience
+      # all checking out repeatedly. This prints GitHub's actual token claims
+      # (iss/aud/sub only, never the signed token itself) so they can be
+      # diffed against the trust policy directly instead of guessed at.
+      # Remove this step once the mismatch is found.
+      - name: Debug OIDC token claims
+        run: |
+          TOKEN=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq '{iss, aud, sub, repository, repository_owner, ref, ref_type, event_name}'
+
       # AWS_DEPLOY_ROLE_ARN is a repo secret pointing at an IAM role that
       # trusts GitHub's OIDC provider for this repo/branch only — no long-
       # lived AWS keys stored in GitHub. See the setup notes in this PR/commit
