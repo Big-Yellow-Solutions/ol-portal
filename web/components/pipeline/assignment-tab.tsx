@@ -13,14 +13,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { api, ApiError } from "@/lib/api";
 import { fmtDollars, fullName } from "@/lib/data";
 import {
-  ASSIGNMENT_APPROVER, CADENCES, POOL_PCT, SOFT_RESERVE_PCT,
+  CADENCES, POOL_PCT, SOFT_RESERVE_PCT,
   assignmentMath, assignmentState, splitEvenly,
 } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
 import type { Deal } from "@/lib/types";
 
-const APPROVER_EMAIL = "liz@optimisticlabs.com";
+/* What the assignment routes return: the deal, plus whether the mail went out. */
+type AssignmentResponse = Deal & { approverEmailed?: boolean; emailed?: boolean };
 const digits = (v: string) => v.replace(/\D/g, "");
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -44,7 +45,7 @@ export function AssignmentTab({
   editable: boolean;
   onSaved: (deal: Deal) => void;
 }) {
-  const { labs, people, companies, contacts, me } = usePortalData();
+  const { labs, people, companies, contacts, me, assignmentApprover } = usePortalData();
   const state = assignmentState(deal);
   const filed = deal.assignment;
 
@@ -61,6 +62,7 @@ export function AssignmentTab({
     [people, labs, dealOwnerKey]
   );
   const nameOf = (key: string) => fullName(people[key]) || key;
+  const approverName = assignmentApprover ? nameOf(assignmentApprover) : "the approver";
 
   const billedTo =
     (deal.companyId ? companies.find((c) => c.id === deal.companyId)?.name : undefined) ??
@@ -106,7 +108,7 @@ export function AssignmentTab({
     !!selected.length && Math.abs(shareTotal - 100) < 0.01 &&
     !!agreementRef.trim() && !!clientName.trim() && value > 0;
 
-  const isApprover = me === ASSIGNMENT_APPROVER;
+  const isApprover = !!me && me === assignmentApprover;
 
   // Re-splitting on every change keeps the total at 100 without anyone doing
   // arithmetic; whoever wants a different split types over it afterwards.
@@ -120,16 +122,20 @@ export function AssignmentTab({
     setLeaders(selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key]);
   }
 
-  async function post(path: string, body?: unknown, done?: string) {
+  async function post(path: string, body: unknown, done: (res: AssignmentResponse) => string) {
     setBusy(true);
     try {
-      const saved = await api<Deal>(path, {
+      const res = await api<AssignmentResponse>(path, {
         method: "POST",
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
+      // The mail flags are about this request, not the deal — keep them off it.
+      const saved: AssignmentResponse = { ...res };
+      delete saved.approverEmailed;
+      delete saved.emailed;
       onSaved(saved);
       setEditing(false);
-      if (done) toast.success(done);
+      toast.success(done(res));
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : "Could not save this assignment.");
     } finally {
@@ -152,7 +158,12 @@ export function AssignmentTab({
         leaders,
         notes: notes.trim(),
       },
-      `Assignment filed — approval email sent to ${APPROVER_EMAIL}`
+      (res) =>
+        me === assignmentApprover
+          ? "Assignment filed"
+          : res.approverEmailed
+            ? `Assignment filed — ${approverName} has been emailed for approval`
+            : `Assignment filed — ${approverName} was notified in the portal, but the email did not send`
     );
 
   /* ---------- 1. locked ---------- */
@@ -194,7 +205,7 @@ export function AssignmentTab({
           </div>
           <p className="mb-3 text-xs leading-relaxed text-ink-mute">
             {approved
-              ? `Approved by ${nameOf(filed.approvedBy ?? ASSIGNMENT_APPROVER)} on ${(filed.approvedAt ?? "").slice(0, 10)}. Finance can release payment against these figures.`
+              ? `Approved by ${nameOf(filed.approvedBy ?? assignmentApprover ?? "")} on ${(filed.approvedAt ?? "").slice(0, 10)}. Finance can release payment against these figures.`
               : `Filed ${(filed.filedAt ?? "").slice(0, 10)} by ${nameOf(filed.filedBy)} · waiting on approval.`}
           </p>
 
@@ -209,7 +220,9 @@ export function AssignmentTab({
 
           {!approved && (
             <p className="mt-3 rounded-xl border border-hair bg-white px-3 py-2 text-[11px] leading-relaxed text-ink-mute">
-              Email sent to {APPROVER_EMAIL} — &ldquo;Assignment filed for {deal.client} · needs your approval.&rdquo;
+              {isApprover
+                ? "This is waiting on your approval."
+                : <>{approverName} was sent an email and a portal notification: &ldquo;Assignment filed for {deal.client} · needs your approval.&rdquo;</>}
             </p>
           )}
 
@@ -219,7 +232,13 @@ export function AssignmentTab({
                 size="sm"
                 className="rounded-full bg-green text-white hover:bg-green/90"
                 disabled={busy}
-                onClick={() => post(`/deals/${deal.id}/assignment/approve`, undefined, "Assignment approved — finance notified by email")}
+                onClick={() =>
+                  post(`/deals/${deal.id}/assignment/approve`, undefined, (res) =>
+                    res.emailed === false
+                      ? "Assignment approved — the deal owner and leaders were notified in the portal, but some emails did not send"
+                      : "Assignment approved — the deal owner and lab leaders have been emailed and notified"
+                  )
+                }
               >
                 <Check size={14} /> Approve assignment
               </Button>
@@ -231,7 +250,7 @@ export function AssignmentTab({
                     size="sm"
                     className="rounded-full"
                     disabled={busy}
-                    onClick={() => post(`/deals/${deal.id}/assignment/reopen`, undefined, "Assignment reopened for edits")}
+                    onClick={() => post(`/deals/${deal.id}/assignment/reopen`, undefined, () => "Assignment reopened for edits")}
                   >
                     Reopen and edit
                   </Button>
@@ -245,7 +264,7 @@ export function AssignmentTab({
 
           {approved && !isApprover && (
             <p className="mt-2.5 text-[11px] text-ink-mute">
-              Approved figures are locked. Ask {nameOf(ASSIGNMENT_APPROVER)} to reopen it if something needs to change.
+              Approved figures are locked. Ask {approverName} to reopen it if something needs to change.
             </p>
           )}
         </div>
@@ -440,7 +459,7 @@ export function AssignmentTab({
             rows={3}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder={`Anything ${nameOf(ASSIGNMENT_APPROVER).split(" ")[0]} should know before the pool is calculated.`}
+            placeholder={`Anything ${approverName.split(" ")[0]} should know before the pool is calculated.`}
             disabled={!editable}
           />
         </div>
@@ -489,7 +508,7 @@ export function AssignmentTab({
             {busy ? "Filing…" : !ready ? "Finish the required fields" : editing ? "Re-file the assignment" : "File the assignment"}
           </Button>
           <p className="mt-2 text-center text-[11px] text-ink-mute">
-            Filing emails {nameOf(ASSIGNMENT_APPROVER)} for approval. You can edit it until it is approved.
+            Filing emails {approverName} for approval. You can edit it until it is approved.
           </p>
         </div>
       )}

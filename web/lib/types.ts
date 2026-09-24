@@ -722,6 +722,8 @@ export interface Bootstrap {
   people: Record<string, Person>;
   role: Role;
   me: string;
+  /* PERSON key of whoever approves assignments; null when nobody matches. */
+  assignmentApprover?: string | null;
   actingAs?: ActingAs | null;
 }
 

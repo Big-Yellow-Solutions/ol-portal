@@ -128,6 +128,7 @@ async function bootstrap(ctx) {
   const [labs, people] = await Promise.all([listType("LAB"), listType("PERSON")]);
   return resp(200, {
     me: ctx.me.sk, role: ctx.role,
+    assignmentApprover: await assignments.approverKey(people),
     ...(ctx.actingAs ? { actingAs: { by: ctx.realMe.sk, byName: fullName(ctx.realMe) } } : {}),
     labs: Object.fromEntries(labs.map(({ pk, sk, ...l }) => [sk, l])),
     people: Object.fromEntries(people.map(({ pk, sk, ...p }) =>

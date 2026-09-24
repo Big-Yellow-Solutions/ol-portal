@@ -45,6 +45,8 @@ const VIEWS: { key: ViewKey; label: string }[] = [
   { key: "documents", label: "Documents" },
 ];
 
+type DrawerState = { deal: Deal | "new"; pendingStage?: Stage; tab?: "details" | "documents" | "assignment" };
+
 export default function PipelinePage() {
   return (
     <Suspense fallback={<p className="text-sm text-ink-mute">Loading…</p>}>
@@ -91,12 +93,16 @@ function PipelineBoard() {
   const [draggingDeal, setDraggingDeal] = useState<Deal | null>(null);
   const [dragOverStage, setDragOverStage] = useState<Stage | null>(null);
 
-  const [dealDrawer, setDealDrawer] = useState<{ deal: Deal | "new"; pendingStage?: Stage; tab?: "details" | "documents" } | null>(null);
+  const [dealDrawer, setDealDrawer] = useState<DrawerState | null>(null);
   const [recordDrawer, setRecordDrawer] = useState<{ type: "company" | "contact"; id: string; returnDealId: string | null } | null>(null);
 
   const viewingId = searchParams.get("deal");
   const viewingDeal = useMemo(() => (viewingId ? (deals.find((d) => d.id === viewingId) ?? null) : null), [viewingId, deals]);
-  const activeDrawer = dealDrawer ?? (viewingDeal ? { deal: viewingDeal } : null);
+  /* A link can name the tab too — the assignment emails and bell notices land
+     on ?deal=<id>&tab=assignment, straight onto the Approve button. */
+  const tabParam = searchParams.get("tab");
+  const linkedTab = tabParam === "assignment" || tabParam === "documents" ? tabParam : undefined;
+  const activeDrawer: DrawerState | null = dealDrawer ?? (viewingDeal ? { deal: viewingDeal, tab: linkedTab } : null);
 
   function setView(v: ViewKey) {
     const qp = new URLSearchParams(searchParams.toString());
@@ -122,6 +128,7 @@ function PipelineBoard() {
     if (searchParams.get("deal")) {
       const qp = new URLSearchParams(searchParams.toString());
       qp.delete("deal");
+      qp.delete("tab");
       const qs = qp.toString();
       router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
     }

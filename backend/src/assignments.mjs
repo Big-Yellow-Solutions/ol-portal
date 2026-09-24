@@ -18,7 +18,7 @@
    has been approved. Money is recomputed here on every write rather than
    trusted from the client. */
 
-import { resp, today, get, put, fullName, esc } from "./util.mjs";
+import { resp, today, get, put, listType, fullName, esc } from "./util.mjs";
 import { notify } from "./notifications.mjs";
 import { sendSystemEmail } from "./email.mjs";
 
@@ -30,8 +30,37 @@ export const POOL_PCT = 70;
 export const SOFT_RESERVE_PCT = 5;
 /* Who may approve. A role check would be the natural fit for this codebase,
    but there are two Admins and only one of them is the approver, so this is a
-   person. Changing who approves is changing this line. */
-export const APPROVER_KEY = process.env.ASSIGNMENT_APPROVER || "liz";
+   person. Changing who approves is changing this line.
+
+   It is named by email, and matched against a PERSON's key OR its `email`
+   attribute. The WorkOS cutover re-keyed the roster by email, and this used to
+   hardcode the old first-name key `liz` — which then matched nobody, so the
+   approver got no bell notice and no Approve button. Matching both shapes
+   means a legacy first-name record carrying the address still works too. */
+export const APPROVER = (process.env.ASSIGNMENT_APPROVER || "liz@optimisticlabs.com").trim().toLowerCase();
+
+const lower = v => String(v || "").trim().toLowerCase();
+
+export const isApprover = person =>
+  !!person && (lower(person.sk) === APPROVER || lower(person.email) === APPROVER);
+
+/* The approver's PERSON key, from a roster the caller already has (bootstrap
+   reads it anyway) or from the table. Null when nobody matches. */
+export async function approverKey(people) {
+  const direct = people ? null : await get("PERSON", APPROVER);
+  if (direct) return direct.sk;
+  const match = (people || (await listType("PERSON"))).find(isApprover);
+  return match ? match.sk : null;
+}
+
+/* Where someone's mail goes: their `email`, or their key when the key is an
+   address (every WorkOS-era account is keyed by email). */
+const addressOf = (person, key) =>
+  String(person?.email || (String(key || "").includes("@") ? key : "")).trim();
+
+/* The deal's own drawer, opened on the Assignment tab — where the Approve
+   button and the receipt both live. */
+const dealHref = deal => `/pipeline?deal=${encodeURIComponent(deal.sk)}&tab=assignment`;
 
 export const CADENCES = [
   "On signature", "Monthly", "Quarterly", "Annually", "On milestones",
@@ -151,71 +180,90 @@ export async function fileAssignment(ctx, dealId, body) {
   /* Two different facts to two different audiences: the leaders learn their
      share is on the record, the approver learns something is queued. Sending
      both as one notification would mean one of them reads the wrong verb. */
+  const approver = await approverKey();
   await notify({
-    to: value.leaders.map(l => l.key),
+    to: value.leaders.map(l => l.key).filter(k => k !== approver),
     kind: "assignment",
     actor: ctx.me.sk,
     actorName: fullName(ctx.me) || ctx.me.sk,
     verb: `filed an assignment naming you on ${deal.client}`,
     snippet: "Waiting on approval before it is locked.",
     meta: "Pipeline",
-    href: "/pipeline"
+    href: dealHref(deal)
   });
-  await notify({
-    to: [APPROVER_KEY],
-    kind: "approval",
-    actor: ctx.me.sk,
-    actorName: fullName(ctx.me) || ctx.me.sk,
-    verb: `filed an assignment on ${deal.client} for your approval`,
-    meta: "Pipeline",
-    href: "/pipeline"
-  });
-  /* The bell alone is not enough: the filing screen promises the approver an
-     email, and the approver is not necessarily sitting in the portal. */
-  await emailApprover({ ctx, deal, assignment });
 
-  const { pk, sk, ...rest } = next;
-  return resp(200, { id: sk, ...rest });
-}
-
-/* Best-effort like notify(): a bounce must not turn a filed assignment into a
-   500. The address is the approver's own `email`, or their key when the key
-   is an address (WorkOS-era accounts are keyed by email). */
-async function emailApprover({ ctx, deal, assignment }) {
-  const approver = await get("PERSON", APPROVER_KEY);
-  const address = String(approver?.email || (APPROVER_KEY.includes("@") ? APPROVER_KEY : "")).trim();
-  if (!address) {
+  /* The approver hears about it on the bell and by email: the filing screen
+     promises an email, and the approver is not necessarily in the portal.
+     Neither goes out when the approver filed it herself. */
+  let approverEmailed = false;
+  if (!approver) {
     console.error(JSON.stringify({
-      level: "warn", message: "assignment approver has no email address", approver: APPROVER_KEY, deal: deal.sk
+      level: "warn", message: "no PERSON matches the assignment approver", approver: APPROVER, deal: deal.sk
     }));
-    return;
+  } else if (approver !== ctx.me.sk) {
+    await notify({
+      to: [approver],
+      kind: "approval",
+      actor: ctx.me.sk,
+      actorName: fullName(ctx.me) || ctx.me.sk,
+      verb: `filed an assignment on ${deal.client} that needs your approval`,
+      meta: "Pipeline",
+      href: dealHref(deal)
+    });
+    approverEmailed = await sendMail({
+      deal,
+      to: [await get("PERSON", approver)],
+      subject: `Assignment filed for ${deal.client} · needs your approval`,
+      lead: `${fullName(ctx.me) || ctx.me.sk} filed a lab leader assignment on ${deal.client} that needs your approval.`,
+      assignment,
+      cta: "Review and approve"
+    });
   }
 
-  const filer = fullName(ctx.me) || ctx.me.sk;
-  const url = `${process.env.FRONTEND_URL || ""}/pipeline`;
+  const { pk, sk, ...rest } = next;
+  return resp(200, { id: sk, ...rest, approverEmailed });
+}
+
+/* Best-effort like notify(): a bounce must not turn a filing or an approval
+   into a 500, so a failure is logged and the send reports false. `to` is a
+   list of PERSON records; one without an address is skipped and logged.
+   Resolves true only when every recipient's mail went out. */
+async function sendMail({ deal, to, subject, lead, assignment, cta }) {
+  const url = `${process.env.FRONTEND_URL || ""}${dealHref(deal)}`;
   const usd = n => `$${Number(n || 0).toLocaleString("en-US")}`;
-  const subject = `Assignment filed for ${deal.client} · needs your approval`;
-  const lead = `${filer} filed a lab leader assignment on ${deal.client} for your approval.`;
   const lines = [
     `Contract value: ${usd(assignment.contractValue)}`,
     ...(await Promise.all((assignment.leaders || []).map(async l =>
       `${fullName(await get("PERSON", l.key)) || l.key}: ${l.pct}%`)))
   ];
-  const plain = `${lead}\n\n${lines.join("\n")}${assignment.notes ? `\n\nNotes: ${assignment.notes}` : ""}\n\nReview it in the portal: ${url}`;
+  const plain = `${lead}\n\n${lines.join("\n")}${assignment.notes ? `\n\nNotes: ${assignment.notes}` : ""}\n\n${cta}: ${url}`;
   const html =
     `<p>${esc(lead)}</p>` +
     `<p>${lines.map(esc).join("<br>")}</p>` +
     (assignment.notes ? `<p><strong>Notes:</strong> ${esc(assignment.notes).replace(/\n/g, "<br>")}</p>` : "") +
-    `<p><a href="${esc(url)}">Review the assignment</a></p>`;
+    `<p><a href="${esc(url)}">${esc(cta)}</a></p>`;
 
-  try {
-    await mailer.send({ toEmail: address, subject, text: plain, html });
-    console.log(JSON.stringify({ level: "info", message: "assignments.approver_emailed", deal: deal.sk, to: address }));
-  } catch (err) {
-    console.error(JSON.stringify({
-      level: "warn", message: "assignment approval email failed", deal: deal.sk, to: address, detail: err.message
-    }));
+  let ok = true;
+  for (const person of to) {
+    const address = addressOf(person, person?.sk);
+    if (!address) {
+      ok = false;
+      console.error(JSON.stringify({
+        level: "warn", message: "assignment email skipped: no address", person: person?.sk, deal: deal.sk
+      }));
+      continue;
+    }
+    try {
+      await mailer.send({ toEmail: address, subject, text: plain, html });
+      console.log(JSON.stringify({ level: "info", message: "assignments.emailed", deal: deal.sk, to: address, subject }));
+    } catch (err) {
+      ok = false;
+      console.error(JSON.stringify({
+        level: "warn", message: "assignment email failed", deal: deal.sk, to: address, detail: err.message
+      }));
+    }
   }
+  return ok;
 }
 
 /* Approval is the gate the whole flow exists for, so it is the one action
@@ -225,7 +273,7 @@ async function emailApprover({ ctx, deal, assignment }) {
 export async function approveAssignment(ctx, dealId) {
   const deal = await get("DEAL", dealId);
   if (!deal) return resp(404, { error: "deal not found" });
-  if (ctx.me.sk !== APPROVER_KEY)
+  if (!isApprover(ctx.me))
     return resp(403, { error: "Only the assignment approver can approve an assignment" });
   if (!deal.assignment) return resp(400, { error: "no assignment has been filed on this deal" });
   if (deal.assignment.approved) return resp(409, { error: "this assignment is already approved" });
@@ -242,19 +290,36 @@ export async function approveAssignment(ctx, dealId) {
   };
   await put(next);
 
+  /* Everyone with a stake in the split: the deal owner, every leader named on
+     it, and whoever filed it. One notice each, and none to the approver. */
+  const keys = [...new Set([
+    deal.dealOwner || deal.owner,
+    ...(deal.assignment.leaders || []).map(l => l.key),
+    deal.assignment.filedBy
+  ].filter(Boolean))].filter(k => k !== ctx.me.sk);
+
   await notify({
-    to: [deal.assignment.filedBy, ...(deal.assignment.leaders || []).map(l => l.key)],
+    to: keys,
     kind: "approval",
     actor: ctx.me.sk,
     actorName: fullName(ctx.me) || ctx.me.sk,
     verb: `approved the assignment on ${deal.client}`,
     snippet: "It is locked now — reopening it takes the approver.",
     meta: "Pipeline",
-    href: "/pipeline"
+    href: dealHref(deal)
+  });
+  const people = (await Promise.all(keys.map(k => get("PERSON", k)))).filter(Boolean);
+  const emailed = await sendMail({
+    deal,
+    to: people,
+    subject: `Assignment approved for ${deal.client}`,
+    lead: `${fullName(ctx.me) || ctx.me.sk} approved the lab leader assignment on ${deal.client}. The figures are now locked.`,
+    assignment: next.assignment,
+    cta: "View the assignment"
   });
 
   const { pk, sk, ...rest } = next;
-  return resp(200, { id: sk, ...rest });
+  return resp(200, { id: sk, ...rest, notified: people.length, emailed });
 }
 
 /* Reopening drops the approval and hands the record back to the filer as a
@@ -263,7 +328,7 @@ export async function approveAssignment(ctx, dealId) {
 export async function reopenAssignment(ctx, dealId) {
   const deal = await get("DEAL", dealId);
   if (!deal) return resp(404, { error: "deal not found" });
-  if (ctx.me.sk !== APPROVER_KEY)
+  if (!isApprover(ctx.me))
     return resp(403, { error: "Only the assignment approver can reopen an approved assignment" });
   if (!deal.assignment) return resp(400, { error: "no assignment has been filed on this deal" });
 
