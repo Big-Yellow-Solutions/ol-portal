@@ -82,8 +82,12 @@ test.after(() => table.close());
 
 /* Imported only now: every module builds its AWS clients at load time and
    reads the endpoint then. */
-const { assignmentMath, cleanAssignment, POOL_PCT, SOFT_RESERVE_PCT, APPROVER_KEY } =
+const { assignmentMath, cleanAssignment, POOL_PCT, SOFT_RESERVE_PCT, APPROVER_KEY, mailer } =
   await import("../src/assignments.mjs");
+
+/* The outbox, in memory. Nothing here reaches SES. */
+const outbox = [];
+mailer.send = async m => { outbox.push(m); };
 const { handler } = await import("../src/app.mjs");
 
 const GROUP = { Admin: "Admin", "Lab Leader": "LabLeader", Contributor: "Contributor" };
@@ -110,12 +114,13 @@ async function call(actor, method, path, body) {
    whole reason the gate is a person and not a role. */
 const seed = () => {
   rows.clear();
+  outbox.length = 0;
   rows.set(rowKey("LAB", "sports"), { pk: "LAB", sk: "sports", name: "Sports Lab" });
   for (const [sk, first, role] of [
     ["liz", "Liz", "Admin"], ["seth", "Seth", "Admin"],
     ["marcus", "Marcus", "Lab Leader"], ["aliza", "Aliza", "Lab Leader"],
     ["dana", "Dana", "Contributor"]
-  ]) rows.set(rowKey("PERSON", sk), { pk: "PERSON", sk, firstName: first, lastName: "T", role, labs: ["sports"], onboarded: true });
+  ]) rows.set(rowKey("PERSON", sk), { pk: "PERSON", sk, email: `${sk}@optimisticlabs.com`, firstName: first, lastName: "T", role, labs: ["sports"], onboarded: true });
   rows.set(rowKey("COMPANY", "CO-001"), { pk: "COMPANY", sk: "CO-001", name: "Independent Center" });
 };
 
@@ -190,6 +195,19 @@ test("the fields finance cannot work without are required", () => {
 });
 
 /* ---------- filing ---------- */
+
+/* Regression: filing used to write only a bell notification while the UI
+   told the filer an approval email had gone out. */
+test("filing an assignment emails the approver", async () => {
+  deal("D-9");
+  const filed = await call("marcus", "POST", "/deals/D-9/assignment", FORM);
+  assert.equal(filed.status, 200);
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].toEmail, `${APPROVER_KEY}@optimisticlabs.com`);
+  assert.match(outbox[0].subject, /Independent Center — Season Sponsorship · needs your approval/);
+  assert.match(outbox[0].text, /Marcus T filed/);
+  assert.match(outbox[0].text, /Marcus T: 60%/);
+});
 
 test("an assignment can only be filed once the deal is Contracted or Closed Won", async () => {
   deal("D-1", { stage: "Negotiating", outcome: undefined });

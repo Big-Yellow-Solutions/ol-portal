@@ -18,8 +18,12 @@
    has been approved. Money is recomputed here on every write rather than
    trusted from the client. */
 
-import { resp, today, get, put, fullName } from "./util.mjs";
+import { resp, today, get, put, fullName, esc } from "./util.mjs";
 import { notify } from "./notifications.mjs";
+import { sendSystemEmail } from "./email.mjs";
+
+/* Swappable so a test can watch the outbox without an SES client. */
+export const mailer = { send: sendSystemEmail };
 
 /* Config, per the handoff's "tweakable props — surface as config, not UI". */
 export const POOL_PCT = 70;
@@ -166,9 +170,52 @@ export async function fileAssignment(ctx, dealId, body) {
     meta: "Pipeline",
     href: "/pipeline"
   });
+  /* The bell alone is not enough: the filing screen promises the approver an
+     email, and the approver is not necessarily sitting in the portal. */
+  await emailApprover({ ctx, deal, assignment });
 
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });
+}
+
+/* Best-effort like notify(): a bounce must not turn a filed assignment into a
+   500. The address is the approver's own `email`, or their key when the key
+   is an address (WorkOS-era accounts are keyed by email). */
+async function emailApprover({ ctx, deal, assignment }) {
+  const approver = await get("PERSON", APPROVER_KEY);
+  const address = String(approver?.email || (APPROVER_KEY.includes("@") ? APPROVER_KEY : "")).trim();
+  if (!address) {
+    console.error(JSON.stringify({
+      level: "warn", message: "assignment approver has no email address", approver: APPROVER_KEY, deal: deal.sk
+    }));
+    return;
+  }
+
+  const filer = fullName(ctx.me) || ctx.me.sk;
+  const url = `${process.env.FRONTEND_URL || ""}/pipeline`;
+  const usd = n => `$${Number(n || 0).toLocaleString("en-US")}`;
+  const subject = `Assignment filed for ${deal.client} · needs your approval`;
+  const lead = `${filer} filed a lab leader assignment on ${deal.client} for your approval.`;
+  const lines = [
+    `Contract value: ${usd(assignment.contractValue)}`,
+    ...(await Promise.all((assignment.leaders || []).map(async l =>
+      `${fullName(await get("PERSON", l.key)) || l.key}: ${l.pct}%`)))
+  ];
+  const plain = `${lead}\n\n${lines.join("\n")}${assignment.notes ? `\n\nNotes: ${assignment.notes}` : ""}\n\nReview it in the portal: ${url}`;
+  const html =
+    `<p>${esc(lead)}</p>` +
+    `<p>${lines.map(esc).join("<br>")}</p>` +
+    (assignment.notes ? `<p><strong>Notes:</strong> ${esc(assignment.notes).replace(/\n/g, "<br>")}</p>` : "") +
+    `<p><a href="${esc(url)}">Review the assignment</a></p>`;
+
+  try {
+    await mailer.send({ toEmail: address, subject, text: plain, html });
+    console.log(JSON.stringify({ level: "info", message: "assignments.approver_emailed", deal: deal.sk, to: address }));
+  } catch (err) {
+    console.error(JSON.stringify({
+      level: "warn", message: "assignment approval email failed", deal: deal.sk, to: address, detail: err.message
+    }));
+  }
 }
 
 /* Approval is the gate the whole flow exists for, so it is the one action
