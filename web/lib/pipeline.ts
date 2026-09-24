@@ -178,12 +178,6 @@ export function companyForContact(
    figures on every write — this exists so the form can show the pool moving as
    somebody types, before anything is filed. */
 
-/* Who may approve a filed assignment. Mirrors ASSIGNMENT_APPROVER in
-   backend/src/assignments.mjs, which is the authority — this only decides
-   whether the button is drawn. A person rather than a role on purpose: there
-   are two Admins and only one of them approves. */
-export const ASSIGNMENT_APPROVER = "liz";
-
 export const POOL_PCT = 70;
 export const SOFT_RESERVE_PCT = 5;
 

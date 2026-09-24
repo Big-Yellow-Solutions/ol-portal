@@ -82,8 +82,16 @@ test.after(() => table.close());
 
 /* Imported only now: every module builds its AWS clients at load time and
    reads the endpoint then. */
-const { assignmentMath, cleanAssignment, POOL_PCT, SOFT_RESERVE_PCT, APPROVER_KEY } =
+const { assignmentMath, cleanAssignment, POOL_PCT, SOFT_RESERVE_PCT, mailer } =
   await import("../src/assignments.mjs");
+/* liz's record in the fixture is a legacy first-name key carrying her address,
+   so the gate is exercised through the email match. */
+const APPROVER_KEY = "liz";
+const notifsFor = key => [...rows.values()].filter(r => r.pk === `NOTIF#${key}`);
+
+/* The outbox, in memory. Nothing here reaches SES. */
+const outbox = [];
+mailer.send = async m => { outbox.push(m); };
 const { handler } = await import("../src/app.mjs");
 
 const GROUP = { Admin: "Admin", "Lab Leader": "LabLeader", Contributor: "Contributor" };
@@ -110,12 +118,13 @@ async function call(actor, method, path, body) {
    whole reason the gate is a person and not a role. */
 const seed = () => {
   rows.clear();
+  outbox.length = 0;
   rows.set(rowKey("LAB", "sports"), { pk: "LAB", sk: "sports", name: "Sports Lab" });
   for (const [sk, first, role] of [
     ["liz", "Liz", "Admin"], ["seth", "Seth", "Admin"],
     ["marcus", "Marcus", "Lab Leader"], ["aliza", "Aliza", "Lab Leader"],
     ["dana", "Dana", "Contributor"]
-  ]) rows.set(rowKey("PERSON", sk), { pk: "PERSON", sk, firstName: first, lastName: "T", role, labs: ["sports"], onboarded: true });
+  ]) rows.set(rowKey("PERSON", sk), { pk: "PERSON", sk, email: `${sk}@optimisticlabs.com`, firstName: first, lastName: "T", role, labs: ["sports"], onboarded: true });
   rows.set(rowKey("COMPANY", "CO-001"), { pk: "COMPANY", sk: "CO-001", name: "Independent Center" });
 };
 
@@ -190,6 +199,67 @@ test("the fields finance cannot work without are required", () => {
 });
 
 /* ---------- filing ---------- */
+
+/* Regression: filing used to write only a bell notification while the UI
+   told the filer an approval email had gone out — and that bell notice went to
+   the old first-name key `liz`, which the email-keyed roster no longer has. */
+test("filing emails the approver and rings her bell, linking straight to the deal", async () => {
+  deal("D-9");
+  const filed = await call("marcus", "POST", "/deals/D-9/assignment", FORM);
+  assert.equal(filed.status, 200);
+  assert.equal(filed.body.approverEmailed, true);
+
+  assert.equal(outbox.length, 1);
+  assert.equal(outbox[0].toEmail, "liz@optimisticlabs.com");
+  assert.match(outbox[0].subject, /Independent Center — Season Sponsorship · needs your approval/);
+  assert.match(outbox[0].text, /Marcus T filed/);
+  assert.match(outbox[0].text, /Marcus T: 60%/);
+  assert.match(outbox[0].text, /\/pipeline\?deal=D-9&tab=assignment/);
+
+  const bell = notifsFor("liz");
+  assert.equal(bell.length, 1);
+  assert.match(bell[0].verb, /needs your approval/);
+  assert.equal(bell[0].href, "/pipeline?deal=D-9&tab=assignment");
+});
+
+test("an approver keyed by email (the post-WorkOS roster) is found and can approve", async () => {
+  rows.delete(rowKey("PERSON", "liz"));
+  rows.set(rowKey("PERSON", "liz@optimisticlabs.com"), {
+    pk: "PERSON", sk: "liz@optimisticlabs.com", email: "liz@optimisticlabs.com",
+    firstName: "Liz", lastName: "Russell", role: "Admin", labs: [], onboarded: true
+  });
+  deal("D-9");
+  await call("marcus", "POST", "/deals/D-9/assignment", FORM);
+  assert.equal(notifsFor("liz@optimisticlabs.com").length, 1);
+  assert.equal(outbox[0].toEmail, "liz@optimisticlabs.com");
+
+  const boot = await call("liz@optimisticlabs.com", "GET", "/bootstrap");
+  assert.equal(boot.body.assignmentApprover, "liz@optimisticlabs.com", "drives the Approve button");
+
+  const ok = await call("liz@optimisticlabs.com", "POST", "/deals/D-9/assignment/approve", {});
+  assert.equal(ok.status, 200);
+});
+
+test("approval emails and notifies the deal owner, every leader and the filer — once each", async () => {
+  deal("D-9", { owner: "seth", dealOwner: "seth" });
+  await call("marcus", "POST", "/deals/D-9/assignment", FORM);
+  outbox.length = 0;
+
+  const ok = await call(APPROVER_KEY, "POST", "/deals/D-9/assignment/approve", {});
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.emailed, true);
+
+  assert.deepEqual(outbox.map(m => m.toEmail).sort(),
+    ["aliza@optimisticlabs.com", "marcus@optimisticlabs.com", "seth@optimisticlabs.com"]);
+  for (const m of outbox) assert.match(m.subject, /Assignment approved for Independent Center/);
+
+  for (const key of ["seth", "marcus", "aliza"]) {
+    const approved = notifsFor(key).filter(n => /approved the assignment/.test(n.verb));
+    assert.equal(approved.length, 1, `${key} is told once`);
+    assert.equal(approved[0].href, "/pipeline?deal=D-9&tab=assignment");
+  }
+  assert.equal(notifsFor("liz").filter(n => /approved/.test(n.verb)).length, 0, "not the approver herself");
+});
 
 test("an assignment can only be filed once the deal is Contracted or Closed Won", async () => {
   deal("D-1", { stage: "Negotiating", outcome: undefined });

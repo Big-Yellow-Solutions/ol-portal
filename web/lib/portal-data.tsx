@@ -46,6 +46,8 @@ interface PortalDataValue {
   people: Record<string, Person>;
   role: Role | null;
   me: string | null;
+  /* PERSON key of the assignment approver, resolved by the API. */
+  assignmentApprover: string | null;
   actingAs: ActingAs | null;
   myLabs: string[];
   bench: PersonWithUsername[];
@@ -120,6 +122,7 @@ export function PortalDataProvider({
   const [people, setPeople] = useState<Record<string, Person>>({});
   const [role, setRole] = useState<Role | null>(null);
   const [me, setMe] = useState<string | null>(null);
+  const [assignmentApprover, setAssignmentApprover] = useState<string | null>(null);
   const [actingAs, setActingAsInfo] = useState<ActingAs | null>(null);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -160,6 +163,7 @@ export function PortalDataProvider({
     setPeople(bootstrap.people);
     setRole(bootstrap.role);
     setMe(bootstrap.me);
+    setAssignmentApprover(bootstrap.assignmentApprover ?? null);
     setActingAsInfo(bootstrap.actingAs ?? null);
     setDeals(dealsRes);
     setProposals(proposalsRes);
@@ -249,6 +253,7 @@ export function PortalDataProvider({
       people,
       role,
       me,
+      assignmentApprover,
       actingAs,
       myLabs,
       bench,
@@ -282,6 +287,7 @@ export function PortalDataProvider({
       people,
       role,
       me,
+      assignmentApprover,
       actingAs,
       myLabs,
       bench,
