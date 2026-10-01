@@ -34,7 +34,7 @@ import type { Deal, Stage } from "@/lib/types";
 import { DealDrawer } from "@/components/pipeline/deal-drawer";
 import { RecordDrawer } from "@/components/pipeline/record-drawer";
 import { ContactsTable } from "@/components/pipeline/contacts-table";
-import { DocumentsGrid } from "@/components/pipeline/documents-grid";
+import { DocumentsGrid, buildDocCards } from "@/components/pipeline/documents-grid";
 import { DealCard } from "@/components/pipeline/deal-card";
 
 type ViewKey = "board" | "companies" | "people" | "documents";
@@ -194,16 +194,10 @@ function PipelineBoard() {
     () => deals.filter((d) => !d.companyId && !d.contactId && billingRequiredAt(d.stage)).length,
     [deals]
   );
-  /* One card per deal's proposal, plus every contract, invoice and filed
-     assignment — the same arithmetic DocumentsGrid does, so the tab count and
-     the grid agree. */
+  /* The grid's own card list, so the tab count and the grid always agree. */
   const documentCount = useMemo(
-    () =>
-      new Set(proposals.map((p) => p.deal).filter(Boolean)).size +
-      contracts.length +
-      invoices.length +
-      deals.filter((d) => d.assignment).length,
-    [proposals, contracts, invoices, deals]
+    () => buildDocCards({ deals, proposals, contracts, invoices, files, companies, contacts, people }).length,
+    [deals, proposals, contracts, invoices, files, companies, contacts, people]
   );
 
   const labName = (id: string) => labs.find((l) => l.id === id)?.name ?? id;
