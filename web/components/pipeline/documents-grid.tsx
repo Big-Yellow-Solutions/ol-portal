@@ -107,6 +107,268 @@ function shortDate(iso: string | undefined): string {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/* Every card the grid draws, unfiltered. Exported so the pipeline page's
+   Documents tab count is the length of this same list rather than a parallel
+   formula that can drift from it (it once skipped uploaded files entirely). */
+export function buildDocCards({
+  deals,
+  proposals,
+  contracts,
+  invoices,
+  files,
+  companies,
+  contacts,
+  people,
+}: Pick<
+  ReturnType<typeof usePortalData>,
+  "deals" | "proposals" | "contracts" | "invoices" | "files" | "companies" | "contacts" | "people"
+>): DocCard[] {
+  const companyMap = Object.fromEntries(companies.map((c) => [c.id, c]));
+  const contactMap = Object.fromEntries(contacts.map((c) => [c.id, c]));
+  const dealMap = Object.fromEntries(deals.map((d) => [d.id, d]));
+  const out: DocCard[] = [];
+
+  /* One card per deal, not per proposal row: a deal's proposal is a single
+     document that has been revised, and the older rows are its history. */
+  const latestByDeal = new Map<string, (typeof proposals)[number]>();
+  for (const p of proposals) {
+    if (!p.deal) continue;
+    const cur = latestByDeal.get(p.deal);
+    if (!cur || (p.updated ?? "") > (cur.updated ?? "")) latestByDeal.set(p.deal, p);
+  }
+  for (const p of latestByDeal.values()) {
+    const deal = p.deal ? dealMap[p.deal] : undefined;
+    const bill = deal
+      ? billingOf(deal, companyMap, contactMap)
+      : { name: p.client ?? "" };
+    const sent = p.status === "Sent" || !!p.sentAt;
+    const earlier = Math.max((p.versions?.length ?? 0) - 1, 0);
+    out.push({
+      id: `proposal:${p.id}`,
+      kind: "proposals",
+      tag: "Proposal",
+      name: p.title,
+      client: bill.name || p.client || "—",
+      status: p.status,
+      variant: PROPOSAL_VARIANT[p.status],
+      version: p.version,
+      when: p.sentAt
+        ? `Sent ${shortDate(p.sentAt)}`
+        : `Updated ${shortDate(p.updated)}`,
+      at: p.sentAt || p.updated || "",
+      amount: deal?.amount ?? 0,
+      sub: deal ? `${deal.client} · ${deal.stage}` : (p.client ?? ""),
+      versionNote:
+        earlier > 0
+          ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record`
+          : undefined,
+      action:
+        p.status === "Customer Approved"
+          ? "Open deal — request a contract"
+          : p.status === "Customer Rejected"
+            ? "Open deal — client declined"
+            : p.status === "Revision Requested"
+              ? "Open deal — revise and resend"
+              : sent
+                ? "Open deal — awaiting client"
+                : "Open deal — mark final and send",
+      deal,
+      done: sent,
+    });
+  }
+
+  /* A deal with no PROPOSAL record at all might still have a proposal
+     attached as a plain uploaded file — the now-usual path. One card per
+     deal, its latest version; earlier ones fold into the same
+     versionNote treatment the structured records get above. */
+  const proposalFilesByDeal = new Map<string, FileRecord[]>();
+  for (const f of files) {
+    if (f.kind !== "proposal" || !f.deal || latestByDeal.has(f.deal)) continue;
+    const list = proposalFilesByDeal.get(f.deal) ?? [];
+    list.push(f);
+    proposalFilesByDeal.set(f.deal, list);
+  }
+  for (const [dealId, list] of proposalFilesByDeal) {
+    const deal = dealMap[dealId];
+    const sorted = [...list].sort(
+      (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
+    );
+    const current = sorted[0];
+    const earlier = sorted.length - 1;
+    out.push({
+      id: `proposal-file:${current.id}`,
+      kind: "proposals",
+      tag: "Proposal",
+      name: current.name,
+      client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+      status: "On file",
+      variant: "secondary",
+      version: current.version,
+      when: `Uploaded ${shortDate(current.date)}`,
+      at: current.date || "",
+      amount: deal?.amount ?? 0,
+      sub: deal ? `${deal.client} · ${deal.stage}` : "",
+      versionNote:
+        earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
+      action: "Open deal — view proposal",
+      deal,
+      done: true,
+      openTab: "documents",
+    });
+  }
+
+  for (const c of contracts) {
+    const deal = c.deal ? dealMap[c.deal] : undefined;
+    const signed = c.status === "Signed";
+    out.push({
+      id: `contract:${c.id}`,
+      kind: "contracts",
+      tag: DOC_KIND_LABEL[docKindOf(c)],
+      name: c.client,
+      client: c.client,
+      status: c.status,
+      variant: CONTRACT_VARIANT[c.status],
+      when: signed
+        ? `Signed ${shortDate(c.updated ?? c.created)}`
+        : `Updated ${shortDate(c.updated ?? c.created)}`,
+      at: c.updated || c.created || "",
+      amount: c.amount ?? deal?.amount ?? 0,
+      sub: deal ? `${deal.client} · ${deal.stage}` : DOC_KIND_LABEL[docKindOf(c)],
+      action: deal
+        ? signed
+          ? "Open deal — view contract"
+          : "Open deal — contract in progress"
+        : "Open on Contracts →",
+      deal,
+      href: deal ? undefined : "/contracts",
+      done: signed,
+    });
+  }
+
+  /* Same fallback as proposals: a deal whose signed contract is a plain
+     uploaded file rather than a generated CONTRACT record still gets a
+     card, but only where no CONTRACT record already covers that deal —
+     the two are alternate ways of clearing the same gate, not two
+     documents. */
+  const dealsWithContractRecord = new Set(
+    contracts.map((c) => c.deal).filter((d): d is string => !!d)
+  );
+  const contractFilesByDeal = new Map<string, FileRecord[]>();
+  for (const f of files) {
+    if (f.kind !== "contract" || !f.deal || dealsWithContractRecord.has(f.deal)) continue;
+    const list = contractFilesByDeal.get(f.deal) ?? [];
+    list.push(f);
+    contractFilesByDeal.set(f.deal, list);
+  }
+  for (const [dealId, list] of contractFilesByDeal) {
+    const deal = dealMap[dealId];
+    const sorted = [...list].sort(
+      (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
+    );
+    const current = sorted[0];
+    const earlier = sorted.length - 1;
+    out.push({
+      id: `contract-file:${current.id}`,
+      kind: "contracts",
+      tag: "Contract",
+      name: current.name,
+      client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+      status: "On file",
+      variant: "secondary",
+      version: current.version,
+      when: `Uploaded ${shortDate(current.date)}`,
+      at: current.date || "",
+      amount: deal?.amount ?? 0,
+      sub: deal ? `${deal.client} · ${deal.stage}` : "",
+      versionNote:
+        earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
+      action: "Open deal — view contract",
+      deal,
+      done: true,
+      openTab: "documents",
+    });
+  }
+
+  for (const i of invoices) {
+    const deal = dealMap[i.deal];
+    out.push({
+      id: `invoice:${i.id}`,
+      kind: "invoices",
+      tag: "Invoice",
+      name: `${i.client} — invoice`,
+      client: i.client,
+      status: i.status,
+      variant: INVOICE_VARIANT[i.status],
+      when:
+        i.status === "Paid" ? `Paid ${shortDate(i.date)}` : `Requested ${shortDate(i.date)}`,
+      at: i.date || "",
+      amount: i.amount ?? 0,
+      sub: deal
+        ? `${deal.client}${i.recurring ? " · recurring" : ""}`
+        : i.recurring
+          ? "Recurring"
+          : "One-off",
+      action: deal ? "Open deal — view invoice" : "Open on Invoice Requests →",
+      deal,
+      href: deal ? undefined : "/invoices",
+      done: i.status === "Paid",
+    });
+  }
+
+  /* Uploaded invoice files are additive, not an alternate to an INVOICE
+     billing request — one stands in for "paid" at the Closed gate, the
+     other tracks Admin Review → Sent → Paid, and a deal can carry both. */
+  for (const f of files) {
+    if (f.kind !== "invoice" || !f.deal) continue;
+    const deal = dealMap[f.deal];
+    out.push({
+      id: `invoice-file:${f.id}`,
+      kind: "invoices",
+      tag: "Invoice",
+      name: f.name,
+      client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
+      status: "On file",
+      variant: "secondary",
+      when: `Uploaded ${shortDate(f.date)}`,
+      at: f.date || "",
+      amount: deal?.amount ?? 0,
+      sub: deal ? deal.client : "",
+      action: "Open deal — view invoice",
+      deal,
+      done: true,
+      openTab: "documents",
+    });
+  }
+
+  /* Pipeline v3: a filed assignment is a document of the pipeline too — it
+     is the thing finance pays against — so it belongs in this grid rather
+     than only inside the deal that produced it. It has no versions: the
+     record is replaced in place until it is approved, and locked after. */
+  for (const deal of deals) {
+    const a = deal.assignment;
+    if (!a) continue;
+    const leaders = a.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ");
+    out.push({
+      id: `assignment:${deal.id}`,
+      kind: "assignments",
+      tag: "Assignment",
+      name: `${deal.client} — lab leader assignment`,
+      client: a.clientName,
+      status: a.approved ? `Approved · ${leaders}` : `Filed · ${leaders}`,
+      variant: a.approved ? "success" : "warning",
+      when: `Issued ${shortDate(a.issued)}`,
+      at: a.issued || "",
+      amount: a.contractValue ?? 0,
+      sub: `${deal.client} · pool ${fmtDollars(a.pool)}`,
+      action: "Open deal — view assignment",
+      deal,
+      done: a.approved,
+    });
+  }
+
+  return out;
+}
+
 export function DocumentsGrid({
   search,
   lab,
@@ -122,262 +384,10 @@ export function DocumentsGrid({
   const [sort, setSort] = useState<Sort>("newest");
   const [page, setPage] = useState(1);
 
-  const companyMap = useMemo(
-    () => Object.fromEntries(companies.map((c) => [c.id, c])),
-    [companies]
+  const all = useMemo(
+    () => buildDocCards({ deals, proposals, contracts, invoices, files, companies, contacts, people }),
+    [deals, proposals, contracts, invoices, files, companies, contacts, people]
   );
-  const contactMap = useMemo(
-    () => Object.fromEntries(contacts.map((c) => [c.id, c])),
-    [contacts]
-  );
-  const dealMap = useMemo(
-    () => Object.fromEntries(deals.map((d) => [d.id, d])),
-    [deals]
-  );
-
-  const all = useMemo<DocCard[]>(() => {
-    const out: DocCard[] = [];
-
-    /* One card per deal, not per proposal row: a deal's proposal is a single
-       document that has been revised, and the older rows are its history. */
-    const latestByDeal = new Map<string, (typeof proposals)[number]>();
-    for (const p of proposals) {
-      if (!p.deal) continue;
-      const cur = latestByDeal.get(p.deal);
-      if (!cur || (p.updated ?? "") > (cur.updated ?? "")) latestByDeal.set(p.deal, p);
-    }
-    for (const p of latestByDeal.values()) {
-      const deal = p.deal ? dealMap[p.deal] : undefined;
-      const bill = deal
-        ? billingOf(deal, companyMap, contactMap)
-        : { name: p.client ?? "" };
-      const sent = p.status === "Sent" || !!p.sentAt;
-      const earlier = Math.max((p.versions?.length ?? 0) - 1, 0);
-      out.push({
-        id: `proposal:${p.id}`,
-        kind: "proposals",
-        tag: "Proposal",
-        name: p.title,
-        client: bill.name || p.client || "—",
-        status: p.status,
-        variant: PROPOSAL_VARIANT[p.status],
-        version: p.version,
-        when: p.sentAt
-          ? `Sent ${shortDate(p.sentAt)}`
-          : `Updated ${shortDate(p.updated)}`,
-        at: p.sentAt || p.updated || "",
-        amount: deal?.amount ?? 0,
-        sub: deal ? `${deal.client} · ${deal.stage}` : (p.client ?? ""),
-        versionNote:
-          earlier > 0
-            ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record`
-            : undefined,
-        action:
-          p.status === "Customer Approved"
-            ? "Open deal — request a contract"
-            : p.status === "Customer Rejected"
-              ? "Open deal — client declined"
-              : p.status === "Revision Requested"
-                ? "Open deal — revise and resend"
-                : sent
-                  ? "Open deal — awaiting client"
-                  : "Open deal — mark final and send",
-        deal,
-        done: sent,
-      });
-    }
-
-    /* A deal with no PROPOSAL record at all might still have a proposal
-       attached as a plain uploaded file — the now-usual path. One card per
-       deal, its latest version; earlier ones fold into the same
-       versionNote treatment the structured records get above. */
-    const proposalFilesByDeal = new Map<string, FileRecord[]>();
-    for (const f of files) {
-      if (f.kind !== "proposal" || !f.deal || latestByDeal.has(f.deal)) continue;
-      const list = proposalFilesByDeal.get(f.deal) ?? [];
-      list.push(f);
-      proposalFilesByDeal.set(f.deal, list);
-    }
-    for (const [dealId, list] of proposalFilesByDeal) {
-      const deal = dealMap[dealId];
-      const sorted = [...list].sort(
-        (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
-      );
-      const current = sorted[0];
-      const earlier = sorted.length - 1;
-      out.push({
-        id: `proposal-file:${current.id}`,
-        kind: "proposals",
-        tag: "Proposal",
-        name: current.name,
-        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
-        status: "On file",
-        variant: "secondary",
-        version: current.version,
-        when: `Uploaded ${shortDate(current.date)}`,
-        at: current.date || "",
-        amount: deal?.amount ?? 0,
-        sub: deal ? `${deal.client} · ${deal.stage}` : "",
-        versionNote:
-          earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
-        action: "Open deal — view proposal",
-        deal,
-        done: true,
-        openTab: "documents",
-      });
-    }
-
-    for (const c of contracts) {
-      const deal = c.deal ? dealMap[c.deal] : undefined;
-      const signed = c.status === "Signed";
-      out.push({
-        id: `contract:${c.id}`,
-        kind: "contracts",
-        tag: DOC_KIND_LABEL[docKindOf(c)],
-        name: c.client,
-        client: c.client,
-        status: c.status,
-        variant: CONTRACT_VARIANT[c.status],
-        when: signed
-          ? `Signed ${shortDate(c.updated ?? c.created)}`
-          : `Updated ${shortDate(c.updated ?? c.created)}`,
-        at: c.updated || c.created || "",
-        amount: c.amount ?? deal?.amount ?? 0,
-        sub: deal ? `${deal.client} · ${deal.stage}` : DOC_KIND_LABEL[docKindOf(c)],
-        action: deal
-          ? signed
-            ? "Open deal — view contract"
-            : "Open deal — contract in progress"
-          : "Open on Contracts →",
-        deal,
-        href: deal ? undefined : "/contracts",
-        done: signed,
-      });
-    }
-
-    /* Same fallback as proposals: a deal whose signed contract is a plain
-       uploaded file rather than a generated CONTRACT record still gets a
-       card, but only where no CONTRACT record already covers that deal —
-       the two are alternate ways of clearing the same gate, not two
-       documents. */
-    const dealsWithContractRecord = new Set(
-      contracts.map((c) => c.deal).filter((d): d is string => !!d)
-    );
-    const contractFilesByDeal = new Map<string, FileRecord[]>();
-    for (const f of files) {
-      if (f.kind !== "contract" || !f.deal || dealsWithContractRecord.has(f.deal)) continue;
-      const list = contractFilesByDeal.get(f.deal) ?? [];
-      list.push(f);
-      contractFilesByDeal.set(f.deal, list);
-    }
-    for (const [dealId, list] of contractFilesByDeal) {
-      const deal = dealMap[dealId];
-      const sorted = [...list].sort(
-        (a, b) => (b.version ?? 1) - (a.version ?? 1) || (b.date ?? "").localeCompare(a.date ?? "")
-      );
-      const current = sorted[0];
-      const earlier = sorted.length - 1;
-      out.push({
-        id: `contract-file:${current.id}`,
-        kind: "contracts",
-        tag: "Contract",
-        name: current.name,
-        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
-        status: "On file",
-        variant: "secondary",
-        version: current.version,
-        when: `Uploaded ${shortDate(current.date)}`,
-        at: current.date || "",
-        amount: deal?.amount ?? 0,
-        sub: deal ? `${deal.client} · ${deal.stage}` : "",
-        versionNote:
-          earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
-        action: "Open deal — view contract",
-        deal,
-        done: true,
-        openTab: "documents",
-      });
-    }
-
-    for (const i of invoices) {
-      const deal = dealMap[i.deal];
-      out.push({
-        id: `invoice:${i.id}`,
-        kind: "invoices",
-        tag: "Invoice",
-        name: `${i.client} — invoice`,
-        client: i.client,
-        status: i.status,
-        variant: INVOICE_VARIANT[i.status],
-        when:
-          i.status === "Paid" ? `Paid ${shortDate(i.date)}` : `Requested ${shortDate(i.date)}`,
-        at: i.date || "",
-        amount: i.amount ?? 0,
-        sub: deal
-          ? `${deal.client}${i.recurring ? " · recurring" : ""}`
-          : i.recurring
-            ? "Recurring"
-            : "One-off",
-        action: deal ? "Open deal — view invoice" : "Open on Invoice Requests →",
-        deal,
-        href: deal ? undefined : "/invoices",
-        done: i.status === "Paid",
-      });
-    }
-
-    /* Uploaded invoice files are additive, not an alternate to an INVOICE
-       billing request — one stands in for "paid" at the Closed gate, the
-       other tracks Admin Review → Sent → Paid, and a deal can carry both. */
-    for (const f of files) {
-      if (f.kind !== "invoice" || !f.deal) continue;
-      const deal = dealMap[f.deal];
-      out.push({
-        id: `invoice-file:${f.id}`,
-        kind: "invoices",
-        tag: "Invoice",
-        name: f.name,
-        client: deal ? billingOf(deal, companyMap, contactMap).name || deal.client : "—",
-        status: "On file",
-        variant: "secondary",
-        when: `Uploaded ${shortDate(f.date)}`,
-        at: f.date || "",
-        amount: deal?.amount ?? 0,
-        sub: deal ? deal.client : "",
-        action: "Open deal — view invoice",
-        deal,
-        done: true,
-        openTab: "documents",
-      });
-    }
-
-    /* Pipeline v3: a filed assignment is a document of the pipeline too — it
-       is the thing finance pays against — so it belongs in this grid rather
-       than only inside the deal that produced it. It has no versions: the
-       record is replaced in place until it is approved, and locked after. */
-    for (const deal of deals) {
-      const a = deal.assignment;
-      if (!a) continue;
-      const leaders = a.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ");
-      out.push({
-        id: `assignment:${deal.id}`,
-        kind: "assignments",
-        tag: "Assignment",
-        name: `${deal.client} — lab leader assignment`,
-        client: a.clientName,
-        status: a.approved ? `Approved · ${leaders}` : `Filed · ${leaders}`,
-        variant: a.approved ? "success" : "warning",
-        when: `Issued ${shortDate(a.issued)}`,
-        at: a.issued || "",
-        amount: a.contractValue ?? 0,
-        sub: `${deal.client} · pool ${fmtDollars(a.pool)}`,
-        action: "Open deal — view assignment",
-        deal,
-        done: a.approved,
-      });
-    }
-
-    return out;
-  }, [proposals, contracts, invoices, files, deals, people, dealMap, companyMap, contactMap]);
 
   const q = search.trim().toLowerCase();
 
