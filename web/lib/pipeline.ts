@@ -5,7 +5,7 @@ import { STAGES } from "@/lib/types";
    gate. Mirrors backend/src/app.mjs's BILLING_GATE_STAGE and gate checks
    exactly, so the board's drag-and-drop can pre-empt a rejected save with the
    same rule the server enforces. */
-export const BILLING_GATE_STAGE: Stage = "Proposal Sent";
+export const BILLING_GATE_STAGE: Stage = "Proposal & Negotiation";
 
 /* The handoff's "tweakable props — surface as config, not UI". They are
    constants rather than settings because nothing in the portal stores
@@ -24,7 +24,7 @@ const stageIndex = (s: Stage) => STAGES.indexOf(s);
    lost stage?" before it asks where the stage sits in the order, because by
    index alone Closed Lost sits past every gate there is. Mirrors the same
    carve-out in backend/src/app.mjs. */
-export const CLOSED_WON: Stage = "Closed";
+export const CLOSED_WON: Stage = "Closed Won (Paid)";
 export const CLOSED_LOST: Stage = "Closed Lost";
 export const isLost = (stage: Stage): boolean => stage === CLOSED_LOST;
 export const isClosedStage = (stage: Stage): boolean => stage === CLOSED_WON || stage === CLOSED_LOST;
@@ -33,18 +33,18 @@ export const billingRequiredAt = (stage: Stage): boolean =>
   !isLost(stage) && stageIndex(stage) >= stageIndex(BILLING_GATE_STAGE);
 
 export const proposalRequiredAt = (stage: Stage): boolean =>
-  !isLost(stage) && stageIndex(stage) >= stageIndex("Proposal Sent");
+  !isLost(stage) && stageIndex(stage) >= stageIndex("Proposal & Negotiation");
 
-/* Pipeline v4: the signed contract used to be what "Closed" itself required.
-   It now gates entry to "Contracted" instead — Closed is reserved for a
-   contract that has also been paid — but the ordinal check still reaches
-   "Closed" too, since its index sits past Contracted's: nothing can skip
-   straight from an earlier stage to Closed without a contract along the way. */
-export const CONTRACT_GATE_STAGE: Stage = "Contracted";
+/* The signed contract gates entry to "Contracted (Signed)" — Closed Won (Paid)
+   is reserved for a contract that has also been paid — and the ordinal check
+   reaches Closed Won (Paid) too, since its index sits past Contracted's:
+   nothing can skip straight from an earlier stage to Closed Won (Paid)
+   without a contract along the way. */
+export const CONTRACT_GATE_STAGE: Stage = "Contracted (Signed)";
 export const contractRequiredAt = (stage: Stage): boolean =>
   !isLost(stage) && stageIndex(stage) >= stageIndex(CONTRACT_GATE_STAGE);
 
-/* Closed now specifically means paid, and the portal's proxy for "paid" is an
+/* Closed Won (Paid) means paid, and the portal's proxy for "paid" is an
    invoice uploaded onto the deal — there's no separate payment ledger to ask
    instead. Mirrors backend/src/app.mjs's own invoice gate. */
 export const INVOICE_GATE_STAGE: Stage = CLOSED_WON;
@@ -233,7 +233,7 @@ export type AssignmentState = "locked" | "needed" | "filed" | "approved";
 
 /** Which of the Assignment tab's three faces a deal should show. A lost deal
  *  never needs one, which is the whole reason the stage exists. Unlocks at
- *  Contracted rather than waiting for Closed (paid) — the paperwork finance
+ *  Contracted (Signed) rather than waiting for Closed Won (Paid) — the paperwork finance
  *  needs to plan the payout is done as soon as the contract is signed. */
 export function assignmentState(deal: Pick<Deal, "stage" | "assignment">): AssignmentState {
   if (!contractRequiredAt(deal.stage)) return "locked";

@@ -19,6 +19,7 @@ import { get, put, fullName, esc, signUrl, docKind, docMeta } from "./util.mjs";
 import { writeAudit, inviteContributor } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { pricingTotal, formatMoney } from "./pricing.mjs";
+import { CONTRACTED, isSettled } from "./stages.mjs";
 
 const s3 = new S3Client({});
 const lambda = new LambdaClient({});
@@ -43,28 +44,28 @@ export async function generateExecutedPdf(c) {
   return payload;
 }
 
-/* FR18. An executed contract moves the deal to Contracted. Until Pipeline v3
+/* FR18. An executed contract moves the deal to Contracted (Signed). Until Pipeline v3
    this had to wait on an Assignment Notice — the deal was parked at "ready to
    close" until somebody filled one in — but that no longer depends on the
    assignment (assignments.mjs): a signed deal is basically won, and the
    assignment is chased after the fact by the drawer's Assignment tab.
    Pipeline v4 moved the actual close (now: paid) out from under this — a
    contract being executed says nothing about payment, so it can no longer be
-   what sets stage: "Closed" and outcome: "Won". If the deal has already moved
-   past this (Closed, paid by hand; or Closed Lost, however that happened
+   what sets stage: Closed Won (Paid) and outcome: "Won". If the deal has already
+   moved past this (Closed Won, paid by hand; or Closed Lost, however that happened
    alongside an execution event) its stage is left alone rather than dragged
-   back to Contracted. */
+   back to Contracted (Signed). */
 export async function rollUpDeal(c) {
   if (!c.deal) return;
   const deal = await get("DEAL", c.deal);
   if (!deal) return;
-  const settled = deal.stage === "Closed" || deal.stage === "Closed Lost";
+  const settled = isSettled(deal.stage);
   await put({
     ...deal,
     contractSigned: true,
     contractSignedAt: c.executedAt,
     contract: c.sk,
-    stage: settled ? deal.stage : "Contracted"
+    stage: settled ? deal.stage : CONTRACTED
   });
 }
 
