@@ -1,4 +1,4 @@
-/* The backfill planner (scripts/backfill-lib.mjs): what a set of CSV rows
+/* The backfill planner (src/backfill.mjs): what a set of CSV rows
    becomes, against a table that may already hold some of it. Pure — no AWS —
    so it runs against fixtures.
 
