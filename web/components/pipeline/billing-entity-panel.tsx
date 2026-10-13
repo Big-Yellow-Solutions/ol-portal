@@ -11,12 +11,13 @@ import { cn } from "@/lib/utils";
 import { billingRequiredAt, initialsOf, websiteError, BILLING_GATE_STAGE } from "@/lib/pipeline";
 import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
+import { stageLabel } from "@/lib/types";
 import type { Company, Contact, Stage } from "@/lib/types";
 
 /* Pipeline v2 (design handoff): the "Billing entity" panel inside the deal
    drawer. A deal can carry a company, a contact ("Person" in the design's own
    copy — kept here since it's user-facing text), both, or neither below the
-   gate stage (lib/pipeline.ts's BILLING_GATE_STAGE, "Proposal Sent"). */
+   gate stage (lib/pipeline.ts's BILLING_GATE_STAGE, "Proposal Sent", shown as Proposal & Negotiation). */
 export function BillingEntityPanel({
   stage,
   companyId,
@@ -129,8 +130,8 @@ export function BillingEntityPanel({
   const badgeText = linked
     ? (company ? company.name : contact!.name)
     : gated
-      ? `Required at ${stage}`
-      : `Optional at ${stage}`;
+      ? `Required at ${stageLabel(stage)}`
+      : `Optional at ${stageLabel(stage)}`;
   const note = linked
     ? company && contact
       ? `${contact.name} is the contact; ${company.name} is invoiced.`
@@ -138,8 +139,8 @@ export function BillingEntityPanel({
         ? "Invoiced to the company. A primary contact is still worth adding."
         : "Invoiced directly to this person."
     : gated
-      ? `A deal at ${stage} must be billable. Link a company, a person, or both.`
-      : `Not needed yet — early-stage deals can sit unlinked. Required once the deal reaches ${BILLING_GATE_STAGE}.`;
+      ? `A deal at ${stageLabel(stage)} must be billable. Link a company, a person, or both.`
+      : `Not needed yet — early-stage deals can sit unlinked. Required once the deal reaches ${stageLabel(BILLING_GATE_STAGE)}.`;
 
   return (
     <div className="rounded-2xl border border-hair bg-warm-panel p-4">

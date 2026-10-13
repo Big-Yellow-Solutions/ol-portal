@@ -64,7 +64,7 @@ const TOOLS = [
       type: "object",
       properties: {
         query: { type: "string", description: "Free text matched against client name, lab, stage and owner. Omit to list everything in scope." },
-        stage: { type: "string", enum: ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed", "Closed Lost"], description: "Restrict to one stage. \"Contracted\" is a signed contract awaiting payment; \"Closed\" is Closed Won and paid." },
+        stage: { type: "string", enum: ["Lead", "Discovery", "Proposal Sent", "Contracted", "Closed", "Closed Lost"], description: "Restrict to one stage. Names are the stored values: \"Proposal Sent\" is shown as Proposal & Negotiation, \"Contracted\" as Contracted (Signed) (a signed contract awaiting payment), and \"Closed\" as Closed Won (Paid)." },
         includeClosed: { type: "boolean", description: "Include closed deals. Defaults to false, so results are open opportunities." }
       },
       additionalProperties: false

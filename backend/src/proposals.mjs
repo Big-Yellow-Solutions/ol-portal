@@ -352,7 +352,7 @@ async function recordView(p, meta) {
    card. Only ever moves forward, and never touches a Closed deal — closing is
    gated on an Assignment Notice the pipeline collects separately, and quietly
    reopening a closed deal would be worse than leaving the stage alone. */
-const STAGE_ORDER = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed"];
+const STAGE_ORDER = ["Lead", "Discovery", "Proposal Sent", "Contracted", "Closed"];
 
 async function advanceDeal(dealId, stage) {
   try {
@@ -451,9 +451,9 @@ export async function shareDecision(token, body, meta = {}) {
   });
   await writeAudit(name || "customer", "proposal." + action,
     `${p.sk} v${p.sentVersion} (${p.client})${comment ? " · " + comment.slice(0, 120) : ""}`);
-  // An approved proposal is a deal in negotiation, not a closed one — closing
-  // waits on the signed contract and its Assignment Notice.
-  if (action === "approve") await advanceDeal(p.deal, "Negotiating");
+  // An approved proposal is still a deal in Proposal & Negotiation, not a closed
+  // one — it moves on when the contract is signed.
+  if (action === "approve") await advanceDeal(p.deal, "Proposal Sent");
 
   const headline = {
     approve: `${p.client} approved your proposal`,

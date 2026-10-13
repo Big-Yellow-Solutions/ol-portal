@@ -14,7 +14,6 @@ export type Stage =
   | "Lead"
   | "Discovery"
   | "Proposal Sent"
-  | "Negotiating"
   | "Contracted"
   | "Closed"
   | "Closed Lost";
@@ -759,22 +758,27 @@ export const STAGES: Stage[] = [
   "Lead",
   "Discovery",
   "Proposal Sent",
-  "Negotiating",
   "Contracted",
   "Closed",
   "Closed Lost",
 ];
 
-/** What the board and the stage selects call "Closed" — the stored value stays
- *  "Closed" so nothing downstream has to be migrated to keep meaning won. */
+/** What people see for each stage. The stored value never changes — only the
+ *  words do — so nothing downstream has to be migrated. "Proposal Sent" is the
+ *  one Proposal & Negotiation column (the old Negotiating stage folds into it,
+ *  see backend/src/util.mjs's foldStage), "Contracted" means the contract is
+ *  signed, and "Closed" means won and paid. */
 export const STAGE_LABELS: Record<Stage, string> = {
   Lead: "Lead",
   Discovery: "Discovery",
-  "Proposal Sent": "Proposal Sent",
-  Negotiating: "Negotiating",
-  Contracted: "Contracted",
-  Closed: "Closed Won",
+  "Proposal Sent": "Proposal & Negotiation",
+  Contracted: "Contracted (Signed)",
+  Closed: "Closed Won (Paid)",
   "Closed Lost": "Closed Lost",
 };
+
+/** Safe for a stage string that came off the wire. */
+export const stageLabel = (stage: string): string =>
+  (STAGE_LABELS as Record<string, string>)[stage] ?? stage;
 
 export const SOURCES: Source[] = ["Referral", "Inbound", "Network", "Event", "Outbound"];

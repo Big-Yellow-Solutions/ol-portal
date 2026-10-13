@@ -28,8 +28,14 @@ export const esc = s => String(s ?? "").replace(/[&<>"']/g, ch =>
    afterwards. */
 export const signUrl = token => `${process.env.FRONTEND_URL}/contract-sign.html?token=${token}`;
 
+/* "Negotiating" is retired: the board has one Proposal & Negotiation column,
+   stored as "Proposal Sent". Deals saved as Negotiating before that read back
+   as Proposal Sent, and are rewritten that way the next time they are saved. */
+export const foldStage = item =>
+  item?.pk === "DEAL" && item.stage === "Negotiating" ? { ...item, stage: "Proposal Sent" } : item;
+
 export const get = async (pk, sk) =>
-  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
+  foldStage((await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item);
 
 export const listType = async pk => {
   const out = [];
@@ -39,7 +45,7 @@ export const listType = async pk => {
       TableName: TABLE, KeyConditionExpression: "pk = :p",
       ExpressionAttributeValues: { ":p": pk }, ExclusiveStartKey
     }));
-    out.push(...page.Items);
+    out.push(...page.Items.map(foldStage));
     ExclusiveStartKey = page.LastEvaluatedKey;
   } while (ExclusiveStartKey);
   return out;

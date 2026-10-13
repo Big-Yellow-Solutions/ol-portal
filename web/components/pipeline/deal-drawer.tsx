@@ -36,7 +36,7 @@ import {
   CLOSED_WON,
 } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
-import { STAGES, STAGE_LABELS, SOURCES } from "@/lib/types";
+import { STAGES, STAGE_LABELS, SOURCES, stageLabel } from "@/lib/types";
 import type { Deal, Source, Stage } from "@/lib/types";
 import { BillingEntityPanel } from "@/components/pipeline/billing-entity-panel";
 import { DocumentUploadPanel } from "@/components/pipeline/document-upload-panel";
@@ -181,17 +181,17 @@ export function DealDrawer({
   const hint = !title.trim()
     ? "A deal name is required"
     : !linked && gated
-      ? `Link a company or a person to save this deal at ${stage}`
+      ? `Link a company or a person to save this deal at ${stageLabel(stage)}`
       : propGated && !hasProposal
-        ? `Upload a proposal before saving this deal at ${stage}`
+        ? `Upload a proposal before saving this deal at ${stageLabel(stage)}`
         : contractGated && !hasContract
-          ? `Upload the signed contract before saving this deal at ${stage}`
+          ? `Upload the signed contract before saving this deal at ${stageLabel(stage)}`
           : invoiceGated && !hasInvoice
             ? "Upload an invoice before closing this deal"
             : isClosed && !close
               ? "Set the date this deal closed"
               : !linked
-                ? `Unlinked — fine at ${stage}, required at ${BILLING_GATE_STAGE}`
+                ? `Unlinked — fine at ${stageLabel(stage)}, required at ${stageLabel(BILLING_GATE_STAGE)}`
                 : "Ready to save";
 
   const buildBody = () => ({
@@ -302,7 +302,7 @@ export function DealDrawer({
           <div className="min-w-0 flex-1">
             <SheetTitle className="truncate">{isNew ? "New deal" : title.trim() || "Untitled deal"}</SheetTitle>
             <SheetDescription className="text-xs">
-              {isNew ? "Needs a name and a billing entity" : `${labs.find((l) => l.id === lab)?.name ?? lab} · ${stage}`}
+              {isNew ? "Needs a name and a billing entity" : `${labs.find((l) => l.id === lab)?.name ?? lab} · ${stageLabel(stage)}`}
             </SheetDescription>
           </div>
           <Button variant="outline" size="icon-sm" className="rounded-full" onClick={onClose} aria-label="Close">
@@ -443,7 +443,7 @@ export function DealDrawer({
               ) : (
                 <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
                   <p className="mb-2 text-xs text-ink-mute">
-                    {stage} needs a proposal uploaded to the deal. Save it now to attach one.
+                    {stageLabel(stage)} needs a proposal uploaded to the deal. Save it now to attach one.
                   </p>
                   <Button
                     type="button"
@@ -470,7 +470,7 @@ export function DealDrawer({
               ) : (
                 <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
                   <p className="mb-2 text-xs text-ink-mute">
-                    {stage} needs a signed contract uploaded to the deal. Save it now to attach one.
+                    {stageLabel(stage)} needs a signed contract uploaded to the deal. Save it now to attach one.
                   </p>
                   <Button
                     type="button"
@@ -497,7 +497,7 @@ export function DealDrawer({
               ) : (
                 <div className="rounded-2xl border border-dashed border-hair-strong bg-warm-panel p-4 text-center">
                   <p className="mb-2 text-xs text-ink-mute">
-                    {stage} needs an invoice uploaded to the deal. Save it now to attach one.
+                    {stageLabel(stage)} needs an invoice uploaded to the deal. Save it now to attach one.
                   </p>
                   <Button
                     type="button"
@@ -620,7 +620,7 @@ export function DealDrawer({
                     ? "On file — a signed client contract is attached to this deal."
                     : hasContract
                       ? "On file — a signed contract is uploaded above."
-                      : "Required at Contracted. Upload the signed contract above, or build and sign one on the Contracts page."}
+                      : "Required at Contracted (Signed). Upload the signed contract above, or build and sign one on the Contracts page."}
                 </p>
                 {existing?.contractSigned && (
                   <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>

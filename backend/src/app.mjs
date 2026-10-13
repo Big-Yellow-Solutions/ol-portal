@@ -29,7 +29,7 @@ import * as community from "./community.mjs";
 import * as notifications from "./notifications.mjs";
 import * as messages from "./messages.mjs";
 import * as verify from "./verify.mjs";
-import { fullName } from "./util.mjs";
+import { fullName, foldStage } from "./util.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
 const TABLE = process.env.TABLE_NAME;
@@ -52,7 +52,15 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
 
-const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed", "Closed Lost"];
+const STAGES = ["Lead", "Discovery", "Proposal Sent", "Contracted", "Closed", "Closed Lost"];
+/* What people see for each stored stage (mirrors web/lib/types.ts's
+   STAGE_LABELS). The stored values stay as they are; only the words change. */
+const STAGE_LABEL = {
+  "Proposal Sent": "Proposal & Negotiation",
+  "Contracted": "Contracted (Signed)",
+  "Closed": "Closed Won (Paid)"
+};
+const stageLabel = s => STAGE_LABEL[s] ?? s;
 /* Pipeline v3 splits the board's final column in two. The won stage keeps the
    stored value "Closed": every rule and report that already reads it means
    "won", so renaming would have churned thirty-odd call sites to say the same
@@ -91,7 +99,7 @@ const resp = (status, body) => ({
 const today = () => new Date().toISOString().slice(0, 10);
 
 const get = async (pk, sk) =>
-  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
+  foldStage((await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item);
 const listType = async pk => {
   const out = [];
   let ExclusiveStartKey;
@@ -100,7 +108,7 @@ const listType = async pk => {
       TableName: TABLE, KeyConditionExpression: "pk = :p",
       ExpressionAttributeValues: { ":p": pk }, ExclusiveStartKey
     }));
-    out.push(...page.Items);
+    out.push(...page.Items.map(foldStage));
     ExclusiveStartKey = page.LastEvaluatedKey;
   } while (ExclusiveStartKey);
   return out;
@@ -180,7 +188,7 @@ async function createDeal(ctx, body) {
   if (contactId && (!(await get("CONTACT", contactId)) || !contacts.inScope(scope, "contacts", contactId)))
     return resp(400, { error: "unknown contact" });
   if (stage !== CLOSED_LOST && STAGES.indexOf(stage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !companyId && !contactId)
-    return resp(400, { error: `A deal at ${stage} needs a billing entity — link a company or a contact` });
+    return resp(400, { error: `A deal at ${stageLabel(stage)} needs a billing entity — link a company or a contact` });
 
   const id = await nextId("DEAL", "D-");
   const stamp = today();
@@ -239,7 +247,7 @@ async function updateDeal(ctx, id, body) {
     const nextCompany = "companyId" in patch ? patch.companyId : deal.companyId;
     const nextContact = "contactId" in patch ? patch.contactId : deal.contactId;
     if (nextStage !== CLOSED_LOST && STAGES.indexOf(nextStage) >= STAGES.indexOf(BILLING_GATE_STAGE) && !nextCompany && !nextContact)
-      return resp(400, { error: `A deal at ${nextStage} needs a billing entity — link a company or a contact` });
+      return resp(400, { error: `A deal at ${stageLabel(nextStage)} needs a billing entity — link a company or a contact` });
   }
   if ("stage" in patch && patch.stage !== CLOSED_LOST &&
       STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
@@ -251,7 +259,7 @@ async function updateDeal(ctx, id, body) {
     // keep moving without re-uploading a document nobody kept.
     const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "proposal");
     const sent = uploaded || (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
-    if (!sent) return resp(400, { error: `${patch.stage} needs a proposal uploaded to the deal` });
+    if (!sent) return resp(400, { error: `${stageLabel(patch.stage)} needs a proposal uploaded to the deal` });
   }
   if ("stage" in patch && patch.stage !== CLOSED_LOST &&
       STAGES.indexOf(patch.stage) >= STAGES.indexOf(CONTRACT_GATE_STAGE) &&
@@ -268,7 +276,7 @@ async function updateDeal(ctx, id, body) {
     // sitting in its own Documents tab should not be stuck before Contracted.
     if (!deal.contractSigned) {
       const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract");
-      if (!uploaded) return resp(400, { error: `${patch.stage} needs a signed contract uploaded to the deal` });
+      if (!uploaded) return resp(400, { error: `${stageLabel(patch.stage)} needs a signed contract uploaded to the deal` });
     }
   }
   if ("stage" in patch && patch.stage !== CLOSED_LOST &&
@@ -278,7 +286,7 @@ async function updateDeal(ctx, id, body) {
     // portal's stand-in for that — there's no separate payment ledger to
     // check instead.
     const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "invoice");
-    if (!uploaded) return resp(400, { error: `${patch.stage} needs an invoice uploaded to the deal` });
+    if (!uploaded) return resp(400, { error: `${stageLabel(patch.stage)} needs an invoice uploaded to the deal` });
   }
 
   const next = { ...deal, ...patch, updated: today() };
