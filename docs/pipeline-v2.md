@@ -22,19 +22,12 @@ visibility is a flat role check — the new `ctx.can.manageContacts()` in
 There is **no delete endpoint**: the design only ever exposes "remove from
 this deal", which just clears the deal's `companyId`/`contactId`.
 
-> **Stage names (current).** The pipeline is `Lead`, `Discovery`,
-> `Proposal & Negotiation`, `Contracted (Signed)`, `Closed Won (Paid)` and
-> `Closed Lost`, defined in `backend/src/stages.mjs`. The older
-> `Proposal Sent`/`Negotiating`, `Contracted` and `Closed` values were renamed
-> and merged by `backend/scripts/migrate-stages.mjs`. Below, "closing" means
-> reaching `Closed Won (Paid)`, which also needs an uploaded invoice.
-
 **Three data-quality gates** in `app.mjs`, which is the point of the design:
 
 | Gate | Rule | Where |
 |---|---|---|
-| Billing entity | required from `Proposal & Negotiation` onward | `createDeal`, `updateDeal` |
-| Sent proposal | advancing to `Proposal & Negotiation`+ needs a proposal with `sentAt` | `updateDeal` |
+| Billing entity | required from `Proposal Sent` onward | `createDeal`, `updateDeal` |
+| Sent proposal | advancing to `Proposal Sent`+ needs a proposal with `sentAt` | `updateDeal` |
 | Signed contract | closing needs `deal.contractSigned` | `updateDeal` |
 
 The gates fire **only on the transition that crosses them** (or when the
@@ -157,7 +150,7 @@ backend deploys separately via `sam deploy`. Neither order is free:
 
 **Backend first** — the gates activate against the currently-live old
 frontend. No existing deal has a billing entity yet, so any stage change into
-`Proposal & Negotiation`+ is refused, and the old UI has no way to attach one.
+`Proposal Sent`+ is refused, and the old UI has no way to attach one.
 
 **Do backend first, then push immediately.** Backend-first fails as a *blocked
 action with an explicit error message*; frontend-first fails as *silent data
@@ -178,7 +171,7 @@ separate decision, not a side effect to discover later.
 
 ## Rollout consideration (not a bug)
 
-After both sides are live, **every in-flight deal at or past `Proposal & Negotiation`
+After both sides are live, **every in-flight deal at or past `Proposal Sent`
 has no billing entity**, because the field is new. The gates mean such a deal
 cannot change stage until someone opens it and links a company or contact. The
 drawer makes this explicit — the Save button disables and the hint line names
@@ -199,7 +192,7 @@ don't look for them.** Computed styles measured and corrected to the spec: h1
 40px/1.06/−.015em (32px ≤760px), card 16px radius / 13px padding, lab chip
 10px/700/.09em, billing tile 26px/9px, tabs 11px 16px 12px / 10px radius,
 hairline `rgba(124,109,245,.16)`, page `#F8F6F2`. Exercised: the full gate
-chain (unlinked deal → stage to Proposal & Negotiation → red badge + disabled Save →
+chain (unlinked deal → stage to Proposal Sent → red badge + disabled Save →
 attach company → hint advances to the proposal gate), the primary-contact
 suggestion row, all four tabs, the record drawer, and mobile at 375px with no
 horizontal page overflow.

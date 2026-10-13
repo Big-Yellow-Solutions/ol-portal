@@ -28,9 +28,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 /* Pipeline v3 (design handoff), the deal drawer's third tab: the Lab Leader
    Assignment. Three faces, in the order a deal meets them —
 
-   locked    the deal is not yet Contracted (Signed), so there is nothing to
-             fill in. A lost deal stays here forever, which is the point of
-             the lost stage.
+   locked    the deal is not Closed Won, so there is nothing to fill in. A lost
+             deal stays here forever, which is the point of the lost stage.
    form      won, nothing filed. Prefilled from the deal, then leaders, shares,
              costs and cadence, with the pool moving live underneath.
    receipt   filed. Amber while it waits on the approver, green once approved.
@@ -175,7 +174,7 @@ export function AssignmentTab({
         <p className="mx-auto mt-1.5 max-w-[380px] text-[13px] leading-relaxed text-ink-mute">
           {deal.stage === "Closed Lost"
             ? "A lost deal is never assigned — there is no engagement to deliver and no pool to split."
-            : "The Lab Leader Assignment form opens once this deal is Contracted (Signed), with a signed contract on file."}
+            : "The Lab Leader Assignment form opens once this deal is Contracted, with a signed contract on file."}
         </p>
       </div>
     );

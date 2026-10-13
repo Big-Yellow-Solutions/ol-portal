@@ -114,7 +114,7 @@ export function DealDrawer({
      clears it — both on a drag that lands here and on the stage select
      below — and the Save gate then asks for the real one. */
   const [close, setClose] = useState(
-    pendingStage === CLOSED_WON && existing?.stage !== CLOSED_WON ? "" : (existing?.close ?? "")
+    pendingStage === "Closed" && existing?.stage !== "Closed" ? "" : (existing?.close ?? "")
   );
   const [source, setSource] = useState<Source>(existing?.source ?? "Referral");
   const [recurring, setRecurring] = useState(existing?.recurring ?? false);
@@ -164,7 +164,7 @@ export function DealDrawer({
     [files, persisted]
   );
 
-  const isClosed = stage === CLOSED_WON;
+  const isClosed = stage === "Closed";
   const gated = billingRequiredAt(stage);
   const linked = !!companyId || !!contactId;
   const propGated = proposalRequiredAt(stage);
@@ -620,7 +620,7 @@ export function DealDrawer({
                     ? "On file — a signed client contract is attached to this deal."
                     : hasContract
                       ? "On file — a signed contract is uploaded above."
-                      : "Required at Contracted (Signed). Upload the signed contract above, or build and sign one on the Contracts page."}
+                      : "Required at Contracted. Upload the signed contract above, or build and sign one on the Contracts page."}
                 </p>
                 {existing?.contractSigned && (
                   <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>

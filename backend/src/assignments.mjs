@@ -21,7 +21,6 @@
 import { resp, today, get, put, listType, fullName, esc } from "./util.mjs";
 import { notify } from "./notifications.mjs";
 import { sendSystemEmail } from "./email.mjs";
-import { CONTRACTED, CLOSED_WON } from "./stages.mjs";
 
 /* Swappable so a test can watch the outbox without an SES client. */
 export const mailer = { send: sendSystemEmail };
@@ -142,11 +141,11 @@ async function isAssignableLeader(key) {
 }
 
 /* Pipeline v4: an assignment used to unlock only once a deal was fully Closed
-   Won. It now unlocks at Contracted (Signed) — the paperwork finance needs to plan the
+   Won. It now unlocks at Contracted — the paperwork finance needs to plan the
    payout is done as soon as the contract is signed, and Closed itself no
    longer means that; it means paid. Mirrors web/lib/pipeline.ts's
    assignmentState (contractRequiredAt). */
-const ASSIGNABLE_STAGES = new Set([CONTRACTED, CLOSED_WON]);
+const ASSIGNABLE_STAGES = new Set(["Contracted", "Closed"]);
 
 /* File it, or revise a filing that has not been approved yet. */
 export async function fileAssignment(ctx, dealId, body) {
@@ -154,7 +153,7 @@ export async function fileAssignment(ctx, dealId, body) {
   if (!deal) return resp(404, { error: "deal not found" });
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   if (!ASSIGNABLE_STAGES.has(deal.stage))
-    return resp(400, { error: "An assignment is only needed once a deal is Contracted (Signed) or Closed Won (Paid)" });
+    return resp(400, { error: "An assignment is only needed once a deal is Contracted or Closed Won" });
   if (deal.assignment?.approved)
     return resp(409, { error: "This assignment is approved and locked — ask the approver to reopen it before editing" });
 

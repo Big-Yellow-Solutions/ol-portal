@@ -14,7 +14,6 @@ import { resp, today, get, put, listType, nextId, fullName } from "./util.mjs";
 import { writeAudit } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { cleanPricing, pricingText, pricingTotal, samePricing } from "./pricing.mjs";
-import { STAGES, PROPOSAL_NEGOTIATION, isSettled } from "./stages.mjs";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -238,7 +237,7 @@ export async function sendProposal(ctx, id, body) {
   await put(next);
   await writeAudit(ctx.me.sk, resend ? "proposal.resent" : "proposal.sent",
     `${id} v${sentVersion} → customer link`);
-  await advanceDeal(p.deal, PROPOSAL_NEGOTIATION);
+  await advanceDeal(p.deal, "Proposal Sent");
 
   const url = `${process.env.FRONTEND_URL}/proposal-view.html?token=${next.shareToken}`;
   const subject = resend
@@ -350,16 +349,16 @@ async function recordView(p, meta) {
 }
 
 /* FR18: the deal's stage tracks proposal progress without anyone dragging a
-   card. Only ever moves forward, and never touches a Closed (won or lost) deal — closing is
+   card. Only ever moves forward, and never touches a Closed deal — closing is
    gated on an Assignment Notice the pipeline collects separately, and quietly
    reopening a closed deal would be worse than leaving the stage alone. */
-const STAGE_ORDER = STAGES;
+const STAGE_ORDER = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed"];
 
 async function advanceDeal(dealId, stage) {
   try {
     if (!dealId) return;
     const deal = await get("DEAL", dealId);
-    if (!deal || isSettled(deal.stage)) return;
+    if (!deal || deal.stage === "Closed" || deal.stage === "Closed Lost") return;
     if (STAGE_ORDER.indexOf(deal.stage) >= STAGE_ORDER.indexOf(stage)) return;
     await put({ ...deal, stage });
   } catch (err) {
@@ -454,7 +453,7 @@ export async function shareDecision(token, body, meta = {}) {
     `${p.sk} v${p.sentVersion} (${p.client})${comment ? " · " + comment.slice(0, 120) : ""}`);
   // An approved proposal is a deal in negotiation, not a closed one — closing
   // waits on the signed contract and its Assignment Notice.
-  if (action === "approve") await advanceDeal(p.deal, PROPOSAL_NEGOTIATION);
+  if (action === "approve") await advanceDeal(p.deal, "Negotiating");
 
   const headline = {
     approve: `${p.client} approved your proposal`,

@@ -139,7 +139,7 @@ function seed() {
   contact("CT-003", "Nils Overgaard");
 
   const deal = (sk, over) => rows.set(rowKey("DEAL", sk), {
-    pk: "DEAL", sk, client: sk, stage: "Proposal & Negotiation", amount: 10000,
+    pk: "DEAL", sk, client: sk, stage: "Proposal Sent", amount: 10000,
     close: "2026-12-01", source: "Referral", recurring: false,
     companyId: null, contactId: null, ...over
   });
