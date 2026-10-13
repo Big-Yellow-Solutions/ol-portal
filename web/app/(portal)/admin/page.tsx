@@ -45,6 +45,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { BackfillImport } from "@/components/admin/backfill-import";
 
 /* ---------- shapes returned by the real backend (admin.mjs / kb.mjs) ---------- */
 
@@ -499,6 +500,7 @@ function AdminConsole({
         <TabsList>
           <TabsTrigger value="accounts">Invites &amp; accounts</TabsTrigger>
           <TabsTrigger value="kb">The Optimist knowledge base</TabsTrigger>
+          <TabsTrigger value="import">Import data</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
 
@@ -821,6 +823,10 @@ function AdminConsole({
         </TabsContent>
 
         {/* ---------- Audit log ---------- */}
+        <TabsContent value="import">
+          <BackfillImport />
+        </TabsContent>
+
         <TabsContent value="audit">
           <Card>
             <CardHeader>

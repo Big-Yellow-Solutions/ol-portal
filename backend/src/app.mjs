@@ -12,6 +12,7 @@ import * as qbo from "./qbo.mjs";
 import * as docusign from "./docusign.mjs";
 import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
 import * as admin from "./admin.mjs";
+import * as backfill from "./backfill-api.mjs";
 import * as proposals from "./proposals.mjs";
 import * as contacts from "./contacts.mjs";
 import * as assignments from "./assignments.mjs";
@@ -606,6 +607,7 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "restore")
     return await admin.restoreUser(ctx, seg[2]);
   if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
+  if (method === "POST" && path === "/admin/backfill") return await backfill.importBackfill(ctx, body);
   if (method === "POST" && path === "/admin/act-as") return await admin.startActingAs(ctx, body);
   if (method === "POST" && path === "/admin/act-as/stop") return await admin.stopActingAs(ctx);
   if (method === "GET" && path === "/qbo/status") return await qboStatus(ctx);
