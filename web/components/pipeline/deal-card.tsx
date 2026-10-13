@@ -77,7 +77,7 @@ export function DealCard({
           <span className="min-w-0 truncate">{labName}</span>
         </span>
         <span className="min-w-1.5 flex-1" />
-        {deal.stage === "Closed" && deal.outcome === "Won" && (
+        {deal.stage === "Closed Won (Paid)" && deal.outcome === "Won" && (
           <span className="shrink-0 rounded-full bg-green-pale px-2.5 py-0.5 text-[11px] font-semibold text-green">Won</span>
         )}
         {deal.stage === "Closed Lost" && (

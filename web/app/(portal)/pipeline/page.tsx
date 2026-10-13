@@ -251,7 +251,7 @@ function PipelineBoard() {
     if (targetStage === CONTRACT_GATE_STAGE && !deal.assignment) {
       // A nudge, not a gate: the move goes through, then the drawer opens
       // on the deal so the form is one click away.
-      await moveTo(deal, targetStage, "Contracted — a Lab Leader Assignment form is needed");
+      await moveTo(deal, targetStage, "Contracted (Signed) — a Lab Leader Assignment form is needed");
       openDeal({ ...deal, stage: targetStage }, undefined, "details");
       return;
     }

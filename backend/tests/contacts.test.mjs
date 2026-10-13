@@ -173,7 +173,7 @@ test("an imported company answers with its city and country until an address is 
 const seedDeal = (id, client, { companyId = null, contactId = null } = {}) =>
   rows.set(rowKey("DEAL", id), {
     pk: "DEAL", sk: id, client, lab: "sports", owner: "nora", dealOwner: "nora",
-    stage: "Proposal Sent", amount: 24000, close: "2026-10-01", source: "Referral",
+    stage: "Proposal & Negotiation", amount: 24000, close: "2026-10-01", source: "Referral",
     recurring: false, companyId, contactId
   });
 

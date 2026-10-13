@@ -20,6 +20,7 @@ import * as proposals from "./proposals.mjs";
 import * as contracts from "./contracts.mjs";
 import * as resources from "./resources.mjs";
 import * as courses from "./courses.mjs";
+import { STAGES } from "./stages.mjs";
 
 /* The list handlers return HTTP responses because that is what app.mjs needs
    from them. Unwrapping here is the price of having exactly one implementation
@@ -64,7 +65,7 @@ const TOOLS = [
       type: "object",
       properties: {
         query: { type: "string", description: "Free text matched against client name, lab, stage and owner. Omit to list everything in scope." },
-        stage: { type: "string", enum: ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed", "Closed Lost"], description: "Restrict to one stage. \"Contracted\" is a signed contract awaiting payment; \"Closed\" is Closed Won and paid." },
+        stage: { type: "string", enum: STAGES, description: "Restrict to one stage. \"Contracted (Signed)\" is a signed contract awaiting payment; \"Closed Won (Paid)\" is won and paid." },
         includeClosed: { type: "boolean", description: "Include closed deals. Defaults to false, so results are open opportunities." }
       },
       additionalProperties: false

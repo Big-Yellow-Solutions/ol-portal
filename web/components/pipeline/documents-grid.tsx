@@ -84,7 +84,7 @@ interface DocCard {
   /** Sort key: the ISO-ish date behind `when`. */
   at: string;
   amount: number;
-  /** "Grace Network — cohort two · Proposal Sent" */
+  /** "Grace Network — cohort two · Proposal & Negotiation" */
   sub: string;
   /** "2 earlier versions on record", when the record actually keeps them. */
   versionNote?: string;

@@ -22,10 +22,9 @@ export type BadgeVariant =
 export const STAGE_VARIANT: Record<Stage, BadgeVariant> = {
   Lead: "outline",
   Discovery: "secondary",
-  "Proposal Sent": "warning",
-  Negotiating: "warning",
-  Contracted: "warning",
-  Closed: "success",
+  "Proposal & Negotiation": "warning",
+  "Contracted (Signed)": "warning",
+  "Closed Won (Paid)": "success",
   "Closed Lost": "outline",
 };
 
