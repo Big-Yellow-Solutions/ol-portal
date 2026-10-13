@@ -153,7 +153,7 @@ export async function fileAssignment(ctx, dealId, body) {
   if (!deal) return resp(404, { error: "deal not found" });
   if (!ctx.can.editDeal(deal)) return resp(403, { error: "Not allowed to edit this deal" });
   if (!ASSIGNABLE_STAGES.has(deal.stage))
-    return resp(400, { error: "An assignment is only needed once a deal is Contracted or Closed Won" });
+    return resp(400, { error: "An assignment is only needed once a deal is Contracted (Signed) or Closed Won (Paid)" });
   if (deal.assignment?.approved)
     return resp(409, { error: "This assignment is approved and locked — ask the approver to reopen it before editing" });
 

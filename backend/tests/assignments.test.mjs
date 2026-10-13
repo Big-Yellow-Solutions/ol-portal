@@ -265,7 +265,7 @@ test("an assignment can only be filed once the deal is Contracted or Closed Won"
   deal("D-1", { stage: "Negotiating", outcome: undefined });
   const open = await call("marcus", "POST", "/deals/D-1/assignment", FORM);
   assert.equal(open.status, 400);
-  assert.match(open.body.error, /Contracted or Closed Won/);
+  assert.match(open.body.error, /Contracted \(Signed\) or Closed Won \(Paid\)/);
 
   deal("D-2", { stage: "Closed Lost", outcome: "Lost" });
   const lost = await call("marcus", "POST", "/deals/D-2/assignment", FORM);
@@ -369,7 +369,7 @@ test("Contracted needs a signed contract; an uploaded file clears it the same wa
 
   const blocked = await call("liz", "PATCH", "/deals/D-1", { stage: "Contracted" });
   assert.equal(blocked.status, 400);
-  assert.match(blocked.body.error, /Contracted needs a signed contract/);
+  assert.match(blocked.body.error, /Contracted \(Signed\) needs a signed contract/);
 
   rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "contract" });
   const cleared = await call("liz", "PATCH", "/deals/D-1", { stage: "Contracted" });
@@ -383,7 +383,7 @@ test("Closed needs an invoice on file even when the contract is already signed",
 
   const blocked = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
   assert.equal(blocked.status, 400);
-  assert.match(blocked.body.error, /Closed needs an invoice/);
+  assert.match(blocked.body.error, /Closed Won \(Paid\) needs an invoice/);
 
   rows.set(rowKey("FILE", "F-1"), { pk: "FILE", sk: "F-1", deal: "D-1", kind: "invoice" });
   const cleared = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed" });
@@ -420,7 +420,23 @@ test("a lost deal is gated on nothing — no billing entity, no proposal, no con
 
 test("moving a deal back out of a closed stage drops the outcome with it", async () => {
   deal("D-1", { stage: "Closed Lost", outcome: "Lost", companyId: "CO-001" });
-  const res = await call("liz", "PATCH", "/deals/D-1", { stage: "Negotiating" });
+  const res = await call("liz", "PATCH", "/deals/D-1", { stage: "Proposal Sent" });
   assert.equal(res.status, 200, res.body?.error);
   assert.equal(res.body.outcome, undefined);
+});
+
+/* ---------- Negotiating is retired: it reads as Proposal Sent ---------- */
+
+test("a deal stored as Negotiating reads back as Proposal Sent, and saves that way", async () => {
+  deal("D-1", { stage: "Negotiating", outcome: undefined });
+  const list = await call("liz", "GET", "/deals");
+  assert.equal(list.body.find(d => d.id === "D-1").stage, "Proposal Sent");
+  assert.equal(rows.get(rowKey("DEAL", "D-1")).stage, "Negotiating", "reading never writes");
+
+  const saved = await call("liz", "PATCH", "/deals/D-1", { amount: 61000 });
+  assert.equal(saved.status, 200, saved.body?.error);
+  assert.equal(rows.get(rowKey("DEAL", "D-1")).stage, "Proposal Sent");
+
+  const retired = await call("liz", "PATCH", "/deals/D-1", { stage: "Negotiating" });
+  assert.equal(retired.status, 400, "Negotiating can no longer be chosen");
 });

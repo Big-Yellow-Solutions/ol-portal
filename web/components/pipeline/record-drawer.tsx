@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { companyForContact, initialsOf, websiteError, websiteHref, websiteLabel } from "@/lib/pipeline";
 import { phoneError } from "@/lib/phone";
 import { usePortalData } from "@/lib/portal-data";
+import { stageLabel } from "@/lib/types";
 import type { Company, Contact } from "@/lib/types";
 
 /* Pipeline v2 (design handoff), section 5b: the company/person record drawer.
@@ -369,7 +370,7 @@ export function RecordDrawer({
                     </span>
                   </span>
                   <span className="shrink-0 rounded-full border border-hair-strong bg-violet-pale px-2.5 py-0.5 text-[11px] font-semibold text-violet-deep">
-                    {d.stage}
+                    {stageLabel(d.stage)}
                   </span>
                 </span>
               </button>

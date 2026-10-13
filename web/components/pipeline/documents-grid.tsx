@@ -23,6 +23,7 @@ import { billingOf } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
 import { cn } from "@/lib/utils";
 import type { BadgeVariant } from "@/lib/data";
+import { stageLabel } from "@/lib/types";
 import type { Deal, FileRecord } from "@/lib/types";
 
 /* Pipeline v2, fourth view: every proposal, signed contract and invoice in the
@@ -157,7 +158,7 @@ export function buildDocCards({
         : `Updated ${shortDate(p.updated)}`,
       at: p.sentAt || p.updated || "",
       amount: deal?.amount ?? 0,
-      sub: deal ? `${deal.client} · ${deal.stage}` : (p.client ?? ""),
+      sub: deal ? `${deal.client} · ${stageLabel(deal.stage)}` : (p.client ?? ""),
       versionNote:
         earlier > 0
           ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record`
@@ -207,7 +208,7 @@ export function buildDocCards({
       when: `Uploaded ${shortDate(current.date)}`,
       at: current.date || "",
       amount: deal?.amount ?? 0,
-      sub: deal ? `${deal.client} · ${deal.stage}` : "",
+      sub: deal ? `${deal.client} · ${stageLabel(deal.stage)}` : "",
       versionNote:
         earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
       action: "Open deal — view proposal",
@@ -233,7 +234,7 @@ export function buildDocCards({
         : `Updated ${shortDate(c.updated ?? c.created)}`,
       at: c.updated || c.created || "",
       amount: c.amount ?? deal?.amount ?? 0,
-      sub: deal ? `${deal.client} · ${deal.stage}` : DOC_KIND_LABEL[docKindOf(c)],
+      sub: deal ? `${deal.client} · ${stageLabel(deal.stage)}` : DOC_KIND_LABEL[docKindOf(c)],
       action: deal
         ? signed
           ? "Open deal — view contract"
@@ -279,7 +280,7 @@ export function buildDocCards({
       when: `Uploaded ${shortDate(current.date)}`,
       at: current.date || "",
       amount: deal?.amount ?? 0,
-      sub: deal ? `${deal.client} · ${deal.stage}` : "",
+      sub: deal ? `${deal.client} · ${stageLabel(deal.stage)}` : "",
       versionNote:
         earlier > 0 ? `${earlier} earlier version${earlier === 1 ? "" : "s"} on record` : undefined,
       action: "Open deal — view contract",
