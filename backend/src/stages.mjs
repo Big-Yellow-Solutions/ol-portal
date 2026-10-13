@@ -27,4 +27,15 @@ export const LEGACY_STAGE_MAP = {
   "Closed": CLOSED_WON
 };
 
+/* Deals written before the rename still carry the old names in the table.
+   Every deal read passes through this, so the rest of the code only ever sees
+   the new names, and a deal saved after being read is rewritten under its new
+   one — the table converges as deals are touched, with no migration to run
+   first. Anything that isn't a deal, or is already current, comes back as is.
+   scripts/migrate-stages.mjs does the same rewrite in bulk. */
+export const modernize = item =>
+  item?.pk === "DEAL" && Object.hasOwn(LEGACY_STAGE_MAP, item.stage)
+    ? { ...item, stage: LEGACY_STAGE_MAP[item.stage] }
+    : item;
+
 export const isSettled = stage => stage === CLOSED_WON || stage === CLOSED_LOST;
