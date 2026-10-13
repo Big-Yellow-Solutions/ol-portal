@@ -1,6 +1,7 @@
 /* OL Portal · shared data helpers for the API modules. */
 
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { modernize } from "./stages.mjs";
 import {
   DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand, QueryCommand
 } from "@aws-sdk/lib-dynamodb";
@@ -29,7 +30,7 @@ export const esc = s => String(s ?? "").replace(/[&<>"']/g, ch =>
 export const signUrl = token => `${process.env.FRONTEND_URL}/contract-sign.html?token=${token}`;
 
 export const get = async (pk, sk) =>
-  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
+  modernize((await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item);
 
 export const listType = async pk => {
   const out = [];
@@ -39,7 +40,7 @@ export const listType = async pk => {
       TableName: TABLE, KeyConditionExpression: "pk = :p",
       ExpressionAttributeValues: { ":p": pk }, ExclusiveStartKey
     }));
-    out.push(...page.Items);
+    out.push(...page.Items.map(modernize));
     ExclusiveStartKey = page.LastEvaluatedKey;
   } while (ExclusiveStartKey);
   return out;
