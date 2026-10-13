@@ -53,16 +53,16 @@ const GUIDES = [
         body: "Board is the Kanban view: one column per stage, one card per deal. Companies and People are directories of every billing entity in your pipeline, each linked deal's total value, and how many are open. Documents is every proposal, contract, invoice and Lab Leader Assignment across all your deals in one filterable, sortable list — not to be confused with a single deal's own Documents tab, covered below, which only shows that one deal's three uploads. Use the search box, and (Admins only) the Lab and Owner pickers, to narrow the Board."
       },
       {
-        heading: "The six stages",
-        body: "Lead, Discovery, Proposal & Negotiation, Contracted (Signed), Closed Won (Paid), and Closed Lost. Drag a card to a new column to move it forward or back, or change Stage inside the deal itself. Closed Lost sits apart from the rest: a deal can be marked lost from any stage, at any time, with nothing required first."
+        heading: "The seven stages",
+        body: "Lead, Discovery, Proposal Sent, Negotiating, Contracted, Closed, and Closed Lost. Drag a card to a new column to move it forward or back, or change Stage inside the deal itself. Closed Lost sits apart from the rest: a deal can be marked lost from any stage, at any time, with nothing required first."
       },
       {
-        heading: "What Proposal & Negotiation, Contracted (Signed) and Closed Won (Paid) each mean",
-        body: "Proposal & Negotiation starts once a proposal has gone out. A contract may also be sent and negotiated here — the deal doesn't leave this stage until a contract is signed. Contracted (Signed) means the contract is signed and nothing else. Closed Won (Paid) is reserved for a signed deal that's also been paid — signing and getting paid are two different moments, and payment terms vary, so the board has a column for each. A deal can sit at Contracted (Signed), invoiced and waiting on payment, for as long as it needs to before someone moves it the rest of the way to Closed Won (Paid)."
+        heading: "What Closed and Contracted each mean",
+        body: "Contracted means the contract is signed and nothing else. Closed (shown as \"Closed Won\") is reserved for a contracted deal that's also been paid — signing and getting paid are two different moments, and the board now has a column for each. A deal can sit at Contracted, invoiced and waiting on payment, for as long as it needs to before someone moves it the rest of the way to Closed."
       },
       {
         heading: "The four requirements, in the order you'll hit them",
-        body: "1) A billing entity — a linked company or person — is required from Proposal & Negotiation onward. 2) A proposal document uploaded to the deal is required from Proposal & Negotiation onward. 3) A signed contract is required from Contracted (Signed) onward. 4) An invoice uploaded to the deal is required to reach Closed Won (Paid) — there's no separate payment tracker, so an invoice on file is the portal's stand-in for \"paid.\" Each one only has to be true once you reach that stage or later; a deal already sitting past a requirement when it was added is never retroactively blocked."
+        body: "1) A billing entity — a linked company or person — is required from Proposal Sent onward. 2) A proposal document uploaded to the deal is required from Proposal Sent onward. 3) A signed contract is required from Contracted onward. 4) An invoice uploaded to the deal is required to reach Closed — there's no separate payment tracker, so an invoice on file is the portal's stand-in for \"paid.\" Each one only has to be true once you reach that stage or later; a deal already sitting past a requirement when it was added is never retroactively blocked."
       },
       {
         heading: "Meeting a requirement",
@@ -78,11 +78,11 @@ const GUIDES = [
       },
       {
         heading: "The Lab Leader Assignment form",
-        body: "Once a deal reaches Contracted (Signed), its card and its drawer flag that an Assignment is needed: who did the work, their fee split (must add to 100%), and any subcontractor or hard costs. This does not block the stage move — it's a nudge, not a gate — but finance won't release payouts without it. One named approver signs off on what's filed; the filer can revise it freely until then, and only the approver can reopen it after."
+        body: "Once a deal reaches Contracted, its card and its drawer flag that an Assignment is needed: who did the work, their fee split (must add to 100%), and any subcontractor or hard costs. This does not block the stage move — it's a nudge, not a gate — but finance won't release payouts without it. One named approver signs off on what's filed; the filer can revise it freely until then, and only the approver can reopen it after."
       },
       {
         heading: "Recurring deals",
-        body: "Check \"Recurring engagement\" on a deal and the portal generates one invoice-eligible instance every month once the deal reaches Contracted (Signed) — it keeps billing straight through Closed Won (Paid) too. Pause or resume it any time from the deal's drawer."
+        body: "Check \"Recurring engagement\" on a deal and the portal generates one invoice-eligible instance every month once the deal reaches Contracted — it keeps billing straight through Closed too. Pause or resume it any time from the deal's drawer."
       },
       {
         heading: "Adding and editing a deal",

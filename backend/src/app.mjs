@@ -8,7 +8,6 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { STAGES, PROPOSAL_NEGOTIATION, CONTRACTED, CLOSED_WON, CLOSED_LOST, modernize } from "./stages.mjs";
 import * as qbo from "./qbo.mjs";
 import * as docusign from "./docusign.mjs";
 import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
@@ -53,11 +52,20 @@ const doc = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true }
 });
 
-/* Stage names live in stages.mjs. Closed Lost skips every gate — a deal can be
-   lost from anywhere, and losing one needs no billing entity, no proposal, no
-   signed contract and no assignment. Outcome is derived from the stage rather
-   than picked separately; the two can't disagree. It is "Won" only at Closed
-   Won (Paid), not at Contracted (Signed). */
+const STAGES = ["Lead", "Discovery", "Proposal Sent", "Negotiating", "Contracted", "Closed", "Closed Lost"];
+/* Pipeline v3 splits the board's final column in two. The won stage keeps the
+   stored value "Closed": every rule and report that already reads it means
+   "won", so renaming would have churned thirty-odd call sites to say the same
+   thing. The lost stage is new, and skips every gate — a deal can be lost from
+   anywhere, and losing one needs no billing entity, no sent proposal, no
+   signed contract and no assignment. Outcome is derived from the stage now
+   rather than picked separately; the two can no longer disagree.
+   Pipeline v4 splits "Closed" again: "Contracted" is a signed contract with
+   payment still outstanding, and "Closed" now specifically means paid — see
+   CONTRACT_GATE_STAGE/INVOICE_GATE_STAGE below. Outcome is unaffected: it is
+   still only "Won" at Closed, not at Contracted. */
+const CLOSED_WON = "Closed";
+const CLOSED_LOST = "Closed Lost";
 const outcomeOf = stage => (stage === CLOSED_WON ? "Won" : stage === CLOSED_LOST ? "Lost" : null);
 // "Network" and "Event" added for Pipeline v2 (design handoff) — additive, so
 // deals sourced before this change keep reading the same three values.
@@ -67,12 +75,12 @@ const INVOICE_STATUSES = ["Admin review", "Sent to client", "Paid", "Overdue"];
 // reaches this stage. Only enforced on the transition itself — see
 // billingGateError below — so it never retroactively blocks a deal that
 // reached this stage before companies/contacts existed.
-const BILLING_GATE_STAGE = PROPOSAL_NEGOTIATION;
+const BILLING_GATE_STAGE = "Proposal Sent";
 // Pipeline v4: a signed contract is required from here on, and an uploaded
 // invoice — the portal's stand-in for "paid" — from Closed on. Both are
 // ordinal like the two gates above, so skipping straight to Closed from
 // anywhere earlier still asks for everything a deal at Closed needs.
-const CONTRACT_GATE_STAGE = CONTRACTED;
+const CONTRACT_GATE_STAGE = "Contracted";
 const INVOICE_GATE_STAGE = CLOSED_WON;
 
 const resp = (status, body) => ({
@@ -83,7 +91,7 @@ const resp = (status, body) => ({
 const today = () => new Date().toISOString().slice(0, 10);
 
 const get = async (pk, sk) =>
-  modernize((await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item);
+  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
 const listType = async pk => {
   const out = [];
   let ExclusiveStartKey;
@@ -92,7 +100,7 @@ const listType = async pk => {
       TableName: TABLE, KeyConditionExpression: "pk = :p",
       ExpressionAttributeValues: { ":p": pk }, ExclusiveStartKey
     }));
-    out.push(...page.Items.map(modernize));
+    out.push(...page.Items);
     ExclusiveStartKey = page.LastEvaluatedKey;
   } while (ExclusiveStartKey);
   return out;
@@ -234,7 +242,7 @@ async function updateDeal(ctx, id, body) {
       return resp(400, { error: `A deal at ${nextStage} needs a billing entity — link a company or a contact` });
   }
   if ("stage" in patch && patch.stage !== CLOSED_LOST &&
-      STAGES.indexOf(patch.stage) >= STAGES.indexOf(PROPOSAL_NEGOTIATION) &&
+      STAGES.indexOf(patch.stage) >= STAGES.indexOf("Proposal Sent") &&
       STAGES.indexOf(deal.stage) < STAGES.indexOf(patch.stage)) {
     // Proposals are written outside the portal and uploaded onto the deal, so
     // an uploaded proposal file is what clears this gate. The older check —

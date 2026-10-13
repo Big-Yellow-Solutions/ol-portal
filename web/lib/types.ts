@@ -1,20 +1,24 @@
 export type Role = "Admin" | "Lab Leader" | "Contributor";
 
-// Mirrors backend/src/stages.mjs exactly; the stored value is the label.
-// "Proposal & Negotiation" opens when a proposal goes out, and a contract may
-// be sent and negotiated inside it. "Contracted (Signed)" is entered only on
-// a signed contract, and "Closed Won (Paid)" only on payment — see
-// contractRequiredAt/invoiceRequiredAt in lib/pipeline.ts. `outcome` is
-// derived from the stage server-side rather than chosen separately, so the
-// two cannot disagree.
+// Mirrors backend/src/app.mjs's STAGES exactly. Pipeline v3 splits the final
+// column: "Closed" is Closed Won — its stored value is unchanged, because
+// every rule and report that reads it already means won — and "Closed Lost"
+// is its own stage. `outcome` is still on the record but is now derived from
+// the stage server-side rather than chosen separately, so the two cannot
+// disagree.
+//
+// Pipeline v4 splits "Closed" itself in two: "Contracted" is a signed
+// contract with payment still outstanding, and "Closed" now specifically
+// means paid — see contractRequiredAt/invoiceRequiredAt in lib/pipeline.ts.
 export type Stage =
   | "Lead"
   | "Discovery"
-  | "Proposal & Negotiation"
-  | "Contracted (Signed)"
-  | "Closed Won (Paid)"
+  | "Proposal Sent"
+  | "Negotiating"
+  | "Contracted"
+  | "Closed"
   | "Closed Lost";
-/** Derived from the stage server-side — "Closed Won (Paid)" is Won and
+/** Derived from the stage server-side since Pipeline v3 — "Closed" is Won and
  *  "Closed Lost" is Lost — and kept on the record because reports read it. */
 export type Outcome = "Won" | "Lost";
 // "Network" and "Event" added for Pipeline v2 (backend/src/app.mjs's SOURCES).
@@ -754,21 +758,22 @@ export interface Guide {
 export const STAGES: Stage[] = [
   "Lead",
   "Discovery",
-  "Proposal & Negotiation",
-  "Contracted (Signed)",
-  "Closed Won (Paid)",
+  "Proposal Sent",
+  "Negotiating",
+  "Contracted",
+  "Closed",
   "Closed Lost",
 ];
 
-/** What the board and the stage selects show. Each stage's stored value is its
- *  label now, so this is the identity map — kept so callers have one place to
- *  ask, and one place to diverge if a label ever needs to differ again. */
+/** What the board and the stage selects call "Closed" — the stored value stays
+ *  "Closed" so nothing downstream has to be migrated to keep meaning won. */
 export const STAGE_LABELS: Record<Stage, string> = {
   Lead: "Lead",
   Discovery: "Discovery",
-  "Proposal & Negotiation": "Proposal & Negotiation",
-  "Contracted (Signed)": "Contracted (Signed)",
-  "Closed Won (Paid)": "Closed Won (Paid)",
+  "Proposal Sent": "Proposal Sent",
+  Negotiating: "Negotiating",
+  Contracted: "Contracted",
+  Closed: "Closed Won",
   "Closed Lost": "Closed Lost",
 };
 

@@ -16,7 +16,7 @@ import type { Company, Contact, Stage } from "@/lib/types";
 /* Pipeline v2 (design handoff): the "Billing entity" panel inside the deal
    drawer. A deal can carry a company, a contact ("Person" in the design's own
    copy — kept here since it's user-facing text), both, or neither below the
-   gate stage (lib/pipeline.ts's BILLING_GATE_STAGE, "Proposal & Negotiation"). */
+   gate stage (lib/pipeline.ts's BILLING_GATE_STAGE, "Proposal Sent"). */
 export function BillingEntityPanel({
   stage,
   companyId,

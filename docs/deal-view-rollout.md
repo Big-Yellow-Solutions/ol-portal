@@ -230,7 +230,7 @@ past features in this repo). Everything below needs a real login.
       always empty for them.
 
 **Regression (all roles)**
-- [ ] Pipeline drag-and-drop restaging still works; dropping on "Closed Won (Paid)"
+- [ ] Pipeline drag-and-drop restaging still works; dropping on "Closed"
       still opens the Assignment Notice dialog, not the Deal View.
 - [ ] "+ New deal" still opens the plain create dialog.
 - [ ] Deleting a deal from the edit dialog does **not** try to reopen the
