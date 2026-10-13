@@ -1,14 +1,15 @@
-/* The planning half of the backfill importer: CSV rows in, the exact records
-   to write out. No AWS here — scripts/import-backfill.mjs reads the table,
-   hands what it found to plan(), and writes what plan() decides. That split is
-   what lets tests/backfill.test.mjs run the whole decision against fixtures.
+/* The planning half of the backfill import: CSV rows in, the exact records
+   to write out. No AWS here — src/backfill-api.mjs (the Admin page's endpoint)
+   reads the table, hands what it found to plan(), and writes what plan()
+   decides. That split is what lets tests/backfill.test.mjs run the whole
+   decision against fixtures.
 
    Record shapes mirror createCompany, createContact and createDeal in
    src/contacts.mjs and src/app.mjs, and the validation mirrors theirs, so an
    imported record is indistinguishable from one made in the portal. The
    difference is deliberate: nothing here goes through the stage gates. A deal
    imported as Closed with no invoice file is the point of a backfill, not a
-   bug — the same stance import-hubspot-companies.mjs takes.
+   bug — the same stance scripts/import-hubspot-companies.mjs takes.
 
    Stage names. The portal stores Proposal Sent, Contracted and Closed and
    shows them as Proposal & Negotiation, Contracted (Signed) and Closed Won

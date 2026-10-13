@@ -1,20 +1,14 @@
 # Backfilling companies, contacts and deals
 
-`backend/scripts/import-backfill.mjs` loads three CSVs (blank templates in
-`docs/backfill-templates/`) in one run, so contacts find their company and deals
-find both. Don't commit filled-in CSVs — they hold real client details.
+Admins: **Admin → Import data**. Upload the three CSVs (blank templates in
+`docs/backfill-templates/`), press **Check files**, read the preview and any
+errors, then **Import**. Checking writes nothing, and one bad row stops the
+whole import. Don't commit filled-in CSVs — they hold real client details.
 
-```
-cd backend && npm ci
-AWS_REGION=us-east-1 node scripts/import-backfill.mjs \
-  --companies companies.csv --contacts contacts.csv --deals deals.csv \
-  --as <an Admin's email>                 # dry run: prints the plan, writes nothing
-... same command plus --confirm            # writes
-```
-
-Any of the three files can be left out. `--as` must be an existing Admin; the
-records are created under that person (visible to Admins until a Lab Leader's
-deal points at them — see `labScope` in `src/contacts.mjs`).
+Any of the three files can be left out. Records are created under the Admin who
+imports them (visible to Admins until a Lab Leader's deal points at them — see
+`labScope` in `src/contacts.mjs`). The endpoint is `POST /admin/backfill`
+(`src/backfill-api.mjs`); the matching and validation are in `src/backfill.mjs`.
 
 ## Columns
 
@@ -44,11 +38,13 @@ deal points at them — see `labScope` in `src/contacts.mjs`).
 
 ## What it does and doesn't do
 
-- Dry run by default. `--confirm` writes nothing if any row has an error.
 - Re-runs skip what exists (companies by name, contacts by company + email,
-  deals by client + lab) and never overwrite.
+  deals by client + lab) and never overwrite; every write is conditional on the
+  key not existing.
 - Deals skip the stage gates on purpose: a Closed deal needs no invoice file.
   Upload documents to the deals afterwards.
 - Nothing sends email or starts billing. `recurring` is off unless a row says
   `yes`; a recurring deal at Contracted or later makes the daily recurring
-  engine generate monthly invoice instances, and the importer warns about it.
+  engine generate monthly invoice instances, and the page warns about it.
+- If an import stops partway (two people creating records at the same moment),
+  it says how many records it wrote. Run it again: what was written is skipped.

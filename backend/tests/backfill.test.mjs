@@ -6,7 +6,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseCsv, parseDate, plan, normName } from "../scripts/backfill-lib.mjs";
+import { parseCsv, parseDate, plan, normName } from "../src/backfill.mjs";
 
 const CTX = { actor: "admin@example.com", today: "2026-10-13" };
 
