@@ -424,37 +424,3 @@ test("moving a deal back out of a closed stage drops the outcome with it", async
   assert.equal(res.status, 200, res.body?.error);
   assert.equal(res.body.outcome, undefined);
 });
-
-/* ---------- deals still stored under the pre-rename stage names ---------- */
-
-test("deals stored under the old stage names read back under the new ones", async () => {
-  deal("D-1", { stage: "Proposal Sent", outcome: undefined });
-  deal("D-2", { stage: "Negotiating", outcome: undefined });
-  deal("D-3", { stage: "Contracted", outcome: undefined });
-  deal("D-4", { stage: "Closed" });
-
-  const list = await call("liz", "GET", "/deals");
-  assert.equal(list.status, 200);
-  const stageOf = Object.fromEntries(list.body.map(d => [d.id, d.stage]));
-  assert.deepEqual(stageOf, {
-    "D-1": "Proposal & Negotiation",
-    "D-2": "Proposal & Negotiation",
-    "D-3": "Contracted (Signed)",
-    "D-4": "Closed Won (Paid)"
-  });
-  assert.equal(rows.get(rowKey("DEAL", "D-4")).stage, "Closed", "reading never writes");
-});
-
-test("an old-named deal still behaves like its new stage, and is rewritten when saved", async () => {
-  // Stored as the old "Contracted": the assignment form must be open to it.
-  deal("D-1", { stage: "Contracted", outcome: undefined });
-  const filed = await call("marcus", "POST", "/deals/D-1/assignment", FORM);
-  assert.equal(filed.status, 200, filed.body?.error);
-
-  // An old "Closed" deal is already won, so a stage move past it is not gated again.
-  deal("D-2", { stage: "Closed" });
-  const saved = await call("liz", "PATCH", "/deals/D-2", { amount: 61000 });
-  assert.equal(saved.status, 200, saved.body?.error);
-  assert.equal(saved.body.stage, "Closed Won (Paid)");
-  assert.equal(rows.get(rowKey("DEAL", "D-2")).stage, "Closed Won (Paid)", "the save converges the stored value");
-});

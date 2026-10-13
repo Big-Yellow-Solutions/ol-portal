@@ -8,7 +8,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { STAGES, PROPOSAL_NEGOTIATION, CONTRACTED, CLOSED_WON, CLOSED_LOST, modernize } from "./stages.mjs";
+import { STAGES, PROPOSAL_NEGOTIATION, CONTRACTED, CLOSED_WON, CLOSED_LOST } from "./stages.mjs";
 import * as qbo from "./qbo.mjs";
 import * as docusign from "./docusign.mjs";
 import { webhook as docusignWebhook } from "./docusign-webhook.mjs";
@@ -83,7 +83,7 @@ const resp = (status, body) => ({
 const today = () => new Date().toISOString().slice(0, 10);
 
 const get = async (pk, sk) =>
-  modernize((await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item);
+  (await doc.send(new GetCommand({ TableName: TABLE, Key: { pk, sk } }))).Item;
 const listType = async pk => {
   const out = [];
   let ExclusiveStartKey;
@@ -92,7 +92,7 @@ const listType = async pk => {
       TableName: TABLE, KeyConditionExpression: "pk = :p",
       ExpressionAttributeValues: { ":p": pk }, ExclusiveStartKey
     }));
-    out.push(...page.Items.map(modernize));
+    out.push(...page.Items);
     ExclusiveStartKey = page.LastEvaluatedKey;
   } while (ExclusiveStartKey);
   return out;
