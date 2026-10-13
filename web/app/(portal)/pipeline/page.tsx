@@ -452,12 +452,19 @@ function PipelineBoard() {
                 }}
                 className={cn("min-w-[240px] flex-1 rounded-2xl p-1.5 transition-colors", isDropTarget && "bg-violet-pale ring-2 ring-violet-light/60")}
               >
-                <div className="flex items-center gap-2 px-1 pb-3">
-                  <h3 className="text-[15px] font-bold tracking-[-0.01em] whitespace-nowrap text-ink">{stageLabel}</h3>
-                  <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">{stageDeals.length}</span>
-                  <span className="flex-1" />
-                  {SHOW_COLUMN_TOTALS && stageDeals.length > 0 && (
-                    <span className="truncate text-xs text-warm-gray">{fmtDollars(total)}</span>
+                {/* The dollar total is the number people scan for, so it gets its own
+                    line and is never truncated; the title and the count share the
+                    first. The line is reserved on empty columns so the cards below
+                    start at the same height across the board. */}
+                <div className="flex flex-col gap-0.5 px-1 pb-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-[15px] font-bold tracking-[-0.01em] whitespace-nowrap text-ink">{stageLabel}</h3>
+                    <span className="rounded-full bg-violet-pale px-2 py-0.5 text-xs font-semibold tabular-nums text-violet-deep">{stageDeals.length}</span>
+                  </div>
+                  {SHOW_COLUMN_TOTALS && (
+                    <span className="min-h-5 text-sm font-semibold tabular-nums text-ink">
+                      {stageDeals.length > 0 ? fmtDollars(total) : ""}
+                    </span>
                   )}
                 </div>
 
