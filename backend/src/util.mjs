@@ -31,6 +31,14 @@ export const signUrl = token => `${process.env.FRONTEND_URL}/contract-sign.html?
 /* "Negotiating" is retired: the board has one Proposal & Negotiation column,
    stored as "Proposal Sent". Deals saved as Negotiating before that read back
    as Proposal Sent, and are rewritten that way the next time they are saved. */
+/* Insights needs to know when a deal entered each stage, which the deal never
+   recorded — only `updated`, which any edit moves. This stamps the date a deal
+   enters a stage, from the moment it ships on; deals saved before it simply
+   have no history and Insights falls back to their last update. Re-entering a
+   stage overwrites its date, since "days waiting" is about the current stay. */
+export const enterStage = (deal, stage, date = today()) =>
+  ({ ...(deal.stageDates || {}), [stage]: date });
+
 export const foldStage = item =>
   item?.pk === "DEAL" && item.stage === "Negotiating" ? { ...item, stage: "Proposal Sent" } : item;
 

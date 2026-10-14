@@ -14,6 +14,9 @@ export const can = {
   deleteDeal: (role: Role) => role === "Admin",
   changeLab: (role: Role) => role === "Admin",
   reviewInvoices: (role: Role) => role === "Admin",
+  // Insights shows every lab's payouts and OL's share. Admin only for now; a
+  // Lab Leader view is planned as its own scoped page.
+  viewInsights: (role: Role) => role === "Admin",
   editProposal: (
     proposal: Proposal,
     role: Role,

@@ -30,7 +30,8 @@ import * as community from "./community.mjs";
 import * as notifications from "./notifications.mjs";
 import * as messages from "./messages.mjs";
 import * as verify from "./verify.mjs";
-import { fullName, foldStage } from "./util.mjs";
+import { fullName, foldStage, enterStage } from "./util.mjs";
+import * as insights from "./insights.mjs";
 import { identityFromClaims, buildContext } from "./identity.mjs";
 
 const TABLE = process.env.TABLE_NAME;
@@ -196,7 +197,7 @@ async function createDeal(ctx, body) {
   const deal = {
     pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
     stage, amount, close, source, recurring: !!recurring, companyId, contactId,
-    created: stamp, updated: stamp,
+    created: stamp, updated: stamp, stageDates: enterStage({}, stage, stamp),
     ...(outcomeOf(stage) ? { outcome: outcomeOf(stage) } : {})
   };
   await put(deal);
@@ -291,6 +292,7 @@ async function updateDeal(ctx, id, body) {
   }
 
   const next = { ...deal, ...patch, updated: today() };
+  if (next.stage !== deal.stage) next.stageDates = enterStage(deal, next.stage);
   const outcome = outcomeOf(next.stage);
   if (outcome) next.outcome = outcome; else delete next.outcome;
   await put(next);
@@ -606,6 +608,10 @@ async function route(ctx, method, path, seg, body) {
     return await admin.offboardUser(ctx, seg[2]);
   if (method === "POST" && seg[0] === "admin" && seg[1] === "users" && seg[3] === "restore")
     return await admin.restoreUser(ctx, seg[2]);
+  // Insights is Admin-only; each handler re-checks the effective role itself.
+  if (method === "GET" && path === "/insights") return await insights.getInsights(ctx);
+  if (method === "PATCH" && path === "/insights/weights") return await insights.saveWeights(ctx, body);
+  if (method === "POST" && path === "/insights/exports") return await insights.logExport(ctx, body);
   if (method === "GET" && path === "/admin/audit") return await admin.listAudit(ctx);
   if (method === "POST" && path === "/admin/backfill") return await backfill.importBackfill(ctx, body);
   if (method === "POST" && path === "/admin/act-as") return await admin.startActingAs(ctx, body);
