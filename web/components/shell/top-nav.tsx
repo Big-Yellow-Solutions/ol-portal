@@ -44,6 +44,7 @@ const PRIMARY: NavItem[] = [
   { href: "/", label: "Community", also: ["/community"] },
   { href: "/pipeline", label: "Pipeline" },
   { href: "/resources", label: "Resources" },
+  { href: "/insights", label: "Insights", roles: ["Admin"] },
 ];
 
 function visible(items: NavItem[], role: Role | null) {

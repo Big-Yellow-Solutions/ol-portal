@@ -15,7 +15,7 @@
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
-import { get, put, fullName, esc, signUrl, docKind, docMeta } from "./util.mjs";
+import { get, put, fullName, esc, signUrl, docKind, docMeta, enterStage } from "./util.mjs";
 import { writeAudit, inviteContributor } from "./admin.mjs";
 import { sendClientEmail } from "./email.mjs";
 import { pricingTotal, formatMoney } from "./pricing.mjs";
@@ -64,7 +64,8 @@ export async function rollUpDeal(c) {
     contractSigned: true,
     contractSignedAt: c.executedAt,
     contract: c.sk,
-    stage: settled ? deal.stage : "Contracted"
+    stage: settled ? deal.stage : "Contracted",
+    ...(settled || deal.stage === "Contracted" ? {} : { stageDates: enterStage(deal, "Contracted") })
   });
 }
 
