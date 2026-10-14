@@ -1,16 +1,22 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { can } from "@/lib/can";
 import { usePortalData } from "@/lib/portal-data";
-import { InsightsView, NoAccess } from "@/components/insights/insights-view";
+import { InsightsView } from "@/components/insights/insights-view";
 
-/* Admin-only. The role check here decides what to *draw*; the data itself is
-   guarded by the API (backend/src/insights.mjs), which answers 403 to anyone
-   else, so a Lab Leader who types /insights gets this screen and nothing more.
-   InsightsView is not mounted for them, so it never even asks. */
+/* Admin-only, and invisible to everyone else: the nav link is Admin-only, and
+   anyone else who reaches this URL is sent home without seeing a page or
+   making a request. That redirect is a courtesy; the control is the API
+   (backend/src/insights.mjs), which answers 403 to anyone but an Admin. */
 export default function InsightsPage() {
   const { role } = usePortalData();
-  if (role === null) return <p className="text-sm text-ink-mute">Loading…</p>;
-  if (!can.viewInsights(role)) return <NoAccess />;
+  const router = useRouter();
+  const allowed = role !== null && can.viewInsights(role);
+  useEffect(() => {
+    if (role !== null && !allowed) router.replace("/");
+  }, [role, allowed, router]);
+  if (!allowed) return null;
   return <InsightsView />;
 }

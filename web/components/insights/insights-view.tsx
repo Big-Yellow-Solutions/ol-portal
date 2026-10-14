@@ -48,9 +48,13 @@ export function InsightsView() {
         const def = defaultFilters(d.today);
         setFilters(filtersFromHash(window.location.hash, def, d.labs.map((l) => l.id)));
       })
-      .catch((e) => live && setError(e instanceof ApiError && e.status === 403 ? "forbidden" : "Couldn't load Insights. Try again in a moment."));
+      .catch((e) => {
+        if (!live) return;
+        if (e instanceof ApiError && e.status === 403) { router.replace("/"); setError("forbidden"); }
+        else setError("Couldn't load Insights. Try again in a moment.");
+      });
     return () => { live = false; };
-  }, []);
+  }, [router]);
 
   const def = useMemo(() => (data ? defaultFilters(data.today) : null), [data]);
 
@@ -127,7 +131,7 @@ export function InsightsView() {
     toast(`Exported ${rows} ${kind === "deals" ? "deals" : "labs"}. Logged as ${who}, ${time}.`);
   };
 
-  if (error === "forbidden") return <NoAccess />;
+  if (error === "forbidden") return null; // the page is already redirecting non-Admins
   if (error) return <p className="text-sm text-[#8A3B12]">{error}</p>;
 
   const isLabView = !!filters && filters.labs.length === 1;
@@ -208,24 +212,6 @@ export function InsightsView() {
           <DealsTable rows={view.unpaid} labName={labName} onOpen={(id) => router.push(`/pipeline?deal=${encodeURIComponent(id)}`)} onExport={exportDeals} />
         </>
       )}
-    </div>
-  );
-}
-
-export function NoAccess() {
-  const router = useRouter();
-  return (
-    <div className="mx-auto my-24 max-w-[560px]">
-      <h1 className="mb-4 font-serif text-4xl font-normal text-ink italic">Insights is for Admins</h1>
-      <p className="mb-6 text-[17px] leading-[1.6] text-ink-soft">
-        This page shows payouts and OL&rsquo;s share for every lab, so it&rsquo;s limited to Admins for now. Ask an Admin if you need numbers for your lab.
-      </p>
-      <button
-        type="button" onClick={() => router.push("/")}
-        className="rounded-full bg-violet-deep px-5 py-[11px] text-sm font-semibold text-white"
-      >
-        Back to the Portal
-      </button>
     </div>
   );
 }
