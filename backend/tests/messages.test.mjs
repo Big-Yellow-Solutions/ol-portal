@@ -27,7 +27,8 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 
 const { doc } = await import("../src/util.mjs");
 const {
-  listConversations, createConversation, sendMessage, renameConversation, conversationId, mailer
+  listConversations, createConversation, sendMessage, renameConversation, markConversationRead,
+  conversationId, mailer
 } = await import("../src/messages.mjs");
 
 /* The outbox, in memory. Nothing here reaches SES. */
@@ -254,4 +255,27 @@ test("a person with no address gets the bell and no email; a failed send is not 
   } finally {
     mailer.send = real;
   }
+});
+
+test("a read mark is per person, only moves forward, and members only", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  const sent = body(await sendMessage(TEDDY, id, { text: "hey @Liz" }));
+
+  assert.equal(body(await listConversations(LIZ)).items[0].readAt, undefined);
+
+  const read = await markConversationRead(LIZ, id, { through: sent.created });
+  assert.equal(read.statusCode, 200);
+  assert.equal(body(await listConversations(LIZ)).items[0].readAt, sent.created);
+  /* Liz reading it does not read it for Teddy. */
+  assert.equal(body(await listConversations(TEDDY)).items[0].readAt, undefined);
+
+  /* An older mark does not rewind; a future one is clamped to now. */
+  await markConversationRead(LIZ, id, { through: "2000-01-01T00:00:00.000Z" });
+  assert.equal(body(await listConversations(LIZ)).items[0].readAt, sent.created);
+  await markConversationRead(LIZ, id, { through: "2999-01-01T00:00:00.000Z" });
+  assert.ok(body(await listConversations(LIZ)).items[0].readAt <= new Date().toISOString());
+
+  assert.equal((await markConversationRead(CASS, id, { through: sent.created })).statusCode, 403);
+  assert.equal((await markConversationRead(LIZ, id, { through: "nope" })).statusCode, 400);
 });
