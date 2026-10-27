@@ -50,6 +50,8 @@ export interface ChatMsg {
   from: string;
   text: string;
   time: string;
+  /* ISO of when it was written; what a read mark is compared against. */
+  created: string;
   /* Written here and not yet acknowledged by the server. */
   pending?: boolean;
 }
@@ -63,6 +65,8 @@ export interface Conversation {
   msgs: ChatMsg[];
   /* ISO of the last activity; what the list sorts by. */
   updated: string;
+  /* ISO of the newest message the signed-in person has read, if any. */
+  readAt?: string;
   /* Opened here and not yet acknowledged by the server. */
   pending?: boolean;
 }
@@ -90,6 +94,7 @@ interface ServerConvo {
   members: string[];
   name?: string;
   updated: string;
+  readAt?: string;
   msgs: ServerMsg[];
 }
 
@@ -164,6 +169,18 @@ function convoTime(updated: string, now: Date): string {
 const POLL_OPEN_MS = 5_000;
 const POLL_CLOSED_MS = 45_000;
 
+/* Whether a message is an @mention of you that you have not yet read. Your
+   own messages and ones still in flight never count. */
+export function isUnreadMention(
+  m: ChatMsg,
+  readAt: string | undefined,
+  mentionsMe: boolean
+): boolean {
+  return (
+    mentionsMe && m.from !== ME && !m.pending && (!readAt || m.created > readAt)
+  );
+}
+
 const PENDING = "pending:";
 const pendingKey = (ids: string[]) => PENDING + [...ids].sort().join("|");
 
@@ -212,6 +229,9 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
   const [pendingMsgs, setPendingMsgs] = useState<
     Record<string, { id: string; text: string; created: string }[]>
   >({});
+  /* Read marks this session has written and the server has not yet echoed
+     back; the later of this and the server's is what counts. */
+  const [readMarks, setReadMarks] = useState<Record<string, string>>({});
   const [loadedAt, setLoadedAt] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -358,6 +378,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       from: m.from === me ? ME : m.from,
       text: m.text,
       time: messageTime(new Date(m.created)),
+      created: m.created,
     });
     const unsent = (key: string): ChatMsg[] =>
       (pendingMsgs[key] ?? []).map((m) => ({
@@ -365,6 +386,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
         from: ME,
         text: m.text,
         time: messageTime(new Date(m.created)),
+        created: m.created,
         pending: true,
       }));
 
@@ -373,7 +395,9 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       const updated = extra.length
         ? pendingMsgs[c.id][pendingMsgs[c.id].length - 1].created
         : c.updated;
+      const local = readMarks[c.id];
       out[c.id] = {
+        readAt: local && (!c.readAt || local > c.readAt) ? local : c.readAt,
         id: c.id,
         members: c.members.filter((k) => k !== me),
         name: c.name || undefined,
@@ -398,7 +422,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       };
     }
     return out;
-  }, [server, pendingConvos, pendingMsgs, me, loadedAt]);
+  }, [server, pendingConvos, pendingMsgs, readMarks, me, loadedAt]);
 
   /* Never list a conversation whose members cannot be named: a row of
      "Someone" is worse than no row. The roster carries offboarded people, so
@@ -422,6 +446,37 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       setActiveId(null);
     }
   }, [mode, activeId, loading, convos]);
+
+  /* Looking at a thread reads it. Marks through the newest incoming message
+     on screen, not through "now", so a message that lands between the last
+     poll and this call is still unread. Optimistic: the badge clears at once
+     and the server's echo on the next poll agrees. */
+  const openThread = mode === "thread" && active && !active.pending ? active : null;
+  const newestIn = openThread?.msgs
+    .filter((m) => m.from !== ME && !m.pending)
+    .reduce<string | undefined>(
+      (best, m) => (!best || m.created > best ? m.created : best),
+      undefined
+    );
+  const openThreadId = openThread?.id;
+  const openReadAt = openThread?.readAt;
+  useEffect(() => {
+    if (!openThreadId || !newestIn) return;
+    if (openReadAt && openReadAt >= newestIn) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setReadMarks((prev) => ({ ...prev, [openThreadId]: newestIn }));
+    void api(`/messages/${encodeURIComponent(openThreadId)}/read`, {
+      method: "POST",
+      body: JSON.stringify({ through: newestIn }),
+    }).catch(() => {
+      /* Best-effort: the badge stays until the next open tries again. */
+      setReadMarks((prev) => {
+        const next = { ...prev };
+        delete next[openThreadId];
+        return next;
+      });
+    });
+  }, [openThreadId, newestIn, openReadAt]);
 
   /* ---------- navigation ---------- */
 

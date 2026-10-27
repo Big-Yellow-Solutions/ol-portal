@@ -24,6 +24,9 @@
                   from      PERSON key, from the JWT and never from the body.
                   text      the words.
                   created   ISO.
+     MSGREAD    pk "MSGREAD#<person key>", sk "<conversation id>". How far
+                that person has read the thread: readThrough, the created
+                time of the newest message they had seen.
 
    Who can read a conversation is decided here: you must be a member. There
    is no route that reads someone else's thread, and a member list is
@@ -87,6 +90,7 @@ export const conversationId = members =>
     .digest("hex")
     .slice(0, 24);
 const msgPartition = id => `MSG#${id}`;
+const readPartition = key => `MSGREAD#${key}`;
 
 const isMember = (convo, key) => Array.isArray(convo?.members) && convo.members.includes(key);
 
@@ -121,14 +125,43 @@ async function threadOf(id) {
 
 /* Every conversation you are in, with its thread, newest activity first.
    One round trip for the whole panel: the list, the previews and every
-   thread the reader might open. */
+   thread the reader might open. Each carries `readAt`, how far you have read
+   it, which is what lets the list tell a new @mention from an old one. */
 export async function listConversations(ctx) {
   const mine = (await listType("CONVO")).filter(c => isMember(c, ctx.me.sk));
   mine.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
-  const items = await Promise.all(mine.map(async c => publicConvo(c, await threadOf(c.sk))));
+  const marks = Object.fromEntries(
+    (await listType(readPartition(ctx.me.sk))).map(r => [r.sk, r.readThrough]));
+  const items = await Promise.all(mine.map(async c => ({
+    ...publicConvo(c, await threadOf(c.sk)),
+    readAt: marks[c.sk]
+  })));
   log("messages.listed", { actor: ctx.me.sk, conversations: items.length });
   metric("ConversationsListed");
   return resp(200, { items });
+}
+
+/* Record that you have read a thread up to `through` (the created time of the
+   newest message the reader had on screen). A row of your own per
+   conversation rather than a field on the CONVO row: sendMessage rewrites
+   that row whole, and a read landing beside a send would be lost. Only ever
+   moves forward, and never past now, so a client cannot mark messages it has
+   not been shown as read. */
+export async function markConversationRead(ctx, id, body) {
+  const convo = await get("CONVO", id);
+  if (!convo) return resp(404, { error: "conversation not found" });
+  if (!isMember(convo, ctx.me.sk)) return resp(403, { error: "You are not in this conversation" });
+
+  const at = Date.parse(body?.through);
+  if (Number.isNaN(at)) return resp(400, { error: "through must be an ISO time" });
+  const through = new Date(Math.min(at, Date.now())).toISOString();
+
+  const pk = readPartition(ctx.me.sk);
+  const prior = await get(pk, id);
+  if (prior && String(prior.readThrough) >= through)
+    return resp(200, { readAt: prior.readThrough });
+  await put({ pk, sk: id, readThrough: through });
+  return resp(200, { readAt: through });
 }
 
 /* Open a conversation with these people. Idempotent: the id is derived from

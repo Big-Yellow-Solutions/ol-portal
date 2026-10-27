@@ -1,6 +1,11 @@
 "use client";
 
-import { ME, useMessages, type Conversation } from "@/lib/messages";
+import {
+  ME,
+  isUnreadMention,
+  useMessages,
+  type Conversation,
+} from "@/lib/messages";
 import { cn } from "@/lib/utils";
 
 /* List mode: every conversation, most-said-in first. A group wears a squared
@@ -52,9 +57,10 @@ export function ConversationList() {
           title={title(convo)}
           preview={preview(convo, person)}
           /* Only an incoming message is a notification — your own @ of
-             someone else must not badge your own conversation. */
-          mentionsMe={convo.msgs.some(
-            (m) => m.from !== ME && mentionIds(m.text).includes(ME)
+             someone else must not badge your own conversation — and only
+             until you have read past it. */
+          mentionsMe={convo.msgs.some((m) =>
+            isUnreadMention(m, convo.readAt, mentionIds(m.text).includes(ME))
           )}
           initials={
             convo.members.length > 1
