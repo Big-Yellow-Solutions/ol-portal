@@ -64,6 +64,7 @@ interface NotificationsValue {
   refresh: () => Promise<void>;
   markAllRead: () => Promise<void>;
   markOneRead: (id: string) => Promise<void>;
+  markThreadRead: (conversationId: string) => Promise<void>;
   countFor: (tab: NotificationTab | "all") => number;
 }
 
@@ -172,6 +173,34 @@ export function NotificationsProvider({
     [items, refresh]
   );
 
+  /* Looking at a conversation is reading it, however it was reached — the
+     bell, the list, a bench card. Without this only a click on the
+     notification row itself cleared it, so a message opened any other way
+     stayed unread forever. */
+  const markThreadRead = useCallback(
+    async (conversationId: string) => {
+      const suffix = `#messages/${conversationId}`;
+      const ids = items
+        .filter((n) => !n.read && n.href?.endsWith(suffix))
+        .map((n) => n.id);
+      if (ids.length === 0) return;
+      generation.current++;
+      const gone = new Set(ids);
+      setItems((xs) => xs.map((n) => (gone.has(n.id) ? { ...n, read: true } : n)));
+      setUnread((n) => Math.max(0, n - ids.length));
+      try {
+        const out = await api<{ unread: number }>("/notifications/read", {
+          method: "POST",
+          body: JSON.stringify({ ids }),
+        });
+        setUnread(out.unread ?? 0);
+      } catch {
+        await refresh();
+      }
+    },
+    [items, refresh]
+  );
+
   /* Tab chips show UNREAD, not totals: a total tells you nothing you did not
      already know, and the chip is meant to disappear once a tab is clear. */
   const countFor = useCallback(
@@ -190,9 +219,21 @@ export function NotificationsProvider({
       refresh,
       markAllRead,
       markOneRead,
+      markThreadRead,
       countFor,
     }),
-    [items, unread, loadedAt, loading, error, refresh, markAllRead, markOneRead, countFor]
+    [
+      items,
+      unread,
+      loadedAt,
+      loading,
+      error,
+      refresh,
+      markAllRead,
+      markOneRead,
+      markThreadRead,
+      countFor,
+    ]
   );
 
   return (

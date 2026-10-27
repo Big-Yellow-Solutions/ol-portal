@@ -19,6 +19,7 @@ import { ConversationList } from "@/components/messages/list";
 import { NewChat } from "@/components/messages/new-chat";
 import { Thread } from "@/components/messages/thread";
 import { useMessages } from "@/lib/messages";
+import { useNotifications } from "@/lib/notifications";
 import { cn } from "@/lib/utils";
 
 /* The Messages slide-over. Mounted once by the shell, so the top nav, the
@@ -36,7 +37,15 @@ const CIRCLE =
 export function MessagesPanel() {
   const { mode, active, error, close, openList, openConversation } =
     useMessages();
+  const { markThreadRead } = useNotifications();
   const pathname = usePathname();
+
+  /* An open thread is a read thread. Re-runs as notifications arrive, so a
+     reply landing while the panel is open does not sit there unread. */
+  const openId = mode === "thread" && active && !active.pending ? active.id : null;
+  useEffect(() => {
+    if (openId) void markThreadRead(openId);
+  }, [openId, markThreadRead]);
 
   /* Every portal screen links to messaging as `#messages`, including screens
      that are not this one — so honour the hash on arrival and on any later
