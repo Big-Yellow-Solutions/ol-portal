@@ -242,6 +242,9 @@ export interface Assignment {
   hardCosts: number;
   subcontractorCosts: number;
   leaders: AssignmentLeader[];
+  /** Admin-only override: founders draw distributions rather than per-deal
+   *  payouts, so after hard and contractor costs everything goes to OL. */
+  founderRun?: boolean;
   notes?: string;
   /** Server-computed. */
   softReserve: number;
@@ -316,6 +319,8 @@ export interface Deal {
   source: Source;
   recurring: boolean;
   outcome?: Outcome;
+  /** Why the deal was lost; required on the move into Closed Lost. */
+  lostReason?: string;
   assignment?: Assignment;
   /** @deprecated superseded by `assignment`; read only to seed the new form. */
   assignmentNotice?: LegacyAssignmentNotice;

@@ -412,7 +412,7 @@ test("jumping straight from Negotiating to Closed still needs the contract and t
 test("a lost deal is gated on nothing — no billing entity, no proposal, no contract", async () => {
   deal("D-1", { stage: "Lead", outcome: undefined, companyId: null, contactId: null, contractSigned: false });
 
-  const res = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed Lost" });
+  const res = await call("liz", "PATCH", "/deals/D-1", { stage: "Closed Lost", lostReason: "Went with another vendor" });
   assert.equal(res.status, 200, res.body?.error);
   assert.equal(res.body.stage, "Closed Lost");
   assert.equal(res.body.outcome, "Lost");
@@ -439,4 +439,82 @@ test("a deal stored as Negotiating reads back as Proposal Sent, and saves that w
 
   const retired = await call("liz", "PATCH", "/deals/D-1", { stage: "Negotiating" });
   assert.equal(retired.status, 400, "Negotiating can no longer be chosen");
+});
+
+/* ---------- founder-run override ---------- */
+
+test("founder-run: hard and contractor costs come off, everything else is OL's — no reserve, no pool", () => {
+  const m = assignmentMath({ contractValue: 60000, hardCosts: 4000, subcontractorCosts: 6000, leaders: [], founderRun: true });
+  assert.equal(m.softReserve, 0);
+  assert.equal(m.pool, 0);
+  assert.equal(m.ol, 50000);                  // 60,000 − 4,000 − 6,000
+  assert.deepEqual(m.payouts, []);
+});
+
+test("a founder-run filing needs no leaders, and drops any that were sent", () => {
+  const ok = cleanAssignment({ ...FORM, founderRun: true, leaders: [] });
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.value.founderRun, true);
+  assert.deepEqual(cleanAssignment({ ...FORM, founderRun: true }).value.leaders, []);
+  assert.equal(cleanAssignment(FORM).value.founderRun, false);
+});
+
+test("founder-run is admin-only, to set and to undo", async () => {
+  deal("D-F", { stage: "Contracted" });
+  const asLeader = await call("marcus", "POST", "/deals/D-F/assignment", { ...FORM, founderRun: true });
+  assert.equal(asLeader.status, 403);
+
+  const asAdmin = await call("seth", "POST", "/deals/D-F/assignment", { ...FORM, founderRun: true, leaders: [] });
+  assert.equal(asAdmin.status, 200);
+  assert.equal(asAdmin.body.assignment.founderRun, true);
+  assert.equal(asAdmin.body.assignment.pool, 0);
+  assert.equal(asAdmin.body.assignment.ol, 50000);
+
+  // The owner cannot revise it back into a leader split behind the admin.
+  const undo = await call("marcus", "POST", "/deals/D-F/assignment", FORM);
+  assert.equal(undo.status, 403);
+});
+
+test("Insights counts a founder-run deal's remainder as OL share with nothing unallocated", async () => {
+  deal("D-G", { stage: "Contracted" });
+  await call("seth", "POST", "/deals/D-G/assignment", { ...FORM, founderRun: true, leaders: [] });
+  const res = await call("liz", "GET", "/insights");
+  const f = res.body.deals.find(d => d.id === "D-G").finance;
+  assert.equal(f.founderRun, true);
+  assert.equal(f.ol, 50000);
+  assert.equal(f.payout, 0);
+  assert.equal(f.soft, 0);
+  assert.equal(f.reconciles, true);
+});
+
+/* ---------- lost reason ---------- */
+
+test("closing a deal as lost needs a reason, whether moved or created", async () => {
+  deal("D-L", { stage: "Discovery", outcome: undefined, companyId: null });
+  for (const lostReason of [undefined, "", "   "]) {
+    const res = await call("liz", "PATCH", "/deals/D-L", { stage: "Closed Lost", lostReason });
+    assert.equal(res.status, 400);
+    assert.match(res.body.error, /reason/);
+  }
+  const ok = await call("liz", "PATCH", "/deals/D-L", { stage: "Closed Lost", lostReason: "  Budget cut  " });
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.lostReason, "Budget cut");
+  assert.equal(ok.body.outcome, "Lost");
+
+  const base = { client: "New", lab: "sports", stage: "Closed Lost", amount: 1, close: "2026-09-01", source: "Referral" };
+  assert.equal((await call("liz", "POST", "/deals", base)).status, 400);
+  assert.equal((await call("liz", "POST", "/deals", { ...base, lostReason: "No budget" })).status, 201);
+});
+
+test("a lost deal's reason cannot be blanked, an older lost deal edits without one, and reopening clears it", async () => {
+  deal("D-M", { stage: "Closed Lost", outcome: "Lost", lostReason: "No budget" });
+  assert.equal((await call("liz", "PATCH", "/deals/D-M", { lostReason: "" })).status, 400);
+  assert.equal((await call("liz", "PATCH", "/deals/D-M", { lostReason: "Timing" })).body.lostReason, "Timing");
+
+  deal("D-O", { stage: "Closed Lost", outcome: "Lost" });
+  assert.equal((await call("liz", "PATCH", "/deals/D-O", { amount: 5 })).status, 200);
+
+  const back = await call("liz", "PATCH", "/deals/D-M", { stage: "Discovery" });
+  assert.equal(back.status, 200);
+  assert.equal(back.body.lostReason, undefined);
 });

@@ -45,7 +45,8 @@ export function AssignmentTab({
   editable: boolean;
   onSaved: (deal: Deal) => void;
 }) {
-  const { labs, people, companies, contacts, me, assignmentApprover } = usePortalData();
+  const { labs, people, companies, contacts, me, role, assignmentApprover } = usePortalData();
+  const isAdmin = role === "Admin";
   const state = assignmentState(deal);
   const filed = deal.assignment;
 
@@ -91,6 +92,7 @@ export function AssignmentTab({
   const [subCosts, setSubCosts] = useState(String(filed?.subcontractorCosts ?? legacy?.subcontractorCosts ?? 0));
   const [cadence, setCadence] = useState<string>(filed?.cadence ?? (deal.recurring ? "Monthly" : "On signature"));
   const [notes, setNotes] = useState(filed?.notes ?? "");
+  const [founderRun, setFounderRun] = useState(!!filed?.founderRun);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   /* "Edit" reopens the form over a filing that is still on the server; only a
@@ -102,10 +104,10 @@ export function AssignmentTab({
   const sub = Number(digits(subCosts)) || 0;
   const leaders = selected.map((key) => ({ key, pct: shares[key] ?? 0 }));
   const shareTotal = leaders.reduce((sum, l) => sum + l.pct, 0);
-  const math = assignmentMath({ contractValue: value, hardCosts: hard, subcontractorCosts: sub, leaders });
+  const math = assignmentMath({ contractValue: value, hardCosts: hard, subcontractorCosts: sub, leaders, founderRun });
 
   const ready =
-    !!selected.length && Math.abs(shareTotal - 100) < 0.01 &&
+    (founderRun || (!!selected.length && Math.abs(shareTotal - 100) < 0.01)) &&
     !!agreementRef.trim() && !!clientName.trim() && value > 0;
 
   const isApprover = !!me && me === assignmentApprover;
@@ -155,7 +157,8 @@ export function AssignmentTab({
         cadence,
         hardCosts: hard,
         subcontractorCosts: sub,
-        leaders,
+        leaders: founderRun ? [] : leaders,
+        founderRun,
         notes: notes.trim(),
       },
       (res) =>
@@ -186,10 +189,19 @@ export function AssignmentTab({
     const receipt: [string, string][] = [
       ["Agreement", filed.agreementRef],
       ["Client", filed.clientName],
-      ["Leaders", filed.leaders.map((l) => `${nameOf(l.key)} — ${l.pct}%`).join(", ")],
-      ["Contract value", fmtDollars(filed.contractValue)],
-      ["Costs", `${fmtDollars(filed.hardCosts)} hard · ${fmtDollars(filed.subcontractorCosts)} sub · ${fmtDollars(filed.softReserve)} soft`],
-      [`Pool · ${filed.poolPct ?? POOL_PCT}%`, fmtDollars(filed.pool)],
+      ...(filed.founderRun
+        ? ([
+            ["Leaders", "Founder-run — no leader split"],
+            ["Contract value", fmtDollars(filed.contractValue)],
+            ["Costs", `${fmtDollars(filed.hardCosts)} hard · ${fmtDollars(filed.subcontractorCosts)} contractors`],
+            ["Optimistic Labs", fmtDollars(filed.net)],
+          ] as [string, string][])
+        : ([
+            ["Leaders", filed.leaders.map((l) => `${nameOf(l.key)} — ${l.pct}%`).join(", ")],
+            ["Contract value", fmtDollars(filed.contractValue)],
+            ["Costs", `${fmtDollars(filed.hardCosts)} hard · ${fmtDollars(filed.subcontractorCosts)} sub · ${fmtDollars(filed.softReserve)} soft`],
+            [`Pool · ${filed.poolPct ?? POOL_PCT}%`, fmtDollars(filed.pool)],
+          ] as [string, string][])),
       ["Cadence", filed.cadence],
     ];
     return (
@@ -255,7 +267,7 @@ export function AssignmentTab({
                     Reopen and edit
                   </Button>
                 )
-              : editable && (
+              : editable && (isAdmin || !filed.founderRun) && (
                   <Button variant="outline" size="sm" className="rounded-full" disabled={busy} onClick={() => setEditing(true)}>
                     Edit the assignment
                   </Button>
@@ -316,7 +328,27 @@ export function AssignmentTab({
         </div>
       </div>
 
+      {/* founder-run override (admins only) */}
+      {isAdmin && (
+        <label className={cn(panel, "flex cursor-pointer items-start gap-3")}>
+          <input
+            type="checkbox"
+            className="mt-0.5 size-4 accent-violet-deep"
+            checked={founderRun}
+            disabled={!editable}
+            onChange={(e) => setFounderRun(e.target.checked)}
+          />
+          <span>
+            <span className="block text-[13px] font-semibold text-ink">Founder-run deal</span>
+            <span className="block text-xs leading-relaxed text-ink-mute">
+              Founders take distributions rather than per-deal payouts. Hard and contractor costs are still recorded; everything else goes to Optimistic Labs, with no soft reserve or leader pool.
+            </span>
+          </span>
+        </label>
+      )}
+
       {/* b) leaders */}
+      {!founderRun && (<>
       <div className={panel}>
         <div className="mb-1 flex items-center gap-2">
           <span className={panelLabel}>Lab leaders assigned</span>
@@ -417,6 +449,8 @@ export function AssignmentTab({
         )}
       </div>
 
+      </>)}
+
       {/* d) costs and cadence */}
       <div className={panel}>
         <div className="mb-1 flex items-center gap-2">
@@ -424,7 +458,9 @@ export function AssignmentTab({
           <span className={cn(chip, "bg-amber-pale text-amber")}>Needs you</span>
         </div>
         <p className="mb-3 text-xs leading-relaxed text-ink-mute">
-          Estimates are fine. The soft cost reserve is held automatically at {SOFT_RESERVE_PCT}% of contract value; finance confirms actuals at close-out.
+          {founderRun
+            ? "Estimates are fine. Founder-run deals hold no soft reserve; finance confirms actuals at close-out."
+            : `Estimates are fine. The soft cost reserve is held automatically at ${SOFT_RESERVE_PCT}% of contract value; finance confirms actuals at close-out.`}
         </p>
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
@@ -435,13 +471,15 @@ export function AssignmentTab({
             <Label htmlFor="pv3-sub">Subcontractors</Label>
             <Input id="pv3-sub" inputMode="numeric" value={sub ? sub.toLocaleString("en-US") : "0"} onChange={(e) => setSubCosts(digits(e.target.value))} disabled={!editable} />
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label>Soft cost reserve</Label>
-            <div className="flex items-center gap-2 rounded-xl bg-violet-pale px-3 py-2.5">
-              <span className="flex-1 text-sm font-semibold text-violet-deep">{fmtDollars(math.softReserve)}</span>
-              <span className="text-[11px] font-medium text-violet">Auto · {SOFT_RESERVE_PCT}%</span>
+          {!founderRun && (
+            <div className="flex flex-col gap-1.5">
+              <Label>Soft cost reserve</Label>
+              <div className="flex items-center gap-2 rounded-xl bg-violet-pale px-3 py-2.5">
+                <span className="flex-1 text-sm font-semibold text-violet-deep">{fmtDollars(math.softReserve)}</span>
+                <span className="text-[11px] font-medium text-violet">Auto · {SOFT_RESERVE_PCT}%</span>
+              </div>
             </div>
-          </div>
+          )}
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="pv3-cadence">Payment cadence</Label>
             <Select value={cadence} onValueChange={setCadence} disabled={!editable}>
@@ -471,8 +509,8 @@ export function AssignmentTab({
           ["Contract value", value ? fmtDollars(value) : "—", false],
           ["Hard costs", hard ? `– ${fmtDollars(hard)}` : "—", true],
           ["Subcontractor costs", sub ? `– ${fmtDollars(sub)}` : "—", true],
-          ["Soft cost reserve", value ? `– ${fmtDollars(math.softReserve)}` : "—", true],
-          ["Net after costs", value ? fmtDollars(math.net) : "—", false],
+          ...(founderRun ? [] : [["Soft cost reserve", value ? `– ${fmtDollars(math.softReserve)}` : "—", true]]),
+          [founderRun ? "Remaining" : "Net after costs", value ? fmtDollars(math.net) : "—", false],
         ] as [string, string, boolean][]).map(([k, v, muted]) => (
           <div key={k} className="flex items-center justify-between gap-3 border-b border-hair py-2.5">
             <span className={cn("text-[13px]", muted ? "text-ink-soft" : "text-ink")}>{k}</span>
@@ -480,10 +518,10 @@ export function AssignmentTab({
           </div>
         ))}
         <div className="flex items-center justify-between gap-3 pt-2.5">
-          <span className="text-[13px] font-semibold text-violet-deep">Lab leader pool · {POOL_PCT}%</span>
-          <span className="text-lg font-semibold text-violet-deep">{value ? fmtDollars(math.pool) : "—"}</span>
+          <span className="text-[13px] font-semibold text-violet-deep">{founderRun ? "Optimistic Labs" : `Lab leader pool · ${POOL_PCT}%`}</span>
+          <span className="text-lg font-semibold text-violet-deep">{value ? fmtDollars(founderRun ? math.ol : math.pool) : "—"}</span>
         </div>
-        {selected.length > 0 && (
+        {!founderRun && selected.length > 0 && (
           <div className="mt-2.5 border-t border-hair pt-2.5">
             <span className="mb-1.5 block text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Lab leader breakdown</span>
             {math.payouts.map((p) => (

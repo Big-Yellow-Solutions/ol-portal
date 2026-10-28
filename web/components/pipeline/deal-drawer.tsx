@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PersonItem, personOptions } from "@/components/ui/person-select";
 import {
   Select,
@@ -33,6 +34,7 @@ import {
   contractRequiredAt,
   invoiceRequiredAt,
   BILLING_GATE_STAGE,
+  CLOSED_LOST,
   CLOSED_WON,
 } from "@/lib/pipeline";
 import { usePortalData } from "@/lib/portal-data";
@@ -116,6 +118,7 @@ export function DealDrawer({
   const [close, setClose] = useState(
     pendingStage === "Closed" && existing?.stage !== "Closed" ? "" : (existing?.close ?? "")
   );
+  const [lostReason, setLostReason] = useState(existing?.lostReason ?? "");
   const [source, setSource] = useState<Source>(existing?.source ?? "Referral");
   const [recurring, setRecurring] = useState(existing?.recurring ?? false);
   const [companyId, setCompanyId] = useState<string | null>(existing?.companyId ?? null);
@@ -165,6 +168,7 @@ export function DealDrawer({
   );
 
   const isClosed = stage === "Closed";
+  const isLostStage = stage === CLOSED_LOST;
   const gated = billingRequiredAt(stage);
   const linked = !!companyId || !!contactId;
   const propGated = proposalRequiredAt(stage);
@@ -176,7 +180,8 @@ export function DealDrawer({
     (!propGated || hasProposal) &&
     (!contractGated || hasContract) &&
     (!invoiceGated || hasInvoice) &&
-    (!isClosed || !!close);
+    (!isClosed || !!close) &&
+    (!isLostStage || !!lostReason.trim());
 
   const hint = !title.trim()
     ? "A deal name is required"
@@ -190,7 +195,9 @@ export function DealDrawer({
             ? "Upload an invoice before closing this deal"
             : isClosed && !close
               ? "Set the date this deal closed"
-              : !linked
+              : isLostStage && !lostReason.trim()
+                ? "Say why this deal was lost before saving"
+                : !linked
                 ? `Unlinked — fine at ${stageLabel(stage)}, required at ${stageLabel(BILLING_GATE_STAGE)}`
                 : "Ready to save";
 
@@ -210,6 +217,7 @@ export function DealDrawer({
     recurring,
     companyId,
     contactId,
+    ...(isLostStage ? { lostReason: lostReason.trim() } : {}),
   });
 
   const submit = async () => {
@@ -372,7 +380,9 @@ export function DealDrawer({
                       <span className="block text-[13px] font-semibold text-ink">Assignment form on file</span>
                       <span className="block truncate text-xs text-ink-mute">
                         {assignment === "approved" ? "Approved" : "Awaiting approval"}
-                        {liveDeal.assignment?.leaders.length
+                        {liveDeal.assignment?.founderRun
+                          ? " · Founder-run"
+                          : liveDeal.assignment?.leaders.length
                           ? ` · ${liveDeal.assignment.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ")}`
                           : ""}
                       </span>
@@ -425,6 +435,22 @@ export function DealDrawer({
                 </Select>
               </div>
             </div>
+
+            {isLostStage && (
+              <div className="flex flex-col gap-1.5">
+                <Label htmlFor="pv2-lost-reason">Reason lost</Label>
+                <Textarea
+                  id="pv2-lost-reason"
+                  rows={3}
+                  value={lostReason}
+                  onChange={(e) => setLostReason(e.target.value)}
+                  placeholder="e.g. Went with another vendor, budget cut, timing…"
+                  maxLength={1000}
+                  disabled={!editable}
+                />
+                <p className="text-[11px] text-ink-mute">Required to close a deal as lost.</p>
+              </div>
+            )}
 
             {/* Same document requirement the Documents tab enforces on an
                 existing deal, surfaced right here instead: a brand-new deal
