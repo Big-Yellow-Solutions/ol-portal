@@ -16,6 +16,7 @@ import * as backfill from "./backfill-api.mjs";
 import * as proposals from "./proposals.mjs";
 import * as contacts from "./contacts.mjs";
 import * as assignments from "./assignments.mjs";
+import * as documents from "./documents.mjs";
 import * as contracts from "./contracts.mjs";
 import * as contractsCreate from "./contracts-create.mjs";
 import * as recurring from "./recurring.mjs";
@@ -280,8 +281,9 @@ async function updateDeal(ctx, id, body) {
     // a PROPOSAL record that was marked final and sent from here — still
     // passes, so deals that crossed the gate under the previous workflow can
     // keep moving without re-uploading a document nobody kept.
-    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "proposal");
-    const sent = uploaded || (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
+    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "proposal" && !f.deletedAt);
+    const waived = !uploaded && documents.hasApprovedWaiver(await listType("WAIVER"), id, "proposal");
+    const sent = uploaded || waived || (await listType("PROPOSAL")).some(p => p.deal === id && !!p.sentAt);
     if (!sent) return resp(400, { error: `${stageLabel(patch.stage)} needs a proposal uploaded to the deal` });
   }
   if ("stage" in patch && patch.stage !== CLOSED_LOST &&
@@ -298,7 +300,8 @@ async function updateDeal(ctx, id, body) {
     // portal never reaches rollUpDeal, and a deal whose signed contract is
     // sitting in its own Documents tab should not be stuck before Contracted.
     if (!deal.contractSigned) {
-      const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract");
+      const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "contract" && !f.deletedAt) ||
+        documents.hasApprovedWaiver(await listType("WAIVER"), id, "contract");
       if (!uploaded) return resp(400, { error: `${stageLabel(patch.stage)} needs a signed contract uploaded to the deal` });
     }
   }
@@ -308,7 +311,7 @@ async function updateDeal(ctx, id, body) {
     // Closed now specifically means paid, and an uploaded invoice is the
     // portal's stand-in for that — there's no separate payment ledger to
     // check instead.
-    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "invoice");
+    const uploaded = (await listType("FILE")).some(f => f.deal === id && f.kind === "invoice" && !f.deletedAt);
     if (!uploaded) return resp(400, { error: `${stageLabel(patch.stage)} needs an invoice uploaded to the deal` });
   }
 
@@ -365,13 +368,28 @@ const canSeeFile = (ctx, f) =>
 
 async function listFiles(ctx) {
   const items = await listType("FILE");
-  const visible = items.filter(f => canSeeFile(ctx, f));
+  // Soft-deleted documents stay on record but are gone from every list, and a
+  // waiver's proof is not a file anyone browses.
+  const visible = items.filter(f => !f.deletedAt && !f.attachment && canSeeFile(ctx, f));
   visible.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-  return resp(200, visible.map(({ pk, sk, key, ...rest }) => ({ id: sk, ...rest })));
+  /* The highest version ever issued on each deal's proposal and contract,
+     deleted ones included: numbers are never reused, so the next upload is
+     one above this even when the top version has since been deleted. */
+  const top = new Map();
+  for (const f of items) {
+    if (!f.deal || !VERSIONED_KINDS.includes(f.kind)) continue;
+    const k = `${f.deal}|${f.kind}`;
+    top.set(k, Math.max(top.get(k) || 0, f.version || 1));
+  }
+  return resp(200, visible.map(({ pk, sk, key, ...rest }) => ({
+    id: sk, ...rest,
+    ...(top.has(`${rest.deal}|${rest.kind}`) ? { maxVersion: top.get(`${rest.deal}|${rest.kind}`) } : {})
+  })));
 }
 
 async function createFile(ctx, body) {
   const { name, size, type, lab, deal, kind } = body || {};
+  const attachment = body?.attachment === true;
   if (typeof name !== "string" || !name.trim()) return resp(400, { error: "name is required" });
   if (!Number.isFinite(size) || size <= 0 || size > MAX_FILE_BYTES)
     return resp(400, { error: "size must be 1 byte to 50 MB" });
@@ -379,6 +397,8 @@ async function createFile(ctx, body) {
   if (lab && !(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
   if (lab && !ctx.can.seesLab(lab)) return resp(403, { error: "lab not visible to you" });
   if (kind && !FILE_KINDS.includes(kind)) return resp(400, { error: "invalid kind" });
+  // Waiver proof belongs to a deal and is never a proposal, contract or invoice.
+  if (attachment && (!deal || kind)) return resp(400, { error: "an attachment needs a deal and no kind" });
 
   /* A second upload into a single-document slot is the next version of that
      document, not a rival to it, so number it above every version already on
@@ -397,10 +417,11 @@ async function createFile(ctx, body) {
   const record = {
     pk: "FILE", sk: id, name: name.trim(), key, size, type,
     ...(lab ? { lab } : {}), ...(deal ? { deal } : {}), ...(kind ? { kind } : {}),
-    ...(version ? { version } : {}),
+    ...(version ? { version } : {}), ...(attachment ? { attachment: true } : {}),
     uploader: ctx.me.sk, date: new Date().toISOString(), status: "Uploading"
   };
   await put(record);
+  if (deal && kind) await documents.withdrawPendingFor(deal, kind, id);
   const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({
     Bucket: FILES_BUCKET, Key: key, ContentType: type, ContentLength: size
   }), { expiresIn: 900 });
@@ -411,6 +432,7 @@ async function downloadFile(ctx, id) {
   const f = await get("FILE", id);
   if (!f) return resp(404, { error: "file not found" });
   if (!canSeeFile(ctx, f)) return resp(403, { error: "Not allowed to access this file" });
+  if (f.deletedAt && ctx.role !== "Admin") return resp(404, { error: "file not found" });
   // `?disposition=inline` backs the deal drawer's View action: the same
   // presigned URL, but opened in a tab rather than pushed to the downloads
   // folder. Anything the browser can't render inline still downloads.
@@ -422,13 +444,50 @@ async function downloadFile(ctx, id) {
   return resp(200, { url });
 }
 
+/* How long after an upload the uploader may take it straight back out — the
+   Documents tab's Undo, and the cleanup when the bytes never reached S3. */
+const UNDO_WINDOW_MS = 10 * 60 * 1000;
+
 async function deleteFile(ctx, id) {
   const f = await get("FILE", id);
-  if (!f) return resp(404, { error: "file not found" });
+  if (!f || f.deletedAt) return resp(404, { error: "file not found" });
   if (ctx.role !== "Admin" && f.uploader !== ctx.me.sk)
     return resp(403, { error: "Only the uploader or an admin can delete a file" });
-  await s3.send(new DeleteObjectCommand({ Bucket: FILES_BUCKET, Key: f.key })).catch(() => {});
-  await doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk: "FILE", sk: id } }));
+
+  const abort = ctx.query?.abort === "1";
+  const undo = ctx.query?.undo === "1";
+  if ((abort || undo) && (f.uploader !== ctx.me.sk || Date.now() - Date.parse(f.date) > UNDO_WINDOW_MS))
+    return resp(409, { error: "This upload can no longer be taken back" });
+
+  const hardDelete = async () => {
+    await s3.send(new DeleteObjectCommand({ Bucket: FILES_BUCKET, Key: f.key })).catch(() => {});
+    await doc.send(new DeleteCommand({ TableName: TABLE, Key: { pk: "FILE", sk: id } }));
+  };
+
+  // An upload that never landed: no record should outlive it.
+  if (abort) {
+    await hardDelete();
+    await documents.restoreWithdrawnBy(id);
+    return resp(200, { deleted: id });
+  }
+
+  // Everything else a deal holds is kept for audit: marked deleted, not erased.
+  // Files-page uploads, which no deal depends on, are still removed outright.
+  if (!f.deal || !f.kind) {
+    await hardDelete();
+    return resp(200, { deleted: id });
+  }
+  if (!undo) {
+    const deal = await get("DEAL", f.deal);
+    if (deal) {
+      const message = documents.protectedDeleteReason({
+        file: f, deal, files: await listType("FILE"), waivers: await listType("WAIVER"), stageLabel
+      });
+      if (message) return resp(409, { error: message });
+    }
+  }
+  await put({ ...f, deletedAt: new Date().toISOString(), deletedBy: ctx.me.sk });
+  if (undo) await documents.restoreWithdrawnBy(id);
   return resp(200, { deleted: id });
 }
 
@@ -527,6 +586,17 @@ async function route(ctx, method, path, seg, body) {
   if (method === "POST" && path === "/files") return await createFile(ctx, body);
   if (method === "GET" && seg[0] === "files" && seg[1] && seg[2] === "download") return await downloadFile(ctx, seg[1]);
   if (method === "DELETE" && seg[0] === "files" && seg[1]) return await deleteFile(ctx, seg[1]);
+  if (method === "GET" && path === "/waivers") return await documents.listWaivers(ctx);
+  if (method === "POST" && seg[0] === "deals" && seg[1] && seg[2] === "waivers" && !seg[3])
+    return await documents.requestWaivers(ctx, seg[1], body);
+  if (method === "POST" && seg[0] === "waivers" && seg[1] && seg[2] === "attachments")
+    return await documents.addWaiverAttachments(ctx, seg[1], body);
+  if (method === "POST" && seg[0] === "waivers" && seg[1] && seg[2] === "withdraw")
+    return await documents.withdrawWaiver(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "waivers" && seg[1] && seg[2] === "dismiss")
+    return await documents.dismissWaiver(ctx, seg[1]);
+  if (method === "POST" && seg[0] === "waivers" && seg[1] && (seg[2] === "approve" || seg[2] === "decline"))
+    return await documents.decideWaiver(ctx, seg[1], seg[2] === "approve" ? "approved" : "declined", body);
   if (method === "POST" && path === "/invoices") return await createInvoice(ctx, body);
   if (method === "PATCH" && seg[0] === "invoices" && seg[1]) return await updateInvoice(ctx, seg[1], body);
   if (method === "POST" && path === "/proposals") return await proposals.createProposal(ctx, body);

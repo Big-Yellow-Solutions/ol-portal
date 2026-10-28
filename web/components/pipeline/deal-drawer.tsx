@@ -43,6 +43,8 @@ import type { Deal, Source, Stage } from "@/lib/types";
 import { BillingEntityPanel } from "@/components/pipeline/billing-entity-panel";
 import { DocumentUploadPanel } from "@/components/pipeline/document-upload-panel";
 import { AssignmentTab } from "@/components/pipeline/assignment-tab";
+import { DocumentsTab } from "@/components/pipeline/documents-tab";
+import { openRequirements, requirementRows } from "@/lib/documents";
 
 /* Pipeline v2 (design handoff): the deal drawer. The design draws one panel
    that both views and edits a deal — no separate read-only mode — so this
@@ -85,7 +87,7 @@ export function DealDrawer({
   onDeleted: (id: string) => void;
   onOpenRecord: (type: "company" | "contact", id: string) => void;
 }) {
-  const { labs, people, proposals, files, role, me, myLabs } = usePortalData();
+  const { labs, people, proposals, files, waivers, role, me, myLabs } = usePortalData();
   const isNew = deal === "new";
   const existing = isNew ? null : deal;
   const editable = existing ? can.editDeal(existing, role!, myLabs, me) : can.addDeal(role!, myLabs);
@@ -144,8 +146,9 @@ export function DealDrawer({
     () =>
       !!persisted &&
       (files.some((f) => f.deal === persisted.id && f.kind === "proposal") ||
+        waivers.some((w) => w.deal === persisted.id && w.requirement === "proposal" && w.status === "approved") ||
         proposals.some((p) => p.deal === persisted.id && !!p.sentAt)),
-    [files, proposals, persisted]
+    [files, waivers, proposals, persisted]
   );
 
   /* The signed contract works the same way: rollUpDeal sets `contractSigned`
@@ -155,8 +158,9 @@ export function DealDrawer({
     () =>
       !!persisted &&
       (!!persisted.contractSigned ||
-        files.some((f) => f.deal === persisted.id && f.kind === "contract")),
-    [files, persisted]
+        files.some((f) => f.deal === persisted.id && f.kind === "contract") ||
+        waivers.some((w) => w.deal === persisted.id && w.requirement === "contract" && w.status === "approved")),
+    [files, waivers, persisted]
   );
 
   /* Closed now specifically means paid, and an uploaded invoice is the
@@ -165,6 +169,27 @@ export function DealDrawer({
   const hasInvoice = useMemo(
     () => !!persisted && files.some((f) => f.deal === persisted.id && f.kind === "invoice"),
     [files, persisted]
+  );
+
+  /* The Documents tab's own badge: a count while every requirement for the
+     deal's current stage is met or waived, an amber dot while one is missing
+     or waiting on an admin. Read off the saved deal, not the unsaved stage. */
+  const docCount = useMemo(
+    () => (existing ? files.filter((f) => f.deal === existing.id && f.kind).length : 0),
+    [files, existing]
+  );
+  const docsOpen = useMemo(
+    () =>
+      !!existing &&
+      openRequirements(
+        requirementRows({
+          deal: liveDeal ?? existing,
+          files,
+          waivers,
+          legacyProposalSent: proposals.some((p) => p.deal === existing.id && !!p.sentAt),
+        })
+      ).length > 0,
+    [existing, liveDeal, files, waivers, proposals]
   );
 
   const isClosed = stage === "Closed";
@@ -200,6 +225,21 @@ export function DealDrawer({
                 : !linked
                 ? `Unlinked — fine at ${stageLabel(stage)}, required at ${stageLabel(BILLING_GATE_STAGE)}`
                 : "Ready to save";
+
+  /* On the Documents tab the banner already says what is missing, so the
+     footer does not repeat it as a warning. Uploads and deletes there save
+     on their own; Save only ever applies to the Details form. */
+  const onDocsTab = !isNew && tab === "documents";
+  const docBlocked =
+    (propGated && !hasProposal) || (contractGated && !hasContract) || (invoiceGated && !hasInvoice);
+  const footerHint = !onDocsTab
+    ? hint
+    : docBlocked
+      ? "Uploads save immediately. Save unlocks once the requirements above are met or waived."
+      : canSave
+        ? "Uploads save immediately"
+        : hint;
+  const footerWarn = onDocsTab ? !canSave && !docBlocked : !canSave;
 
   const buildBody = () => ({
     client: title,
@@ -344,6 +384,16 @@ export function DealDrawer({
                 >
                   {t.label}
                   {owed && <span className="ml-1.5 text-[11px] font-semibold">Needs you</span>}
+                  {t.key === "documents" &&
+                    (docsOpen ? (
+                      <span aria-label="A required document is missing" className="ml-2 inline-block size-2 rounded-full bg-amber" />
+                    ) : (
+                      docCount > 0 && (
+                        <span className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-violet-pale px-1.5 text-[11px] font-bold text-violet-deep">
+                          {docCount}
+                        </span>
+                      )
+                    ))}
                 </button>
               );
             })}
@@ -615,48 +665,7 @@ export function DealDrawer({
               </>
             )}
 
-            {showDocuments && (
-              <>
-            <DocumentUploadPanel
-              deal={existing!}
-              kind="proposal"
-              label="Upload Proposal"
-              hint="Attach the proposal document for this deal. Uploading again supersedes it — earlier versions stay on record."
-              editable={editable}
-            />
-            <DocumentUploadPanel
-              deal={existing!}
-              kind="contract"
-              label="Upload Contract"
-              hint="Attach the signed contract for this deal. Uploading again supersedes it — earlier versions stay on record."
-              editable={editable}
-            />
-            <DocumentUploadPanel
-              deal={existing!}
-              kind="invoice"
-              label="Upload Invoice"
-              hint="Attach each invoice issued for this deal. Uploads are saved immediately."
-              editable={editable}
-            />
-
-            {contractGated && (
-              <div className="rounded-2xl border border-hair bg-warm-panel p-4">
-                <div className="mb-1 text-[11px] font-semibold tracking-wide text-warm-gray uppercase">Signed contract</div>
-                <p className="text-xs text-ink-mute">
-                  {existing?.contractSigned
-                    ? "On file — a signed client contract is attached to this deal."
-                    : hasContract
-                      ? "On file — a signed contract is uploaded above."
-                      : "Required at Contracted (Signed). Upload the signed contract above, or build and sign one on the Contracts page."}
-                </p>
-                {existing?.contractSigned && (
-                  <a href="/contracts" className="mt-2 inline-block text-xs font-semibold text-violet-deep hover:text-violet">Manage on Contracts →</a>
-                )}
-              </div>
-            )}
-
-              </>
-            )}
+            {showDocuments && existing && <DocumentsTab deal={liveDeal ?? existing} editable={editable} />}
 
             {showAssignmentTab && liveDeal && (
               <AssignmentTab
@@ -672,8 +681,8 @@ export function DealDrawer({
         </div>
 
         <DealDrawerFooter
-          hint={hint}
-          tone={canSave ? "mute" : "warn"}
+          hint={footerHint}
+          tone={footerWarn ? "warn" : "mute"}
           onDelete={!isNew && can.deleteDeal(role!) ? del : undefined}
           deleting={deleting}
           onSave={editable ? handleSave : undefined}

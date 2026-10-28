@@ -18,6 +18,7 @@ import type {
   Contract,
   Deal,
   FileRecord,
+  Waiver,
   Guide,
   InvoiceRequest,
   Lab,
@@ -55,6 +56,8 @@ interface PortalDataValue {
   proposals: Proposal[];
   invoices: InvoiceRequest[];
   files: FileRecord[];
+  waivers: Waiver[];
+  refreshWaivers: () => Promise<void>;
   contracts: Contract[];
   recurrences: Recurrence[];
   guides: Guide[];
@@ -128,6 +131,7 @@ export function PortalDataProvider({
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRequest[]>([]);
   const [files, setFiles] = useState<FileRecord[]>([]);
+  const [waivers, setWaivers] = useState<Waiver[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [recurrences, setRecurrences] = useState<Recurrence[]>([]);
   const [guides, setGuides] = useState<Guide[]>([]);
@@ -137,7 +141,7 @@ export function PortalDataProvider({
   const fetchAll = useCallback(async (): Promise<void> => {
     const [
       bootstrap, dealsRes, proposalsRes, invoicesRes, filesRes, contractsRes,
-      recurrencesRes, guidesRes, companiesRes, contactsRes,
+      recurrencesRes, guidesRes, companiesRes, contactsRes, waiversRes,
     ] =
       await inBatches([
         () => api<Bootstrap>("/bootstrap"),
@@ -158,6 +162,9 @@ export function PortalDataProvider({
         // deploy or an independent backend rollback.
         () => api<Company[]>("/companies").catch(() => [] as Company[]),
         () => api<Contact[]>("/contacts").catch(() => [] as Contact[]),
+        // Waivers are new too: against a Lambda that predates them an empty
+        // list simply means nothing is waived, which is the safe reading.
+        () => api<Waiver[]>("/waivers").catch(() => [] as Waiver[]),
       ]);
     setLabs(Object.entries(bootstrap.labs).map(([id, lab]) => ({ id, name: lab.name })));
     setPeople(bootstrap.people);
@@ -174,6 +181,7 @@ export function PortalDataProvider({
     setGuides(guidesRes);
     setCompanies(companiesRes);
     setContacts(contactsRes);
+    setWaivers(waiversRes);
   }, []);
 
   const load = useCallback(async (): Promise<void> => {
@@ -210,6 +218,10 @@ export function PortalDataProvider({
     // Intentionally run once on mount — `load` only changes identity if
     // `fetchAll` does, which never does (empty dep array).
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const refreshWaivers = useCallback(async () => {
+    setWaivers(await api<Waiver[]>("/waivers").catch(() => [] as Waiver[]));
   }, []);
 
   const refreshFiles = useCallback(async () => {
@@ -261,6 +273,7 @@ export function PortalDataProvider({
       proposals,
       invoices,
       files,
+      waivers,
       contracts,
       recurrences,
       guides,
@@ -276,6 +289,7 @@ export function PortalDataProvider({
       setContacts,
       refresh,
       refreshFiles,
+      refreshWaivers,
       refreshProposals,
       needsWelcome,
     }),
@@ -295,6 +309,7 @@ export function PortalDataProvider({
       proposals,
       invoices,
       files,
+      waivers,
       contracts,
       recurrences,
       guides,
@@ -302,6 +317,7 @@ export function PortalDataProvider({
       contacts,
       refresh,
       refreshFiles,
+      refreshWaivers,
       refreshProposals,
       needsWelcome,
     ]

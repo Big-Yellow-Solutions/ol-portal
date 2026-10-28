@@ -451,9 +451,15 @@ export interface FileRecord {
    *  stored before versioning existed and on unversioned kinds (invoices);
    *  read an absent value as 1. */
   version?: number;
+  /** The highest version ever issued for this deal's proposal or contract,
+   *  deleted ones included — the next upload is one above it. */
+  maxVersion?: number;
   proposal?: string;
   contract?: string;
   contributorEmail?: string;
+  /** Proof attached to a waiver request. Never a deal document, and the server
+   *  leaves these out of /files, so a FileRecord in the list never has this. */
+  attachment?: boolean;
   status: FileStatus;
   size?: number;
   type?: string;
@@ -464,6 +470,36 @@ export interface FileRecord {
     summary?: string;
     keyPoints?: string[];
   };
+}
+
+/** A request to proceed without a proposal or signed contract. Mirrors
+ *  backend/src/documents.mjs. Only `approved` ever satisfies a stage gate. */
+export type WaiverRequirement = "proposal" | "contract";
+export type WaiverStatus = "pending" | "approved" | "declined" | "withdrawn";
+
+export interface WaiverAttachment {
+  id: string;
+  name: string;
+  size?: number;
+  type?: string;
+  addedBy: string;
+  addedAt: string;
+}
+
+export interface Waiver {
+  id: string;
+  deal: string;
+  requirement: WaiverRequirement;
+  reason: string;
+  attachments: WaiverAttachment[];
+  requestedBy: string;
+  requestedAt: string;
+  status: WaiverStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  adminNote?: string;
+  /** The requester has read a declined waiver's note. */
+  dismissed?: boolean;
 }
 
 // Field names match backend/src/contracts.mjs's raw record shape.

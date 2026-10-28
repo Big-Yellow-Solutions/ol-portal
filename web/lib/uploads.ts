@@ -85,12 +85,16 @@ export async function uploadDealDocument({
   file,
   dealId,
   kind,
+  attachment,
   lab,
   onProgress,
 }: {
   file: File;
   dealId: string;
-  kind: FileKind;
+  /** Omit for a waiver attachment. */
+  kind?: FileKind;
+  /** Proof for a waiver request: stored on the deal but never a deal document. */
+  attachment?: boolean;
   lab?: string;
   onProgress?: (pct: number) => void;
 }): Promise<string> {
@@ -101,7 +105,8 @@ export async function uploadDealDocument({
       size: file.size,
       type: file.type || "application/octet-stream",
       deal: dealId,
-      kind,
+      ...(kind ? { kind } : {}),
+      ...(attachment ? { attachment: true } : {}),
       ...(lab ? { lab } : {}),
     }),
   });
@@ -112,7 +117,7 @@ export async function uploadDealDocument({
        otherwise leave a record with nothing behind it — and on a deal, a
        `kind: "proposal"` record that clears the stage gate without a document
        actually being stored. Drop it and report the failure. */
-    await api(`/files/${id}`, { method: "DELETE" }).catch(() => {});
+    await api(`/files/${id}?abort=1`, { method: "DELETE" }).catch(() => {});
     throw err;
   }
   return id;
