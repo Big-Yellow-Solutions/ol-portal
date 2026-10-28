@@ -258,9 +258,11 @@ function WorkosAuthBridge({ children }: { children: React.ReactNode }) {
                       session through these. Signing the user out over one —
                       which is what null used to mean for every failure — is
                       the one thing not to do. */
-  const token = useCallback(async () => {
+  const token = useCallback(async (opts?: { forceRefresh?: boolean }) => {
     try {
-      return await getAccessToken();
+      return await getAccessToken(
+        opts?.forceRefresh ? { forceRefresh: true } : undefined
+      );
     } catch (err: unknown) {
       if (err instanceof LoginRequiredError) {
         trace("token.login-required");

@@ -81,8 +81,10 @@ export function CognitoAuthProvider({
      `token` does — api() treats a rejection as retryable, not a sign-out. */
   useEffect(() => {
     registerTokenSource({
-      getToken: async () => {
-        const session = await fetchAuthSession();
+      getToken: async (opts) => {
+        const session = await fetchAuthSession({
+          forceRefresh: !!opts?.forceRefresh,
+        });
         return session.tokens?.idToken?.toString() ?? null;
       },
       endSession: async () => {

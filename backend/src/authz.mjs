@@ -10,7 +10,7 @@
    The JWKS lives at a client-scoped path instead, so the URL has to be built
    by hand and the verification done in code. */
 
-import { createRemoteJWKSet, jwtVerify } from "jose";
+import { createRemoteJWKSet, jwtVerify, errors } from "jose";
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { doc, TABLE } from "./util.mjs";
 
@@ -77,6 +77,18 @@ export async function verifyWorkosToken(token) {
   });
   return payload;
 }
+
+/* Whether a failed verification says anything about the token.
+
+   A JOSE error (expired, bad signature, wrong issuer, no such key) is a verdict
+   on the token: deny it. Anything else — the JWKS fetch failing or timing out,
+   an unset client id — is a verdict on this container's day, and answering it
+   with a deny would reach the browser as a 401, which it reads as "your
+   session is over" and answers by signing the user out. The authorizer throws
+   for these instead: API Gateway turns that into a 500, which the client
+   treats as an ordinary failed request and tries again. */
+export const isTransientTokenError = err =>
+  !(err instanceof errors.JOSEError) || err instanceof errors.JWKSTimeout;
 
 /* Reset point for tests, and for the "the key rotated while the container was
    warm" case jose already handles internally — kept explicit so a future
