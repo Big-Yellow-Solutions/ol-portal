@@ -1,3 +1,4 @@
+import { trace } from "@/lib/auth-trace";
 import { CONFIG } from "@/lib/config";
 import { endSession, getAuthToken } from "@/lib/session";
 
@@ -50,6 +51,7 @@ export async function api<T = unknown>(
      this does, one pointless round trip later. endSession is a no-op when
      the provider is already on its way to sign-in with the page in hand. */
   if (!token) {
+    trace("api.no-token", { request: path });
     await endSession();
     throw new ApiError("Unauthorized", 401);
   }
@@ -71,9 +73,11 @@ export async function api<T = unknown>(
        once more; only a second refusal ends it. A refresh that fails for now
        rejects, which propagates as an ordinary error, and one that says the
        session is gone returns null, which falls through to the end below. */
+    trace("api.401", { request: path, retried: !!authRetried });
     if (!authRetried) {
       const fresh = await getAuthToken({ forceRefresh: true });
       if (fresh) return api<T>(path, { ...opts, authRetried: true });
+      trace("api.401.session-gone", { request: path });
     }
     // endSession both clears the session and navigates; the throw only stops
     // this caller from carrying on as though it had data.
