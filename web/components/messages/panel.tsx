@@ -14,6 +14,7 @@ import {
   CloseIcon,
   PencilIcon,
   PlusIcon,
+  TrashIcon,
 } from "@/components/community/icons";
 import { ConversationList } from "@/components/messages/list";
 import { NewChat } from "@/components/messages/new-chat";
@@ -106,6 +107,7 @@ function Header() {
     openNew,
     close,
     rename,
+    remove,
   } = useMessages();
 
   const [renaming, setRenaming] = useState(false);
@@ -132,6 +134,22 @@ function Header() {
             ? `${active.members.map((id) => person(id).first).join(", ")} · group`
             : person(active.members[0]).role
           : "";
+
+  /* Per person: the others in the chat keep it, and it comes back with its
+     history when anyone writes again — which the confirm says, so deleting
+     is not mistaken for erasing. */
+  const removeActive = () => {
+    if (!active) return;
+    if (
+      !window.confirm(
+        `Delete this conversation from your list? ${
+          group ? "The others in it" : person(active.members[0]).first
+        } will still have it, and it comes back with its earlier messages if anyone writes again.`
+      )
+    )
+      return;
+    remove(active.id);
+  };
 
   const commit = () => {
     rename(nameDraft);
@@ -194,6 +212,18 @@ function Header() {
           className={CIRCLE}
         >
           {renaming ? <CheckIcon size={14} /> : <PencilIcon size={14} />}
+        </button>
+      )}
+
+      {mode === "thread" && active && (
+        <button
+          type="button"
+          onClick={removeActive}
+          aria-label="Delete conversation"
+          title="Delete conversation"
+          className={CIRCLE}
+        >
+          <TrashIcon size={14} />
         </button>
       )}
 

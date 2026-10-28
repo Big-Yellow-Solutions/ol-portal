@@ -582,6 +582,8 @@ async function route(ctx, method, path, seg, body) {
     return await messages.sendMessage(ctx, decodeURIComponent(seg[1]), body);
   if (method === "POST" && seg[0] === "messages" && seg[1] && seg[2] === "read")
     return await messages.markConversationRead(ctx, decodeURIComponent(seg[1]), body);
+  if (method === "DELETE" && seg[0] === "messages" && seg[1] && !seg[2])
+    return await messages.deleteConversation(ctx, decodeURIComponent(seg[1]));
   if (method === "PATCH" && seg[0] === "messages" && seg[1] && !seg[2])
     return await messages.renameConversation(ctx, decodeURIComponent(seg[1]), body);
   if (method === "GET" && path === "/recurrences") return await recurring.listRecurrences(ctx);

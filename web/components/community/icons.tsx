@@ -144,6 +144,15 @@ export function PencilIcon(props: IconProps) {
   );
 }
 
+export function TrashIcon(props: IconProps) {
+  return (
+    <Stroke {...props} width={1.9}>
+      <path d="M4 7h16M10 11v6M14 11v6" />
+      <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7" />
+    </Stroke>
+  );
+}
+
 export function CheckIcon({ width = 2.4, ...props }: IconProps & { width?: number }) {
   return (
     <Stroke {...props} width={width}>

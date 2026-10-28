@@ -24,9 +24,19 @@
                   from      PERSON key, from the JWT and never from the body.
                   text      the words.
                   created   ISO.
-     MSGREAD    pk "MSGREAD#<person key>", sk "<conversation id>". How far
-                that person has read the thread: readThrough, the created
-                time of the newest message they had seen.
+     MSGREAD    pk "MSGREAD#<person key>", sk "<conversation id>". One
+                person's own state for a thread, never shared:
+                  readThrough  the created time of the newest message they
+                            had seen.
+                  deletedAt    ISO. They deleted the conversation: it leaves
+                            their list. Nothing else changes — the thread and
+                            everyone else's view of it are untouched, and a
+                            conversation is the same record whenever the same
+                            people talk again (the id is a hash of the
+                            members). So the next message after deletedAt
+                            brings it back with its whole history, which is
+                            the point: delete is "get this out of my list",
+                            not "erase what was said".
 
    Who can read a conversation is decided here: you must be a member. There
    is no route that reads someone else's thread, and a member list is
@@ -92,6 +102,12 @@ export const conversationId = members =>
 const msgPartition = id => `MSG#${id}`;
 const readPartition = key => `MSGREAD#${key}`;
 
+/* Deleted by this person and quiet since. Anything at or after the deletion —
+   a message from anyone, this person included — makes it live again; a tie
+   resolves toward showing the message rather than losing it. */
+const isDeleted = (mark, convo) =>
+  !!mark?.deletedAt && String(convo.updated) < String(mark.deletedAt);
+
 const isMember = (convo, key) => Array.isArray(convo?.members) && convo.members.includes(key);
 
 const publicMsg = ({ pk, sk, ...rest }) => ({ id: sk, ...rest });
@@ -130,11 +146,12 @@ async function threadOf(id) {
 export async function listConversations(ctx) {
   const mine = (await listType("CONVO")).filter(c => isMember(c, ctx.me.sk));
   mine.sort((a, b) => String(b.updated).localeCompare(String(a.updated)));
-  const marks = Object.fromEntries(
-    (await listType(readPartition(ctx.me.sk))).map(r => [r.sk, r.readThrough]));
-  const items = await Promise.all(mine.map(async c => ({
+  const state = Object.fromEntries(
+    (await listType(readPartition(ctx.me.sk))).map(r => [r.sk, r]));
+  const visible = mine.filter(c => !isDeleted(state[c.sk], c));
+  const items = await Promise.all(visible.map(async c => ({
     ...publicConvo(c, await threadOf(c.sk)),
-    readAt: marks[c.sk]
+    readAt: state[c.sk]?.readThrough
   })));
   log("messages.listed", { actor: ctx.me.sk, conversations: items.length });
   metric("ConversationsListed");
@@ -160,8 +177,27 @@ export async function markConversationRead(ctx, id, body) {
   const prior = await get(pk, id);
   if (prior && String(prior.readThrough) >= through)
     return resp(200, { readAt: prior.readThrough });
-  await put({ pk, sk: id, readThrough: through });
+  await put({ ...prior, pk, sk: id, readThrough: through });
   return resp(200, { readAt: through });
+}
+
+/* Delete a conversation from your own list. Per person by design: the other
+   members still have it, and if they write again it comes back to you with
+   everything that was said before (see MSGREAD above). Deleting also counts
+   as reading it, so a thread you deleted does not come back flagged with an
+   @mention you already dealt with. Idempotent. */
+export async function deleteConversation(ctx, id) {
+  const convo = await get("CONVO", id);
+  if (!convo) return resp(404, { error: "conversation not found" });
+  if (!isMember(convo, ctx.me.sk)) return resp(403, { error: "You are not in this conversation" });
+
+  const pk = readPartition(ctx.me.sk);
+  const prior = await get(pk, id);
+  const deletedAt = now();
+  await put({ ...prior, pk, sk: id, deletedAt, readThrough: deletedAt });
+  log("messages.conversation.deleted", { actor: ctx.me.sk, conversation: id });
+  metric("ConversationDeleted");
+  return resp(200, { deleted: true });
 }
 
 /* Open a conversation with these people. Idempotent: the id is derived from
@@ -183,6 +219,10 @@ export async function createConversation(ctx, body) {
   const id = conversationId(members);
   const existing = await get("CONVO", id);
   if (existing) {
+    /* Starting the chat again is how you get a deleted one back, history
+       and all. */
+    const mark = await get(readPartition(ctx.me.sk), id);
+    if (mark?.deletedAt) await put({ ...mark, deletedAt: undefined });
     log("messages.conversation.reused", { actor: ctx.me.sk, conversation: id });
     return resp(200, publicConvo(existing, await threadOf(id)));
   }

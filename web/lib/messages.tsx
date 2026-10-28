@@ -210,6 +210,9 @@ interface MessagesValue {
   close: () => void;
   send: (text: string) => void;
   rename: (name: string) => void;
+  /* Remove the conversation from YOUR list. Everyone else keeps it, and it
+     returns, history and all, when anyone writes again. */
+  remove: (id: string) => void;
   refresh: () => Promise<void>;
 }
 
@@ -240,6 +243,10 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
      one of these waits for the id before writing. */
   const creating = useRef<Map<string, Promise<string | null>>>(new Map());
   const generation = useRef(0);
+  /* Conversations whose DELETE has been sent and not yet answered. The panel
+     refreshes the moment it changes mode, which is exactly when a delete is
+     in flight, and that read can beat the delete to the server. */
+  const deleting = useRef<Set<string>>(new Set());
 
   /* ---------- people ---------- */
 
@@ -339,7 +346,8 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       const data = await api<{ items: ServerConvo[] }>("/messages");
       if (mine !== generation.current) return;
       const next: Record<string, ServerConvo> = {};
-      for (const c of data.items ?? []) next[c.id] = c;
+      for (const c of data.items ?? [])
+        if (!deleting.current.has(c.id)) next[c.id] = c;
       setServer(next);
       setLoadedAt(new Date());
       setError(null);
@@ -670,6 +678,52 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
     [activeId, absorbConvo, refresh]
   );
 
+  const remove = useCallback(
+    (id: string) => {
+      /* Drop it from view now; a poll that started before this must not put
+         it back, which bumping the generation sees to. A pending conversation
+         has nothing on the server to delete. */
+      generation.current++;
+      setServer((prev) => {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setPendingConvos((prev) => {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setPendingMsgs((prev) => {
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setActiveId((cur) => (cur === id ? null : cur));
+      setMode((m) => (m === "thread" ? "list" : m));
+      if (id.startsWith(PENDING)) return;
+      deleting.current.add(id);
+      void api(`/messages/${encodeURIComponent(id)}`, { method: "DELETE" })
+        .then(() => setError(null))
+        .catch((err) => {
+          if (err instanceof ApiError && err.status === 401) return;
+          setError(
+            err instanceof ApiError ? err.message : "Could not delete the conversation."
+          );
+        })
+        .finally(() => {
+          deleting.current.delete(id);
+          /* Either way the server now has the answer; if the delete failed
+             this is what puts the conversation back. */
+          void refresh();
+        });
+    },
+    [refresh]
+  );
+
   const value = useMemo<MessagesValue>(
     () => ({
       mode,
@@ -691,6 +745,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       close,
       send,
       rename,
+      remove,
       refresh,
     }),
     [
@@ -713,6 +768,7 @@ export function MessagesProvider({ children }: { children: React.ReactNode }) {
       close,
       send,
       rename,
+      remove,
       refresh,
     ]
   );

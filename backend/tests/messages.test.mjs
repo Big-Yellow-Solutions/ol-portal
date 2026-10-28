@@ -27,7 +27,7 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 
 const { doc } = await import("../src/util.mjs");
 const {
-  listConversations, createConversation, sendMessage, renameConversation, markConversationRead,
+  listConversations, createConversation, sendMessage, renameConversation, markConversationRead, deleteConversation,
   conversationId, mailer
 } = await import("../src/messages.mjs");
 
@@ -87,6 +87,8 @@ const TEDDY = as("teddy@optimisticlabs.com");
 const LIZ = as("hello@optimisticlabs.com");
 const CASS = as("cass");
 const body = r => JSON.parse(r.body);
+/* Timestamps are milliseconds; let one pass so ordering is unambiguous. */
+const tick = () => new Promise(r => setTimeout(r, 5));
 
 test("a sent message is on the recipient's list after a fresh read", async () => {
   reset();
@@ -278,4 +280,55 @@ test("a read mark is per person, only moves forward, and members only", async ()
 
   assert.equal((await markConversationRead(CASS, id, { through: sent.created })).statusCode, 403);
   assert.equal((await markConversationRead(LIZ, id, { through: "nope" })).statusCode, 400);
+});
+
+test("deleting a conversation is yours alone, and new activity brings it back whole", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  await sendMessage(TEDDY, id, { text: "first" });
+  await tick();
+  await sendMessage(LIZ, id, { text: "second" });
+  await tick();
+
+  assert.equal((await deleteConversation(LIZ, id)).statusCode, 200);
+  assert.equal(body(await listConversations(LIZ)).items.length, 0);
+  /* Teddy never deleted it: nothing changes for him. */
+  assert.deepEqual(
+    body(await listConversations(TEDDY)).items[0].msgs.map(m => m.text), ["first", "second"]);
+
+  /* Deleting twice is fine, and so is deleting someone else's thread: 403. */
+  assert.equal((await deleteConversation(LIZ, id)).statusCode, 200);
+  assert.equal((await deleteConversation(CASS, id)).statusCode, 403);
+  assert.equal((await deleteConversation(LIZ, "c_nope")).statusCode, 404);
+
+  await tick();
+  /* Teddy writes again: it is back on Liz's list with the old messages. */
+  await sendMessage(TEDDY, id, { text: "third" });
+  const back = body(await listConversations(LIZ)).items;
+  assert.equal(back.length, 1);
+  assert.deepEqual(back[0].msgs.map(m => m.text), ["first", "second", "third"]);
+});
+
+test("restarting a deleted chat yourself brings it back with its history", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  await sendMessage(TEDDY, id, { text: "before" });
+  await tick();
+  await deleteConversation(TEDDY, id);
+  assert.equal(body(await listConversations(TEDDY)).items.length, 0);
+
+  const again = await createConversation(TEDDY, { members: [LIZ.me.sk] });
+  assert.equal(body(again).id, id);
+  const items = body(await listConversations(TEDDY)).items;
+  assert.deepEqual(items[0].msgs.map(m => m.text), ["before"]);
+});
+
+test("deleting keeps the read mark, and reading keeps the deletion", async () => {
+  reset();
+  const id = body(await createConversation(TEDDY, { members: [LIZ.me.sk] })).id;
+  const sent = body(await sendMessage(TEDDY, id, { text: "hi" }));
+  await tick();
+  await deleteConversation(LIZ, id);
+  await markConversationRead(LIZ, id, { through: sent.created });
+  assert.equal(body(await listConversations(LIZ)).items.length, 0);
 });
