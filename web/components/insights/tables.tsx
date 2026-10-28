@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Clock, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  compact, money, pct, sortRows,
-  type LabRow, type Metrics, type UnpaidRow,
+  compact, fmtDate, money, pct, sortRows,
+  type LabRow, type LostRow, type Metrics, type UnpaidRow,
 } from "@/lib/insights";
 import { Panel, PanelTitle } from "./panels";
 
@@ -259,6 +259,72 @@ export function DealsTable({
             })}
             {!visible.length && (
               <tr><td colSpan={DEAL_COLS.length} className="px-6 py-10 text-center text-sm text-ink-mute">No deals match these filters.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Panel>
+  );
+}
+
+/* ---------- lost deals ---------- */
+
+export function LostTable({
+  rows, labName, onOpen,
+}: {
+  rows: LostRow[]; labName: (id: string) => string; onOpen: (id: string) => void;
+}) {
+  const total = rows.reduce((t, r) => t + r.deal.amount, 0);
+  return (
+    <Panel className="px-0 pb-2">
+      <div className="px-6 pb-3.5">
+        <PanelTitle
+          title="Lost deals"
+          sub={`${rows.length} deal${rows.length === 1 ? "" : "s"} lost in this range, ${money(total)} in all. Click a row to open the deal.`}
+        />
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-[rgba(124,109,245,.2)]">
+              {["Deal", "Lab", "Lab leader", "Lost on", "Value", "Reason"].map((h, i, all) => (
+                <th
+                  key={h} scope="col"
+                  className={cn(HEAD, "text-ink-mute", h === "Value" ? "text-right" : "text-left", i === 0 && "pl-6", i === all.length - 1 && "pr-6")}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ deal: d, lostOn }) => (
+              <tr
+                key={d.id} onClick={() => onOpen(d.id)}
+                className="cursor-pointer border-b border-[rgba(124,109,245,.12)] hover:bg-[#FBFAFF]"
+              >
+                <td className="max-w-[260px] py-3 pr-3 pl-6">
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onOpen(d.id); }}
+                    className="block max-w-full truncate text-left font-semibold hover:text-violet-deep"
+                  >
+                    {d.client}
+                  </button>
+                </td>
+                <td className={CELL + " text-left"}>{labName(d.lab)}</td>
+                <td className={CELL + " text-left"}>{d.leaderName}</td>
+                <td className={CELL + " text-left"}>{fmtDate(lostOn)}</td>
+                <td className={cn(CELL, "text-right font-semibold")}>{money(d.amount)}</td>
+                <td className="min-w-[260px] max-w-[420px] py-3 pr-6 pl-3 text-left">
+                  {d.lostReason
+                    ? <span className="whitespace-pre-wrap">{d.lostReason}</span>
+                    : <span className="text-ink-mute">No reason recorded</span>}
+                </td>
+              </tr>
+            ))}
+            {!rows.length && (
+              <tr><td colSpan={6} className="px-6 py-10 text-center text-sm text-ink-mute">No deals were lost in this range.</td></tr>
             )}
           </tbody>
         </table>

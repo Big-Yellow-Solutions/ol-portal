@@ -9,12 +9,12 @@ import { usePortalData } from "@/lib/portal-data";
 import { stageLabel } from "@/lib/types";
 import {
   addDays, baseDeals, bounds, dealsCsv, defaultFilters, filtersFromHash, filtersToHash, fmtDate, funnel,
-  hasHistory, labColor, labRows, labsCsv, metrics, monthly, unpaidRows,
+  hasHistory, labColor, labRows, labsCsv, lostRows, metrics, monthly, unpaidRows,
   type Filters, type InsightsData, type Metrics, type UnpaidRow,
 } from "@/lib/insights";
 import { FilterBar } from "./filter-bar";
 import { FunnelPanel, KpiCards, MoneyPanel, WonChart, type MoneyRow } from "./panels";
-import { DealsTable, ExportButton, LabTable } from "./tables";
+import { DealsTable, ExportButton, LabTable, LostTable } from "./tables";
 
 function download(name: string, csv: string) {
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
@@ -94,6 +94,7 @@ export function InsightsView() {
       months: monthly(m.won, filters, b0, b1, today),
       labRows: labRows(ds, visLabs, b0, b1, ctx),
       unpaid: unpaidRows(ds, today),
+      lost: lostRows(ds, b0, b1, filters.basis),
       noHistory: ds.filter((d) => !hasHistory(d)).length,
     };
   }, [data, filters, labs, weight]);
@@ -210,6 +211,7 @@ export function InsightsView() {
             <LabTable rows={view.labRows} total={view.m} color={colorOf} onOpen={(id) => patch({ labs: [id] })} onExport={exportLabs} />
           )}
           <DealsTable rows={view.unpaid} labName={labName} onOpen={(id) => router.push(`/pipeline?deal=${encodeURIComponent(id)}`)} onExport={exportDeals} />
+          <LostTable rows={view.lost} labName={labName} onOpen={(id) => router.push(`/pipeline?deal=${encodeURIComponent(id)}`)} />
         </>
       )}
     </div>

@@ -94,7 +94,7 @@ export async function getInsights(ctx) {
       amount: d.amount || 0, created: d.created || null, updated: d.updated || null,
       close: d.close || null, stageDates: d.stageDates || null,
       companyId: d.companyId || null, billing: companyName.get(d.companyId) || null,
-      hasAssignment: !!d.assignment, finance: dealFinance(d)
+      hasAssignment: !!d.assignment, lostReason: d.lostReason || null, finance: dealFinance(d)
     }))
   });
 }

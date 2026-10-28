@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   baseDeals, bounds, defaultFilters, delta, dealsCsv, filtersFromHash, filtersToHash, funnel,
-  metrics, monthly, niceMax, stageAt, toCsv, unpaidRows, wonDate, compact,
+  lostRows, metrics, monthly, niceMax, stageAt, toCsv, unpaidRows, wonDate, compact,
   type InsightsDeal,
 } from "../lib/insights.ts";
 
@@ -19,7 +19,7 @@ let n = 0;
 const deal = (over: Partial<InsightsDeal> = {}): InsightsDeal => ({
   id: `D-${++n}`, client: "Client", lab: "faith", stage: "Lead", leader: "marcus", leaderName: "Marcus",
   amount: 10000, created: "2026-03-01", updated: "2026-03-01", close: null, stageDates: null,
-  companyId: null, billing: null, hasAssignment: true, finance: fin(10000), ...over,
+  companyId: null, billing: null, hasAssignment: true, lostReason: null, finance: fin(10000), ...over,
 });
 const ctx = { basis: "closed" as const, today: TODAY, weights: { "Proposal Sent": 25 as number } };
 
@@ -183,4 +183,16 @@ test("a founder-run deal's remainder after hard and contractor costs is all OL s
   assert.equal(m.costs.sub, 6000);
   assert.equal(m.costs.payout, 0);
   assert.equal(m.ol, 50000);
+});
+
+test("lost deals in range are listed newest first with their reasons", () => {
+  const lost = (d: string, reason: string | null) =>
+    deal({ stage: "Closed Lost", lostReason: reason, stageDates: { "Closed Lost": d } });
+  const ds = [
+    lost("2026-03-01", "Budget cut"), lost("2026-05-01", null), lost("2025-12-31", "Too early"),
+    deal({ stage: "Contracted" }),
+  ];
+  const rows = lostRows(ds, "2026-01-01", "2026-10-02", "closed");
+  assert.deepEqual(rows.map((r) => r.lostOn), ["2026-05-01", "2026-03-01"]);
+  assert.deepEqual(rows.map((r) => r.deal.lostReason), [null, "Budget cut"]);
 });

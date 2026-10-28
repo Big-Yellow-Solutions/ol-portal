@@ -54,6 +54,8 @@ export interface InsightsDeal {
   /** The company the deal bills to, when one is linked. */
   billing: string | null;
   hasAssignment: boolean;
+  /** Why the deal was lost; null on a deal lost before reasons were required. */
+  lostReason: string | null;
   finance: DealFinance;
 }
 
@@ -368,6 +370,19 @@ export function unpaidRows(ds: InsightsDeal[], today: string): UnpaidRow[] {
       const reason = !signed ? null : !deal.hasAssignment ? "no-assignment" : !deal.finance.reconciles ? "unallocated" : null;
       return { deal, waiting, aging: waiting > AGING_DAYS, unreconciled: reason !== null, reason };
     });
+}
+
+export interface LostRow { deal: InsightsDeal; lostOn: string }
+
+/** Deals lost in [s, e), newest first. Dated by when they were lost, or by
+ *  creation under the "created" basis, matching how metrics() counts losses. */
+export function lostRows(ds: InsightsDeal[], s: string, e: string, basis: Basis): LostRow[] {
+  return ds
+    .filter(isLost)
+    .map((deal) => ({ deal, lostOn: lostDate(deal)!, on: basis === "created" ? created(deal) : lostDate(deal)! }))
+    .filter((r) => r.on >= s && r.on < e)
+    .map(({ deal, lostOn }) => ({ deal, lostOn }))
+    .sort((a, b) => b.lostOn.localeCompare(a.lostOn));
 }
 
 export interface LabRow {
