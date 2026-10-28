@@ -76,6 +76,11 @@ const stageLabel = s => STAGE_LABEL[s] ?? s;
    still only "Won" at Closed, not at Contracted. */
 const CLOSED_WON = "Closed";
 const CLOSED_LOST = "Closed Lost";
+/* Losing a deal still skips every gate, but it now has to say why: the reason
+   is what makes a lost deal worth reporting on. Required on the move into the
+   lost stage (and on create); a deal that was lost before this existed keeps
+   editing freely without one. */
+const cleanLostReason = v => (typeof v === "string" ? v.trim().slice(0, 1000) : "");
 const outcomeOf = stage => (stage === CLOSED_WON ? "Won" : stage === CLOSED_LOST ? "Lost" : null);
 // "Network" and "Event" added for Pipeline v2 (design handoff) — additive, so
 // deals sourced before this change keep reading the same three values.
@@ -161,6 +166,7 @@ async function isValidDealOwner(key) {
 async function createDeal(ctx, body) {
   if (!ctx.can.addDeal()) return resp(403, { error: "Not allowed to add deals" });
   const { client, lab, owner, dealOwner, stage, amount, close, source, recurring } = body || {};
+  const lostReason = cleanLostReason(body?.lostReason);
   const assignable = ctx.role === "Admin" ? null : ctx.me.labs || [];
   if (typeof client !== "string" || !client.trim()) return resp(400, { error: "client is required" });
   if (!(await get("LAB", lab))) return resp(400, { error: "unknown lab" });
@@ -168,6 +174,7 @@ async function createDeal(ctx, body) {
   if (!STAGES.includes(stage)) return resp(400, { error: "invalid stage" });
   if (!SOURCES.includes(source)) return resp(400, { error: "invalid source" });
   if (!Number.isFinite(amount) || amount < 0) return resp(400, { error: "invalid amount" });
+  if (stage === CLOSED_LOST && !lostReason) return resp(400, { error: "A reason is required to close a deal as lost" });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(close || "")) return resp(400, { error: "invalid close date" });
   const ownerKey = ctx.role === "Lab Leader" ? ctx.me.sk : (owner || ctx.me.sk);
   if (!(await get("PERSON", ownerKey))) return resp(400, { error: "unknown owner" });
@@ -198,7 +205,8 @@ async function createDeal(ctx, body) {
     pk: "DEAL", sk: id, client: client.trim(), lab, owner: ownerKey, dealOwner: dealOwnerKey,
     stage, amount, close, source, recurring: !!recurring, companyId, contactId,
     created: stamp, updated: stamp, stageDates: enterStage({}, stage, stamp),
-    ...(outcomeOf(stage) ? { outcome: outcomeOf(stage) } : {})
+    ...(outcomeOf(stage) ? { outcome: outcomeOf(stage) } : {}),
+    ...(stage === CLOSED_LOST ? { lostReason } : {})
   };
   await put(deal);
   const { pk, sk, ...rest } = deal;
@@ -212,8 +220,9 @@ async function updateDeal(ctx, id, body) {
   const patch = {};
   const editable = ["client", "owner", "dealOwner", "stage", "amount", "close", "source", "recurring",
     "lab", "recurPaused", "autoInvoice", "recurEnd",
-    "companyId", "contactId"];
+    "companyId", "contactId", "lostReason"];
   for (const k of editable) if (body && k in body) patch[k] = body[k];
+  if ("lostReason" in patch) patch.lostReason = cleanLostReason(patch.lostReason);
   if ("recurPaused" in patch) patch.recurPaused = !!patch.recurPaused;
   if ("autoInvoice" in patch) patch.autoInvoice = !!patch.autoInvoice;
   if ("recurEnd" in patch && patch.recurEnd && !/^\d{4}-\d{2}-\d{2}$/.test(patch.recurEnd))
@@ -235,6 +244,18 @@ async function updateDeal(ctx, id, body) {
   if ("contactId" in patch && patch.contactId &&
       (!(await get("CONTACT", patch.contactId)) || !contacts.inScope(entityScope, "contacts", patch.contactId)))
     return resp(400, { error: "unknown contact" });
+
+  // Closing as lost needs a reason, on the move into the stage. An already-lost
+  // deal may have none (it predates this) but cannot have one blanked out.
+  {
+    const nextStage = patch.stage ?? deal.stage;
+    if (nextStage === CLOSED_LOST) {
+      const entering = deal.stage !== CLOSED_LOST;
+      const reason = "lostReason" in patch ? patch.lostReason : deal.lostReason;
+      if (!reason && (entering || "lostReason" in patch))
+        return resp(400, { error: "A reason is required to close a deal as lost" });
+    }
+  }
 
   // Billing-entity, sent-proposal, signed-contract and uploaded-invoice gates
   // only fire on the transition that actually crosses each one (or, for
@@ -295,6 +316,7 @@ async function updateDeal(ctx, id, body) {
   if (next.stage !== deal.stage) next.stageDates = enterStage(deal, next.stage);
   const outcome = outcomeOf(next.stage);
   if (outcome) next.outcome = outcome; else delete next.outcome;
+  if (next.stage !== CLOSED_LOST) delete next.lostReason;
   await put(next);
   const { pk, sk, ...rest } = next;
   return resp(200, { id: sk, ...rest });

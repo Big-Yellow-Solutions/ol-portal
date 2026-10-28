@@ -27,6 +27,7 @@ import {
   contractRequiredAt,
   invoiceRequiredAt,
   CONTRACT_GATE_STAGE,
+  isLost,
   SHOW_COLUMN_TOTALS,
 } from "@/lib/pipeline";
 import { STAGES, STAGE_LABELS } from "@/lib/types";
@@ -210,6 +211,13 @@ function PipelineBoard() {
     if (deal.stage === targetStage) return;
     if (!can.editDeal(deal, role!, myLabs, me)) {
       toast.error("You don't have permission to move this deal.");
+      return;
+    }
+    /* Losing a deal skips every gate below but needs a reason, which only the
+       drawer can collect — so a drop on Closed Lost opens it already there. */
+    if (isLost(targetStage)) {
+      toast.info(`Say why ${deal.client} was lost to close it out`);
+      openDeal(deal, targetStage);
       return;
     }
     if (billingRequiredAt(targetStage) && !deal.companyId && !deal.contactId) {

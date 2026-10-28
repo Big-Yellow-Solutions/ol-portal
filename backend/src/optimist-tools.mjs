@@ -85,6 +85,7 @@ const TOOLS = [
           amount: money(d.amount), expectedClose: d.close, owner: d.owner,
           source: d.source, recurring: !!d.recurring,
           ...(d.outcome ? { outcome: d.outcome } : {}),
+          ...(d.lostReason ? { lostReason: d.lostReason } : {}),
           ...(d.contractSigned ? { contractSigned: true } : {}),
           ...(d.readyToClose ? { readyToClose: true } : {})
         })),
@@ -116,6 +117,7 @@ const TOOLS = [
         amount: money(d.amount), expectedClose: d.close, source: d.source,
         owner: d.owner, dealOwner: d.dealOwner, recurring: !!d.recurring,
         outcome: d.outcome || null,
+        ...(d.lostReason ? { lostReason: d.lostReason } : {}),
         contractSigned: !!d.contractSigned,
         proposals: (props.data || []).filter(p => p.deal === id)
           .map(p => ({ id: p.id, title: p.title, status: p.status, version: p.version, updated: p.updated })),

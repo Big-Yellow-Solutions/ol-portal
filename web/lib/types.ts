@@ -319,6 +319,8 @@ export interface Deal {
   source: Source;
   recurring: boolean;
   outcome?: Outcome;
+  /** Why the deal was lost; required on the move into Closed Lost. */
+  lostReason?: string;
   assignment?: Assignment;
   /** @deprecated superseded by `assignment`; read only to seed the new form. */
   assignmentNotice?: LegacyAssignmentNotice;
