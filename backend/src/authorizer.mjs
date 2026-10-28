@@ -13,7 +13,9 @@
 
 import { PutCommand } from "@aws-sdk/lib-dynamodb";
 import { decodeJwt } from "jose";
-import { verifyWorkosToken, sessionVerified, isVerifyRoute, issuers } from "./authz.mjs";
+import {
+  verifyWorkosToken, sessionVerified, isVerifyRoute, issuers, isTransientTokenError
+} from "./authz.mjs";
 import { doc, TABLE, writeAudit, AUDIT_TTL_DAYS } from "./util.mjs";
 
 const DENY = { isAuthorized: false };
@@ -70,6 +72,12 @@ export const handler = async event => {
   try {
     claims = await verifyWorkosToken(token);
   } catch (err) {
+    /* Not a verdict on the token (see isTransientTokenError): fail the
+       request, not the session. */
+    if (isTransientTokenError(err)) {
+      log("token verification unavailable", err.message);
+      throw err;
+    }
     /* Expired, forged, wrong environment and wrong key all land here and all
        mean the same thing to the caller. Logged with the reason because the
        difference matters a great deal from this side — an issuer mismatch
@@ -124,8 +132,11 @@ export const handler = async event => {
   try {
     verified = await sessionVerified(sid);
   } catch (err) {
+    /* A DynamoDB hiccup says nothing about the session. A deny here reached
+       the browser as a 401 and signed a perfectly good session out; throwing
+       makes it a 500 the client simply retries. */
     log("verification lookup failed", err.message);
-    return DENY;
+    throw err;
   }
   const path = (event.rawPath || "").replace(/\/+$/, "");
   if (!verified && !isVerifyRoute(path)) return DENY;

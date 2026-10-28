@@ -17,7 +17,7 @@ export interface TokenSource {
   /** The bearer token for the API; null when the session is conclusively
    *  gone (the provider is then already getting the user to sign-in); a
    *  rejection when it could not be renewed right now but may be later. */
-  getToken: () => Promise<string | null>;
+  getToken: (opts?: { forceRefresh?: boolean }) => Promise<string | null>;
   /** Ends the session and gets the user back to a signed-out surface. A
    *  no-op while a sign-in the provider started is already navigating. */
   endSession: () => Promise<void>;
@@ -42,8 +42,13 @@ function required(): TokenSource {
   return source;
 }
 
-export function getAuthToken(): Promise<string | null> {
-  return required().getToken();
+/* forceRefresh asks the provider to mint a new token rather than hand back
+   the cached one; api() uses it once after a 401, before giving up on the
+   session. */
+export function getAuthToken(opts?: {
+  forceRefresh?: boolean;
+}): Promise<string | null> {
+  return required().getToken(opts);
 }
 
 export function endSession(): Promise<void> {

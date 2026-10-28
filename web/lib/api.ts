@@ -33,13 +33,15 @@ export class ApiError extends Error {
 
 export async function api<T = unknown>(
   path: string,
-  opts: RequestInit & { skipActAs?: boolean } = {}
+  opts: RequestInit & { skipActAs?: boolean; authRetried?: boolean } = {}
 ): Promise<T> {
+  const { authRetried, ...init } = opts;
   /* Three answers from the token source (lib/session.ts): a token, null for
      a session that is conclusively gone, or a rejection for a renewal that
      failed for now and may succeed next time — that last one propagates as
      an ordinary error, never as a sign-out. */
   const token = await getAuthToken();
+  opts = init;
 
   /* No token means the session is gone. Sending the request anyway is not
      harmless — the Authorization header is the API's declared identity
@@ -63,6 +65,16 @@ export async function api<T = unknown>(
   const res = await fetch(`${CONFIG.apiUrl}${path}`, { ...opts, headers });
 
   if (res.status === 401) {
+    /* One 401 is not yet proof the session is over: the token can expire
+       between being handed out and being checked, and ending the session
+       throws away the whole sign-in. Ask for a freshly minted token and try
+       once more; only a second refusal ends it. A refresh that fails for now
+       rejects, which propagates as an ordinary error, and one that says the
+       session is gone returns null, which falls through to the end below. */
+    if (!authRetried) {
+      const fresh = await getAuthToken({ forceRefresh: true });
+      if (fresh) return api<T>(path, { ...opts, authRetried: true });
+    }
     // endSession both clears the session and navigates; the throw only stops
     // this caller from carrying on as though it had data.
     await endSession();
