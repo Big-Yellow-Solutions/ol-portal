@@ -1,6 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useRouter } from "next/navigation";
 import {
   AuthKitProvider,
@@ -46,9 +53,38 @@ function hostedInstead<A extends unknown[], R>(what: string) {
 type SignIn = (opts: { state: { returnTo: string } }) => Promise<void>;
 let reauthInFlight = false;
 
+/* A re-entry that lands back on a page that immediately needs another one is
+   a loop the user cannot get out of, so after REAUTH_MAX within REAUTH_WINDOW
+   this declines and lets the caller end the session instead. Kept in
+   sessionStorage because each attempt replaces the document. */
+const REAUTH_KEY = "olportal.reauthAt";
+const REAUTH_MAX = 3;
+const REAUTH_WINDOW_MS = 60_000;
+
+function reauthAllowed(): boolean {
+  try {
+    const now = Date.now();
+    const prior: unknown = JSON.parse(
+      window.sessionStorage.getItem(REAUTH_KEY) ?? "[]"
+    );
+    const recent = (Array.isArray(prior) ? prior : []).filter(
+      (t): t is number => typeof t === "number" && now - t < REAUTH_WINDOW_MS
+    );
+    if (recent.length >= REAUTH_MAX) return false;
+    window.sessionStorage.setItem(REAUTH_KEY, JSON.stringify([...recent, now]));
+  } catch {
+    // Storage blocked: no way to count, so allow it rather than sign out.
+  }
+  return true;
+}
+
 function reauthenticate(signIn: SignIn, reason: string) {
   if (reauthInFlight) {
     trace("reauth.already", { reason });
+    return;
+  }
+  if (!reauthAllowed()) {
+    trace("reauth.loop-guard", { reason });
     return;
   }
   reauthInFlight = true;
@@ -240,7 +276,7 @@ function WorkosAuthBridge({ children }: { children: React.ReactNode }) {
       );
     } catch (err: unknown) {
       if (err instanceof LoginRequiredError) {
-        trace("token.login-required");
+        trace("token.login-required", { isLoading });
         if (!isLoading) reauthenticate(signIn, "login-required");
         return null;
       }
@@ -277,7 +313,15 @@ function WorkosAuthBridge({ children }: { children: React.ReactNode }) {
     }
   }, [signOut]);
 
-  useEffect(() => {
+  /* A layout effect, not a passive one: passive effects run children first,
+     and the portal layout's own first request (is this session verified?)
+     goes out in a child's passive effect on the very commit that flips the
+     status to signed in. Registered passively, that request used the
+     previous render's token function, whose `isLoading` was still true — so
+     a dead refresh was not answered with a re-sign-in, api() read the null as
+     "session gone" and signed the user out of WorkOS outright. Layout effects
+     run before any passive effect, so the function in place is this render's. */
+  useLayoutEffect(() => {
     registerTokenSource({ getToken: token, endSession: async () => leave() });
   }, [token, leave]);
 
