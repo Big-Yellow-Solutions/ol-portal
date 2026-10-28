@@ -242,6 +242,9 @@ export interface Assignment {
   hardCosts: number;
   subcontractorCosts: number;
   leaders: AssignmentLeader[];
+  /** Admin-only override: founders draw distributions rather than per-deal
+   *  payouts, so after hard and contractor costs everything goes to OL. */
+  founderRun?: boolean;
   notes?: string;
   /** Server-computed. */
   softReserve: number;

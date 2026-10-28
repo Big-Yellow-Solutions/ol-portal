@@ -440,3 +440,49 @@ test("a deal stored as Negotiating reads back as Proposal Sent, and saves that w
   const retired = await call("liz", "PATCH", "/deals/D-1", { stage: "Negotiating" });
   assert.equal(retired.status, 400, "Negotiating can no longer be chosen");
 });
+
+/* ---------- founder-run override ---------- */
+
+test("founder-run: hard and contractor costs come off, everything else is OL's — no reserve, no pool", () => {
+  const m = assignmentMath({ contractValue: 60000, hardCosts: 4000, subcontractorCosts: 6000, leaders: [], founderRun: true });
+  assert.equal(m.softReserve, 0);
+  assert.equal(m.pool, 0);
+  assert.equal(m.ol, 50000);                  // 60,000 − 4,000 − 6,000
+  assert.deepEqual(m.payouts, []);
+});
+
+test("a founder-run filing needs no leaders, and drops any that were sent", () => {
+  const ok = cleanAssignment({ ...FORM, founderRun: true, leaders: [] });
+  assert.equal(ok.error, undefined);
+  assert.equal(ok.value.founderRun, true);
+  assert.deepEqual(cleanAssignment({ ...FORM, founderRun: true }).value.leaders, []);
+  assert.equal(cleanAssignment(FORM).value.founderRun, false);
+});
+
+test("founder-run is admin-only, to set and to undo", async () => {
+  deal("D-F", { stage: "Contracted" });
+  const asLeader = await call("marcus", "POST", "/deals/D-F/assignment", { ...FORM, founderRun: true });
+  assert.equal(asLeader.status, 403);
+
+  const asAdmin = await call("seth", "POST", "/deals/D-F/assignment", { ...FORM, founderRun: true, leaders: [] });
+  assert.equal(asAdmin.status, 200);
+  assert.equal(asAdmin.body.assignment.founderRun, true);
+  assert.equal(asAdmin.body.assignment.pool, 0);
+  assert.equal(asAdmin.body.assignment.ol, 50000);
+
+  // The owner cannot revise it back into a leader split behind the admin.
+  const undo = await call("marcus", "POST", "/deals/D-F/assignment", FORM);
+  assert.equal(undo.status, 403);
+});
+
+test("Insights counts a founder-run deal's remainder as OL share with nothing unallocated", async () => {
+  deal("D-G", { stage: "Contracted" });
+  await call("seth", "POST", "/deals/D-G/assignment", { ...FORM, founderRun: true, leaders: [] });
+  const res = await call("liz", "GET", "/insights");
+  const f = res.body.deals.find(d => d.id === "D-G").finance;
+  assert.equal(f.founderRun, true);
+  assert.equal(f.ol, 50000);
+  assert.equal(f.payout, 0);
+  assert.equal(f.soft, 0);
+  assert.equal(f.reconciles, true);
+});

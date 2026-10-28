@@ -50,24 +50,26 @@ export function dealFinance(deal) {
   if (a && Number.isFinite(a.contractValue)) {
     const math = assignmentMath({
       contractValue: a.contractValue, hardCosts: a.hardCosts || 0,
-      subcontractorCosts: a.subcontractorCosts || 0, leaders: a.leaders || []
+      subcontractorCosts: a.subcontractorCosts || 0, leaders: a.leaders || [],
+      founderRun: !!a.founderRun
     });
-    const payouts = Array.isArray(a.payouts) && a.payouts.length ? a.payouts : math.payouts;
+    const payouts = Array.isArray(a.payouts) && a.payouts.length && !a.founderRun ? a.payouts : math.payouts;
     const payout = payouts.reduce((t, p) => t + (p.payout || 0), 0);
     const tolerance = 0.5 * Math.max(1, payouts.length);
     const unallocated = r2(math.pool - payout);
     return {
       tcv: a.contractValue, hard: a.hardCosts || 0, sub: a.subcontractorCosts || 0,
-      soft: math.softReserve, payout, ol: math.net - math.pool, unallocated,
+      soft: math.softReserve, payout, ol: math.ol, unallocated,
       reconciles: Math.abs(unallocated) <= tolerance,
-      source: a.approved ? "approved" : "filed"
+      source: a.approved ? "approved" : "filed",
+      founderRun: !!a.founderRun
     };
   }
   const math = assignmentMath({ contractValue: deal.amount || 0 });
   return {
     tcv: deal.amount || 0, hard: 0, sub: 0, soft: math.softReserve,
-    payout: math.pool, ol: math.net - math.pool, unallocated: 0,
-    reconciles: false, source: "projected"
+    payout: math.pool, ol: math.ol, unallocated: 0,
+    reconciles: false, source: "projected", founderRun: false
   };
 }
 

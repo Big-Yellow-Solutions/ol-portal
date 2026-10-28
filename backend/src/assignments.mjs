@@ -73,8 +73,15 @@ const money = v => (Number.isFinite(v) && v >= 0 ? Math.round(v) : null);
 /* The pool math, in one place because three surfaces render it: the form's
    live preview, the filed receipt, and whatever finance exports later. Every
    step rounds to whole dollars so the breakdown always adds up on screen. */
-export function assignmentMath({ contractValue = 0, hardCosts = 0, subcontractorCosts = 0, leaders = [] }) {
+export function assignmentMath({ contractValue = 0, hardCosts = 0, subcontractorCosts = 0, leaders = [], founderRun = false }) {
   const gross = Math.max(contractValue, 0);
+  /* Founder-run: founders draw distributions rather than per-deal payouts, so
+     hard and contractor costs still come off the top but nothing else is
+     carved out — no soft reserve, no leader pool. Whatever is left is OL's. */
+  if (founderRun) {
+    const ol = Math.max(gross - hardCosts - subcontractorCosts, 0);
+    return { softReserve: 0, net: ol, pool: 0, ol, payouts: [] };
+  }
   const soft = Math.round((gross * SOFT_RESERVE_PCT) / 100);
   const net = Math.max(gross - hardCosts - subcontractorCosts - soft, 0);
   const pool = Math.round((net * POOL_PCT) / 100);
@@ -82,6 +89,7 @@ export function assignmentMath({ contractValue = 0, hardCosts = 0, subcontractor
     softReserve: soft,
     net,
     pool,
+    ol: net - pool,
     payouts: leaders.map(l => ({ key: l.key, pct: l.pct, payout: Math.round((pool * l.pct) / 100) }))
   };
 }
@@ -90,6 +98,7 @@ export function assignmentMath({ contractValue = 0, hardCosts = 0, subcontractor
    caller, which needs an await per person. */
 export function cleanAssignment(body) {
   const b = body || {};
+  const founderRun = b.founderRun === true;
   const agreementRef = str(b.agreementRef, 200);
   if (!agreementRef) return { error: "a client agreement reference is required" };
   const clientName = str(b.clientName, 200);
@@ -107,6 +116,17 @@ export function cleanAssignment(body) {
 
   const cadence = str(b.cadence, 60);
   if (!CADENCES.includes(cadence)) return { error: "invalid payment cadence" };
+
+  /* A founder-run deal has no leader split to record. */
+  if (founderRun) {
+    return {
+      value: {
+        agreementRef, clientName, contractValue, issued, cadence,
+        hardCosts, subcontractorCosts, leaders: [], founderRun: true,
+        notes: str(b.notes, 2000)
+      }
+    };
+  }
 
   if (!Array.isArray(b.leaders) || !b.leaders.length)
     return { error: "at least one lab leader is required" };
@@ -127,7 +147,7 @@ export function cleanAssignment(body) {
   return {
     value: {
       agreementRef, clientName, contractValue, issued, cadence,
-      hardCosts, subcontractorCosts, leaders,
+      hardCosts, subcontractorCosts, leaders, founderRun: false,
       notes: str(b.notes, 2000)
     }
   };
@@ -156,6 +176,12 @@ export async function fileAssignment(ctx, dealId, body) {
     return resp(400, { error: "An assignment is only needed once a deal is Contracted (Signed) or Closed Won (Paid)" });
   if (deal.assignment?.approved)
     return resp(409, { error: "This assignment is approved and locked — ask the approver to reopen it before editing" });
+
+  /* The override is an Admin decision, on the effective role so an Admin
+     acting as a Lab Leader does not keep it. It also protects an existing
+     founder-run filing from being quietly turned back into a leader split. */
+  if ((body?.founderRun === true || deal.assignment?.founderRun) && ctx.role !== "Admin")
+    return resp(403, { error: "Founder-run assignments are admin-only" });
 
   const { value, error } = cleanAssignment(body);
   if (error) return resp(400, { error });
@@ -233,6 +259,7 @@ async function sendMail({ deal, to, subject, lead, assignment, cta }) {
   const usd = n => `$${Number(n || 0).toLocaleString("en-US")}`;
   const lines = [
     `Contract value: ${usd(assignment.contractValue)}`,
+    ...(assignment.founderRun ? ["Founder-run: everything after hard and contractor costs goes to Optimistic Labs"] : []),
     ...(await Promise.all((assignment.leaders || []).map(async l =>
       `${fullName(await get("PERSON", l.key)) || l.key}: ${l.pct}%`)))
   ];

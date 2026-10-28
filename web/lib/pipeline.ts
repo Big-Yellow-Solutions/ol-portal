@@ -194,6 +194,8 @@ export interface PoolMath {
   softReserve: number;
   net: number;
   pool: number;
+  /** Optimistic Labs' share: net less the leader pool. */
+  ol: number;
   payouts: { key: string; pct: number; payout: number }[];
 }
 
@@ -202,8 +204,13 @@ export function assignmentMath(input: {
   hardCosts: number;
   subcontractorCosts: number;
   leaders: { key: string; pct: number }[];
+  founderRun?: boolean;
 }): PoolMath {
   const gross = Math.max(input.contractValue || 0, 0);
+  if (input.founderRun) {
+    const ol = Math.max(gross - (input.hardCosts || 0) - (input.subcontractorCosts || 0), 0);
+    return { softReserve: 0, net: ol, pool: 0, ol, payouts: [] };
+  }
   const softReserve = Math.round((gross * SOFT_RESERVE_PCT) / 100);
   const net = Math.max(gross - (input.hardCosts || 0) - (input.subcontractorCosts || 0) - softReserve, 0);
   const pool = Math.round((net * POOL_PCT) / 100);
@@ -211,6 +218,7 @@ export function assignmentMath(input: {
     softReserve,
     net,
     pool,
+    ol: net - pool,
     payouts: input.leaders.map((l) => ({ key: l.key, pct: l.pct, payout: Math.round((pool * l.pct) / 100) })),
   };
 }

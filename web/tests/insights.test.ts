@@ -174,3 +174,13 @@ test("CSV: quotes, and a typed deal name can't open as a spreadsheet formula", (
   assert.ok(csv.includes("'=cmd"), "the formula is neutralised");
   assert.ok(csv.startsWith("Summary\nGenerated,now by Liz"));
 });
+
+test("a founder-run deal's remainder after hard and contractor costs is all OL share", () => {
+  const f = { ...fin(60000), hard: 4000, sub: 6000, soft: 0, payout: 0, ol: 50000, founderRun: true };
+  const m = metrics([deal({ stage: "Contracted", stageDates: { Contracted: "2026-06-01" }, finance: f })],
+    "2026-01-01", "2026-10-02", ctx);
+  assert.equal(m.costs.hard, 4000);
+  assert.equal(m.costs.sub, 6000);
+  assert.equal(m.costs.payout, 0);
+  assert.equal(m.ol, 50000);
+});

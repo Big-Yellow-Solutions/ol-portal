@@ -372,7 +372,9 @@ export function DealDrawer({
                       <span className="block text-[13px] font-semibold text-ink">Assignment form on file</span>
                       <span className="block truncate text-xs text-ink-mute">
                         {assignment === "approved" ? "Approved" : "Awaiting approval"}
-                        {liveDeal.assignment?.leaders.length
+                        {liveDeal.assignment?.founderRun
+                          ? " · Founder-run"
+                          : liveDeal.assignment?.leaders.length
                           ? ` · ${liveDeal.assignment.leaders.map((l) => fullName(people[l.key]) || l.key).join(", ")}`
                           : ""}
                       </span>

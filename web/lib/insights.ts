@@ -34,6 +34,8 @@ export interface DealFinance {
   reconciles: boolean;
   /** "projected": no assignment filed, so costs are assumed to be zero. */
   source: "approved" | "filed" | "projected";
+  /** Founder-run: no leader payout, the remainder after hard and contractor costs is OL's. */
+  founderRun?: boolean;
 }
 
 export interface InsightsDeal {

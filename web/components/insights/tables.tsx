@@ -242,6 +242,9 @@ export function DealsTable({
                   <td className={cn(CELL, "text-right")}>{x.payout == null ? "—" : money(x.payout)}</td>
                   <td className={cn(CELL, "pr-6 text-right")}>
                     <div className="font-semibold text-violet-deep">{x.ol == null ? "—" : money(x.ol)}</div>
+                    {d.finance.founderRun && (
+                      <span className="mt-1 inline-block rounded-full bg-violet-pale px-2 py-0.5 text-[11px] font-semibold text-violet-deep">Founder-run</span>
+                    )}
                     {r.reason === "no-assignment" && (
                       <span className="mt-1 inline-block rounded-full bg-[#FBEFE6] px-2 py-0.5 text-[11px] font-semibold text-[#8A3B12]">No assignment filed</span>
                     )}
