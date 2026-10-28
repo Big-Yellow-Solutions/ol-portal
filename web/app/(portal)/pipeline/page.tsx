@@ -57,7 +57,7 @@ export default function PipelinePage() {
 }
 
 function PipelineBoard() {
-  const { loading, error, deals, labs, people, companies, contacts, proposals, contracts, invoices, files, role, me, myLabs, setDeals } =
+  const { loading, error, deals, labs, people, companies, contacts, proposals, contracts, invoices, files, waivers, role, me, myLabs, setDeals } =
     usePortalData();
   const router = useRouter();
   const pathname = usePathname();
@@ -157,13 +157,22 @@ function PipelineBoard() {
      below reads this rather than a proposal record, because proposals are
      written outside the portal now and uploaded on the deal's Documents tab. */
   const dealsWithProposalFile = useMemo(
-    () => new Set(files.filter((f) => f.kind === "proposal" && f.deal).map((f) => f.deal!)),
-    [files]
+    () =>
+      new Set([
+        ...files.filter((f) => f.kind === "proposal" && f.deal).map((f) => f.deal!),
+        // An approved waiver clears the same gate; a pending one never does.
+        ...waivers.filter((w) => w.requirement === "proposal" && w.status === "approved").map((w) => w.deal),
+      ]),
+    [files, waivers]
   );
 
   const dealsWithContractFile = useMemo(
-    () => new Set(files.filter((f) => f.kind === "contract" && f.deal).map((f) => f.deal!)),
-    [files]
+    () =>
+      new Set([
+        ...files.filter((f) => f.kind === "contract" && f.deal).map((f) => f.deal!),
+        ...waivers.filter((w) => w.requirement === "contract" && w.status === "approved").map((w) => w.deal),
+      ]),
+    [files, waivers]
   );
 
   /* Closed now means paid, and an uploaded invoice is the portal's stand-in
