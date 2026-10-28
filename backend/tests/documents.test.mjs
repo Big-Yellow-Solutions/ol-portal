@@ -132,6 +132,8 @@ const deal = (id, over = {}) => {
 };
 
 
+const { planVersionFixes } = await import("../src/documents.mjs");
+
 test.beforeEach(seed);
 
 /* A file the way createFile leaves it, minus the S3 round trip. */
@@ -361,4 +363,34 @@ test("a deleted version's number is not reused, and /files says what the next on
   assert.equal(list.body[0].maxVersion, 2, "the deleted v2 still holds its number");
   const up = await call("marcus", "POST", "/files", { name: "p.pdf", size: 10, type: "application/pdf", deal: "D-19", kind: "proposal", lab: "sports" });
   assert.equal(rows.get(rowKey("FILE", up.body.id)).version, 3);
+});
+
+/* ---------- migrating uploads that predate versions ---------- */
+
+test("a lone unversioned upload, or a clean versioned chain, needs no migration", () => {
+  const f = (id, kind, version, date) => ({ sk: id, deal: "D-1", kind, version, date });
+  assert.deepEqual(planVersionFixes([f("a", "proposal", undefined, "2026-01-01")]), []);
+  assert.deepEqual(planVersionFixes([f("a", "proposal", undefined, "2026-01-01"), f("b", "proposal", 2, "2026-02-01")]), []);
+  assert.deepEqual(planVersionFixes([f("a", "contract", 1, "2026-01-01"), f("b", "contract", 2, "2026-02-01")]), []);
+});
+
+test("several unversioned uploads are numbered by date, and later versions shift up behind them", () => {
+  const f = (id, version, date, over = {}) => ({ sk: id, deal: "D-1", kind: "proposal", version, date, ...over });
+  const fixes = planVersionFixes([
+    f("late", undefined, "2026-03-01"), f("early", undefined, "2026-01-01"), f("mid", undefined, "2026-02-01"),
+    f("v2", 2, "2026-04-01"), f("v4", 4, "2026-06-01"),            // v3 was deleted earlier
+    f("gone", undefined, "2026-01-15", { deletedAt: "2026-02-01" }), // a deleted file is left alone
+    f("other", undefined, "2026-01-01", { deal: "D-2" }),            // a different deal is its own group
+  ]);
+  const to = Object.fromEntries(fixes.map(x => [x.id, x.to]));
+  assert.deepEqual(to, { early: 1, mid: 2, late: 3, v2: 4, v4: 6 }, "order kept, the v3 gap kept");
+  assert.equal(planVersionFixes([]).length, 0);
+});
+
+test("invoices are never renumbered, and re-running the plan after applying it changes nothing", () => {
+  const inv = [{ sk: "i1", deal: "D-1", kind: "invoice", date: "2026-01-01" }, { sk: "i2", deal: "D-1", kind: "invoice", date: "2026-02-01" }];
+  assert.deepEqual(planVersionFixes(inv), []);
+  const files = [{ sk: "a", deal: "D-1", kind: "contract", date: "2026-01-01" }, { sk: "b", deal: "D-1", kind: "contract", date: "2026-02-01" }];
+  const applied = files.map(f => ({ ...f, version: planVersionFixes(files).find(x => x.id === f.sk)?.to }));
+  assert.deepEqual(planVersionFixes(applied), []);
 });

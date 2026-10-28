@@ -243,3 +243,38 @@ export function protectedDeleteReason({ file, deal, files, waivers, stageLabel }
   return `This is the only ${KIND_NAME[file.kind]}, and a ${stageLabel(deal.stage)} deal needs one. ` +
     "Upload a new version first, or move the deal back a stage.";
 }
+
+/* ---------- migrating what was uploaded before versions ---------- */
+
+/* Files stored before versioning carry no `version` and read as v1. One of
+   them is harmless, and createFile numbers the next upload v2 so nothing
+   collides. Several are not: they all read "v1", the Documents tab cannot tell
+   its versions apart, and a mixed group can show two documents with the same
+   number. This puts them in order by upload date as v1..vN and shifts any
+   versioned file after them up by the same amount, so the order the portal
+   shows is the order things happened. Gaps left by deleted versions are kept —
+   a number is never reused — and a group that is already fine produces no
+   change, so re-running it is safe. Returns [{ id, from, to }]. */
+export function planVersionFixes(files) {
+  const groups = new Map();
+  for (const f of files) {
+    if (!f.deal || !["proposal", "contract"].includes(f.kind) || f.deletedAt) continue;
+    const k = `${f.deal}|${f.kind}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(f);
+  }
+  const fixes = [];
+  for (const group of groups.values()) {
+    const legacy = group.filter(f => !f.version)
+      .sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.sk.localeCompare(b.sk));
+    if (legacy.length < 2) continue;
+    const versioned = group.filter(f => f.version);
+    const lowest = Math.min(...versioned.map(f => f.version), Infinity);
+    // Versioned files started at 2 (the legacy pile counted as one v1), unless
+    // one of them is a v1, which means nothing legacy sat in front of it.
+    const shift = legacy.length - (lowest >= 2 ? 1 : 0);
+    legacy.forEach((f, i) => fixes.push({ id: f.sk, from: null, to: i + 1 }));
+    for (const f of versioned) fixes.push({ id: f.sk, from: f.version, to: f.version + shift });
+  }
+  return fixes.filter(x => x.from !== x.to);
+}
