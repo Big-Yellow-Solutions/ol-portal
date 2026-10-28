@@ -14,6 +14,7 @@ import {
 } from "@/lib/auth-context";
 import { CONFIG, WORKOS_CALLBACK_PATH } from "@/lib/config";
 import { currentPath, safeReturnTo } from "@/lib/return-to";
+import { trace } from "@/lib/auth-trace";
 import { registerTokenSource } from "@/lib/session";
 
 /* AuthKit hosts the credential screens, so everything the Cognito provider
@@ -27,32 +28,6 @@ function hostedInstead<A extends unknown[], R>(what: string) {
     Promise.reject(
       new Error(`${what} is handled by AuthKit's hosted pages, not the portal.`)
     );
-}
-
-/* A structured trace of the session's life, for following a redirect chain
-   in a real browser. On in development; in a production build only when
-   localStorage["olportal.authTrace"] is "1". One JSON line per event so it
-   survives copy-paste and log capture; events carry paths, statuses and
-   error names — never a token, a code or a cookie. */
-function trace(event: string, detail: Record<string, unknown> = {}) {
-  if (typeof window === "undefined") return;
-  if (process.env.NODE_ENV === "production") {
-    try {
-      if (window.localStorage.getItem("olportal.authTrace") !== "1") return;
-    } catch {
-      return;
-    }
-  }
-  console.debug(
-    "[auth]",
-    JSON.stringify({
-      t: new Date().toISOString(),
-      event,
-      path: currentPath(),
-      hidden: document.hidden,
-      ...detail,
-    })
-  );
 }
 
 /* One re-entry into AuthKit per page, however many callers notice that the
