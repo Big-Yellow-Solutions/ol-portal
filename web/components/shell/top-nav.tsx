@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { NotificationButton } from "@/components/shell/notification-button";
 import { useMessages } from "@/lib/messages";
+import { useNotifications } from "@/lib/notifications";
 import { usePortalData } from "@/lib/portal-data";
 import { useAuth } from "@/lib/auth";
 import { fullName, initials } from "@/lib/data";
@@ -130,6 +131,14 @@ export function TopNav() {
   const router = useRouter();
   const { role, people, me } = usePortalData();
   const { openList } = useMessages();
+  const { items } = useNotifications();
+  /* The dot is the bell's own record of messages you have not opened: a new
+     message or an @mention, until the thread is opened (the panel marks it
+     read) or the notification is. It was a permanent dot, so it said "new
+     message" whether or not there was one. */
+  const unreadMessages = items.some(
+    (n) => !n.read && (n.tab === "messages" || n.tab === "mentions")
+  );
   const { logout } = useAuth();
   const meRecord = me ? people[me] : undefined;
 
@@ -169,14 +178,16 @@ export function TopNav() {
           <button
             type="button"
             onClick={openList}
-            aria-label="Messages"
+            aria-label={unreadMessages ? "Messages, unread" : "Messages"}
             className="relative flex cursor-pointer items-center text-ink transition-colors hover:text-violet-deep"
           >
             <MessageIcon />
-            <span
-              aria-hidden="true"
-              className="absolute -top-0.5 -right-[3px] size-[7px] rounded-full bg-violet-deep"
-            />
+            {unreadMessages && (
+              <span
+                aria-hidden="true"
+                className="absolute -top-0.5 -right-[3px] size-[7px] rounded-full bg-violet-deep"
+              />
+            )}
           </button>
 
           {/* Was a <span> with a permanent dot and no handler: it claimed
