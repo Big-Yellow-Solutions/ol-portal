@@ -456,8 +456,9 @@ export function DealDrawer({
                 existing deal, surfaced right here instead: a brand-new deal
                 has no tab strip yet (it only appears once there is a record
                 to browse), so without this the stage gate below has no way
-                to be cleared during creation at all. */}
-            {propGated && !hasProposal && (
+                to be cleared during creation at all. An existing deal has the
+                Documents tab for this, so it is only offered here while new. */}
+            {isNew && propGated && !hasProposal && (
               persisted ? (
                 <DocumentUploadPanel
                   deal={persisted}
@@ -484,7 +485,7 @@ export function DealDrawer({
               )
             )}
 
-            {contractGated && !hasContract && (
+            {isNew && contractGated && !hasContract && (
               persisted ? (
                 <DocumentUploadPanel
                   deal={persisted}
@@ -511,7 +512,7 @@ export function DealDrawer({
               )
             )}
 
-            {invoiceGated && !hasInvoice && (
+            {isNew && invoiceGated && !hasInvoice && (
               persisted ? (
                 <DocumentUploadPanel
                   deal={persisted}
