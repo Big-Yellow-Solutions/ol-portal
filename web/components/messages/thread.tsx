@@ -18,7 +18,12 @@ import { cn } from "@/lib/utils";
    you have to answer is findable in a long scroll. */
 
 /* Typing "@" opens the picker; it closes as soon as the draft stops ending in
-   a bare @token. */
+   a bare @token.
+
+   Only people in the conversation can be @-ed. The server notifies members
+   and nobody else — someone outside could not open what the notification
+   points at — so offering anyone on the bench, and styling the name as if it
+   rang a bell, promised a notification that never went out. */
 const TRAILING_MENTION = /@([A-Za-z]*)$/;
 
 export function Thread() {
@@ -36,12 +41,16 @@ export function Thread() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs.length]);
 
-  const people = useMemo(() => [me, ...roster], [me, roster]);
-
   const inThread = useMemo(() => active?.members ?? [], [active]);
+  const people = useMemo(
+    () => [me, ...roster.filter((p) => inThread.includes(p.id))],
+    [me, roster, inThread]
+  );
+
   const pool = useMemo(() => {
     const q = (mq ?? "").toLowerCase();
     return roster
+      .filter((p) => inThread.includes(p.id))
       .filter((p) => {
         if (!q) return true;
         const last = p.name.split(" ").slice(1).join(" ");
@@ -49,13 +58,31 @@ export function Thread() {
           p.name.toLowerCase().startsWith(q) ||
           last.toLowerCase().startsWith(q)
         );
-      })
-      /* People already in the chat first — the likeliest @ in any thread. */
-      .sort(
-        (a, b) =>
-          Number(inThread.includes(b.id)) - Number(inThread.includes(a.id))
-      );
+      });
   }, [roster, mq, inThread]);
+
+  /* What the draft will do when sent: every highlighted name gets a
+     notification. The composer paints the same runs, so what is purple here
+     is exactly who is told. */
+  const draftParts = useMemo(() => segments(draft, people), [draft, people]);
+  const willNotify = useMemo(
+    () => [
+      ...new Set(
+        draftParts
+          .map((s) => s.id)
+          .filter((id): id is string => !!id && id !== ME)
+          .map((id) => person(id).first)
+      ),
+    ],
+    [draftParts, person]
+  );
+
+  /* The composer is an <input>, which cannot style part of its own text. The
+     coloured copy sits over it, pointer-events off, and the real text is made
+     transparent; this follows the input when a long draft scrolls it. */
+  const input = useRef<HTMLInputElement>(null);
+  const [scrollX, setScrollX] = useState(0);
+  const syncScroll = () => setScrollX(input.current?.scrollLeft ?? 0);
 
   const insertMention = (p: MessagePerson) => {
     setDraft((d) => d.replace(TRAILING_MENTION, `@${p.first} `));
@@ -191,16 +218,11 @@ export function Thread() {
                       {p.role}
                     </span>
                   </span>
-                  {inThread.includes(p.id) && (
-                    <span className="flex-none rounded-full bg-violet-pale px-2 py-[3px] text-[10px] font-semibold tracking-[0.06em] text-violet-deep uppercase">
-                      In chat
-                    </span>
-                  )}
                 </button>
               ))}
               {pool.length === 0 && (
                 <div className="p-3.5 text-[13px] text-warm-gray">
-                  No one by that name
+                  No one in this chat by that name
                 </div>
               )}
             </div>
@@ -214,13 +236,18 @@ export function Thread() {
           }}
           className="flex items-end gap-2"
         >
+          <div className="relative min-w-0 flex-1">
           <input
+            ref={input}
             value={draft}
+            onScroll={syncScroll}
+            onSelect={syncScroll}
             onChange={(e) => {
               const v = e.target.value;
               const hit = v.match(TRAILING_MENTION);
               setDraft(v);
               setMq(hit ? hit[1] : null);
+              requestAnimationFrame(syncScroll);
             }}
             onKeyDown={(e) => {
               if (mq === null) return;
@@ -239,9 +266,33 @@ export function Thread() {
             aria-label="Write a message"
             className={cn(
               FIELD,
-              "min-w-0 flex-1 rounded-[12px] px-[13px] py-[11px] text-sm"
+              "block w-full rounded-[12px] px-[13px] py-[11px] text-sm leading-5 text-transparent caret-ink placeholder:text-warm-gray"
             )}
           />
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 overflow-hidden rounded-[12px] border border-transparent px-[13px] py-[11px] text-sm leading-5 whitespace-pre"
+          >
+            <span
+              className="inline-block min-w-full text-ink"
+              style={{ transform: `translateX(${-scrollX}px)` }}
+            >
+              {draftParts.map((s, j) => (
+                /* No padding or weight on the highlight: either would make
+                   this copy wider than the input's own text and the two
+                   would drift apart down the line. */
+                <span
+                  key={j}
+                  className={cn(
+                    s.id && "rounded-[4px] bg-[rgba(124,109,245,0.22)] text-violet-deep"
+                  )}
+                >
+                  {s.text}
+                </span>
+              ))}
+            </span>
+          </div>
+          </div>
           <button
             type="submit"
             aria-label="Send"
@@ -256,6 +307,12 @@ export function Thread() {
             <ArrowRightIcon size={16} />
           </button>
         </form>
+        {willNotify.length > 0 && (
+          <div className="mt-2 flex items-center gap-[5px] text-[11px] font-medium text-violet-deep">
+            <BellIcon size={11} />
+            {willNotify.join(", ")} will be notified
+          </div>
+        )}
       </div>
     </>
   );
