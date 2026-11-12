@@ -36,6 +36,33 @@ Parameters:
       domain (NEXT_PUBLIC_WORKOS_API_HOSTNAME): tokens minted through it carry
       https://<that domain>/user_management/<client id> instead.
 
+  InboundMode:
+    Type: String
+    Default: dry-run
+    AllowedValues: [dry-run]
+    Description: >-
+      Email intake mode. dry-run records and replies but writes nothing to
+      Pipeline. "live" is added to AllowedValues by the phase that implements it.
+  InboundRecipient:
+    Type: String
+    Default: theoptimist@in.optimisticlabs.com
+    Description: >-
+      The hidden SES address that Google Workspace routing forwards
+      theoptimist@optimisticlabs.com to. Its subdomain's MX record points at
+      SES inbound. Never published.
+  InboundReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: >-
+      Reserved concurrency for the intake function; 0 leaves it unreserved.
+      Lambda requires 10 unreserved executions account-wide, so with the
+      current account quota of 10 a reservation is rejected. Raise the quota
+      first, then set this to 1 before the create phase (it removes the
+      nextId race for intake).
+
+Conditions:
+  ReserveInboundConcurrency: !Not [!Equals [!Ref InboundReservedConcurrency, 0]]
+
 Globals:
   Function:
     Runtime: nodejs24.x
@@ -57,6 +84,14 @@ Resources:
         BlockPublicPolicy: true
         IgnorePublicAcls: true
         RestrictPublicBuckets: true
+      # Raw inbound mail is kept for 90 days, the same as the INBOUND rows
+      # that point at it.
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-inbound-mail
+            Status: Enabled
+            Prefix: inbound/
+            ExpirationInDays: 90
       CorsConfiguration:
         CorsRules:
           - AllowedOrigins:
@@ -102,6 +137,94 @@ Resources:
                 Rules:
                   - Name: prefix
                     Value: uploads/
+
+  # ---- Email intake (the Optimist's inbox) ---------------------------------
+  # theoptimist@optimisticlabs.com is routed by Google Workspace to
+  # InboundRecipient; SES stores the raw message under inbound/ and the S3
+  # event below invokes InboundFunction. See docs/email-intake.md for the DNS,
+  # Workspace and rule-set activation steps that sit outside this template.
+  InboundFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-inbound
+      CodeUri: src/
+      Handler: inbound.handler
+      Architectures: [arm64]
+      Timeout: 120
+      MemorySize: 512
+      ReservedConcurrentExecutions: !If [ReserveInboundConcurrency, !Ref InboundReservedConcurrency, !Ref "AWS::NoValue"]
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+          ANTHROPIC_KEY_PARAM: /ol-portal/anthropic-api-key
+          AUTH_PROVIDER: !Ref AuthProvider
+          FRONTEND_URL: https://portal.optimisticlabs.com
+          INBOUND_MODE: !Ref InboundMode
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+        - SSMParameterReadPolicy:
+            ParameterName: ol-portal/anthropic-api-key
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::ol-portal-files-${AWS::AccountId}/inbound/*
+            - Effect: Allow
+              Action: ses:SendEmail
+              Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+      Events:
+        MailStored:
+          Type: S3
+          Properties:
+            Bucket: !Ref FilesBucket
+            Events: s3:ObjectCreated:*
+            # Only SES's own writes. The analyzer fires on uploads/, so raw
+            # mail never reaches it and never becomes a FILE row.
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: inbound/
+
+  InboundBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FilesBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSesToStoreInboundMail
+            Effect: Allow
+            Principal: { Service: ses.amazonaws.com }
+            Action: s3:PutObject
+            Resource: !Sub arn:aws:s3:::ol-portal-files-${AWS::AccountId}/inbound/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  # A rule set is created here but NOT activated: only one set can be active
+  # per region and activating it would replace whichever is active now. It is
+  # a manual step, after checking the account has none (docs/email-intake.md).
+  InboundRuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: ol-portal-inbound
+
+  InboundRule:
+    Type: AWS::SES::ReceiptRule
+    DependsOn: InboundBucketPolicy
+    Properties:
+      RuleSetName: !Ref InboundRuleSet
+      Rule:
+        Name: optimist-inbox
+        Enabled: true
+        ScanEnabled: true
+        TlsPolicy: Require
+        Recipients: [!Ref InboundRecipient]
+        Actions:
+          - S3Action:
+              BucketName: !Ref FilesBucket
+              ObjectKeyPrefix: inbound/
 
   PortalTable:
     Type: AWS::DynamoDB::Table

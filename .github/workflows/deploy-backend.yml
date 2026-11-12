@@ -45,6 +45,15 @@ jobs:
         with:
           node-version: "24"
 
+      # There is no staging stack, so a bad deploy writes straight to
+      # production. The suite is fast and needs no AWS access (the table is an
+      # in-memory stand-in), so it gates the deploy.
+      - name: test
+        working-directory: backend
+        run: |
+          npm ci
+          npm test
+
       # Every function here is plain Node.js with no native/compiled
       # dependencies (even ContractPdfFunction's @sparticuz/chromium ships a
       # prebuilt binary rather than compiling one at install time), so there's
