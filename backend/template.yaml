@@ -60,7 +60,16 @@ Parameters:
       first, then set this to 1 before the create phase (it removes the
       nextId race for intake).
 
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >-
+      Address that receives the SES bounce-rate and complaint-rate alarms. Empty
+      creates the alarms without a subscriber (they still show in CloudWatch),
+      which is not what you want in production: set it.
+
 Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
   ReserveInboundConcurrency: !Not [!Equals [!Ref InboundReservedConcurrency, 0]]
 
 Globals:
@@ -160,6 +169,7 @@ Resources:
           AUTH_PROVIDER: !Ref AuthProvider
           FRONTEND_URL: https://portal.optimisticlabs.com
           INBOUND_MODE: !Ref InboundMode
+          MAIL_CONFIG_SET: !Ref MailConfigurationSet
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
@@ -171,7 +181,9 @@ Resources:
               Resource: !Sub arn:aws:s3:::ol-portal-files-${AWS::AccountId}/inbound/*
             - Effect: Allow
               Action: ses:SendEmail
-              Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+              Resource:
+                - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${MailConfigurationSet}
       Events:
         MailStored:
           Type: S3
@@ -225,6 +237,113 @@ Resources:
           - S3Action:
               BucketName: !Ref FilesBucket
               ObjectKeyPrefix: inbound/
+
+  # ---- Bounce and complaint handling ----------------------------------------
+  # Every send names this configuration set (email.mjs). SES publishes bounce,
+  # complaint, reject and delivery-delay events to MailEventsTopic;
+  # MailEventsFunction records them and suppresses permanently-bounced or
+  # complaining addresses, which email.mjs then refuses to send to. Reputation
+  # metrics feed the two alarms below.
+  MailConfigurationSet:
+    Type: AWS::SES::ConfigurationSet
+    Properties:
+      Name: ol-portal-mail
+      ReputationOptions:
+        ReputationMetricsEnabled: true
+      SendingOptions:
+        SendingEnabled: true
+
+  MailEventsTopic:
+    Type: AWS::SNS::Topic
+
+  MailEventsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics: [!Ref MailEventsTopic]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowSesToPublishMailEvents
+            Effect: Allow
+            Principal: { Service: ses.amazonaws.com }
+            Action: sns:Publish
+            Resource: !Ref MailEventsTopic
+            Condition:
+              StringEquals:
+                AWS:SourceAccount: !Ref AWS::AccountId
+              ArnLike:
+                AWS:SourceArn: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${MailConfigurationSet}
+
+  MailEventDestination:
+    Type: AWS::SES::ConfigurationSetEventDestination
+    DependsOn: MailEventsTopicPolicy
+    Properties:
+      ConfigurationSetName: !Ref MailConfigurationSet
+      EventDestination:
+        Name: bounces-and-complaints
+        Enabled: true
+        MatchingEventTypes: [bounce, complaint, reject, deliveryDelay]
+        SnsDestination:
+          TopicARN: !Ref MailEventsTopic
+
+  MailEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ol-portal-mail-events
+      CodeUri: src/
+      Handler: mail-events.handler
+      Architectures: [arm64]
+      Timeout: 30
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref PortalTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref PortalTable
+      Events:
+        SesEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref MailEventsTopic
+
+  MailAlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription: !If
+        - HasAlertEmail
+        - [{ Protocol: email, Endpoint: !Ref AlertEmail }]
+        - !Ref AWS::NoValue
+
+  # AWS reviews an account at 5% bounces / 0.1% complaints and can pause
+  # sending. These fire at 2% and 0.05%, so there is time to act. The metrics
+  # are account-wide and arrive about hourly.
+  BounceRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: SES bounce rate above 2%. Check MAILEVENT rows in the portal table for the addresses.
+      Namespace: AWS/SES
+      MetricName: Reputation.BounceRate
+      Statistic: Average
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 0.02
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref MailAlertTopic]
+
+  ComplaintRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: SES complaint rate above 0.05%. Check MAILEVENT rows in the portal table for the addresses.
+      Namespace: AWS/SES
+      MetricName: Reputation.ComplaintRate
+      Statistic: Average
+      Period: 3600
+      EvaluationPeriods: 1
+      Threshold: 0.0005
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref MailAlertTopic]
 
   PortalTable:
     Type: AWS::DynamoDB::Table
@@ -580,6 +699,8 @@ Resources:
           # (Secrets Manager rather than the SSM SecureString the other
           # integrations use, because that is where this key lives.)
           WORKOS_SECRET_ID: !Ref WorkosSecretId
+          # Publishes this function's bounces and complaints (see MailEventsFunction).
+          MAIL_CONFIG_SET: !Ref MailConfigurationSet
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref PortalTable
@@ -619,7 +740,12 @@ Resources:
               Action:
                 - ses:SendEmail
                 - ses:SendRawEmail
-              Resource: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+              # Sending with a configuration set is authorised against the set
+              # as well as the identity; without the second ARN every send
+              # would be denied.
+              Resource:
+                - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/*
+                - !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:configuration-set/${MailConfigurationSet}
       Events:
         GetRoute:
           Type: HttpApi

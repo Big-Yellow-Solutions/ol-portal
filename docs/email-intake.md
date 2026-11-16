@@ -59,3 +59,28 @@ Dry-run replies right on lab, person and company for at least 9 in 10 of 15 to
   Message-ID) because the `INBOUND` sort key is arrival time.
 - **Model constant.** `models.mjs` is new; `optimist.mjs` and `guides.mjs` still
   carry their own copies of the same string.
+
+## Bounce and complaint handling (for SES production access)
+
+All outbound mail (sign-in codes, proposals, contract links, message and
+assignment notices, intake replies) is sent with the `ol-portal-mail`
+configuration set.
+
+- SES publishes bounce, complaint, reject and delivery-delay events to an SNS
+  topic; `ol-portal-mail-events` records each as a `MAILEVENT` row (90 days).
+- A **permanent** bounce or a **complaint** adds the address to the
+  `SUPPRESSION` list (no TTL). `email.mjs` checks it before every send and
+  throws `SuppressedRecipientError`, so the person who triggered the mail sees
+  the failure. Transient and undetermined bounces, rejects and delays are
+  recorded, not suppressed. If the lookup itself fails, the mail still sends.
+- CloudWatch alarms on the account's `Reputation.BounceRate` (2%) and
+  `Reputation.ComplaintRate` (0.05%) notify `AlertEmail`. AWS reviews at 5% and
+  0.1%.
+- Clear an address once corrected: `node scripts/clear-suppression.mjs <email>`
+  (and `aws sesv2 delete-suppressed-destination --email-address <email>` if it
+  is on SES's own list too).
+
+**Before deploying:** set the GitHub repository variable `ALERT_EMAIL`
+(Settings, Secrets and variables, Variables). Unset, the alarms exist but have
+no subscriber. After the first deploy, click the confirmation link SNS emails
+to that address.

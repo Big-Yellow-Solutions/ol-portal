@@ -7,6 +7,7 @@
    Reply-To set to their real one, so replies still land with the right person. */
 
 import { SESv2Client, SendEmailCommand } from "@aws-sdk/client-sesv2";
+import { assertNotSuppressed } from "./suppression.mjs";
 
 const ses = new SESv2Client({});
 const DOMAIN = "optimisticlabs.com";
@@ -31,9 +32,18 @@ export async function sendSystemEmail({ toEmail, subject, text, html }) {
   await deliver({ from: SYSTEM_FROM, replyTo: null, toEmail, subject, text, html });
 }
 
+/* Every message carries the configuration set, which is what publishes its
+   bounces and complaints to mail-events.mjs. Unset in a stack that doesn't
+   define one (a test, a local run), where the send simply isn't tracked. */
+const CONFIG_SET = () => process.env.MAIL_CONFIG_SET || undefined;
+
 async function deliver({ from, replyTo, toEmail, subject, text, html }) {
+  // A permanent bounce or a complaint stops mail to that address until a
+  // person clears it (suppression.mjs). Throws, so the sender sees it.
+  await assertNotSuppressed(toEmail);
   await ses.send(new SendEmailCommand({
     FromEmailAddress: from,
+    ConfigurationSetName: CONFIG_SET(),
     Destination: { ToAddresses: [toEmail] },
     ...(replyTo ? { ReplyToAddresses: [replyTo] } : {}),
     Content: {
