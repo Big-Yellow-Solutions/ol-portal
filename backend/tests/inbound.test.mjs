@@ -18,7 +18,7 @@ process.env.AWS_ENDPOINT_URL_DYNAMODB = "http://127.0.0.1:1";
 
 const { doc } = await import("../src/util.mjs");
 const { perms } = await import("../src/identity.mjs");
-const { splitForward, parseInbound } = await import("../src/inbound-parse.mjs");
+const { splitForward, parseInbound, outsideParticipants, addressesIn, deepestFrom, MAX_TEXT } = await import("../src/inbound-parse.mjs");
 const { authenticateSender } = await import("../src/inbound-auth.mjs");
 const { sanitize } = await import("../src/inbound-extract.mjs");
 const { planIntake, resolveLab, labFromNote, companyKey, externalPersonEmail } = await import("../src/inbound-plan.mjs");
@@ -102,7 +102,8 @@ test("a Gmail forward splits into the forwarder's note and the forwarded message
   assert.equal(forwarded.subject, "Board retreat");
   assert.deepEqual(forwarded.cc.map(a => a.address), ["pat@riverchurch.org"]);
   assert.match(forwarded.body, /Executive Director/);
-  assert.doesNotMatch(forwarded.body, /earlier chatter/, "quoted history beyond the forward is stripped");
+  assert.match(forwarded.body, /earlier chatter/, "quoted history is kept, with its > markers removed");
+  assert.doesNotMatch(forwarded.body, /^>/m);
 });
 
 test("a message with no forward marker is all note", () => {
@@ -297,6 +298,101 @@ test("an intent the Optimist doesn't know changes nothing", () => {
 test("a deal name falls back to company-or-person when the model gave none", () => {
   const p = plan({ x: { deal: { ...EXTRACTION.deal, name: "" } } });
   assert.equal(p.deal.name, "River Church (from email)");
+});
+
+
+/* ---------- nested and mixed forwarding ---------- */
+
+/* The shape of a real forward: a teammate forwards an INTERNAL reply
+   ("Sounds great!") whose quoted history holds the outsider's original email.
+   Gmail also wraps the long Cc line mid-address, flush left. */
+const INTERNAL_CHAIN = [
+  "---------- Forwarded message ---------",
+  "From: Aliza Goodman <aliza@optimisticlabs.com>",
+  "Date: Fri, Nov 13, 2026 at 12:55 PM",
+  "Subject: Re: Reconnecting in Miami",
+  "To: Seth Cohen <seth@optimisticlabs.com>",
+  "Cc: Marci Cohen <marci@optimisticlabs.com>, Liz Russell <",
+  "liz@optimisticlabs.com>", "",
+  "Sounds great!", "",
+  "On Fri, Nov 13, 2026 at 8:25 AM Seth Cohen <seth@optimisticlabs.com> wrote:", "",
+  "> Aliza - I'll explain, but this is a good meeting for us to take together", ">",
+  "> ---------- Forwarded message ---------",
+  "> From: Leah Soibel <leah@fuentelatina.org>",
+  "> Date: Fri, Nov 13, 2026 at 8:01 AM",
+  "> Subject: Reconnecting in Miami",
+  "> To: seth@optimisticlabs.com <seth@optimisticlabs.com>", ">", ">",
+  "> Seth, I'm so glad we reconnected. Your offer to be an ally means a lot.",
+  "> Leah"
+].join("\n");
+
+const LEAH = { firstName: "Leah", lastName: "Soibel", email: "leah@fuentelatina.org", phone: "", title: "" };
+
+test("a forwarded internal chain keeps the outsider's email, quoted history and all", () => {
+  const { forwarded } = splitForward("Faith lab\n\n" + INTERNAL_CHAIN);
+  assert.equal(forwarded.from.address, "aliza@optimisticlabs.com");
+  assert.match(forwarded.body, /Leah Soibel <leah@fuentelatina\.org>/);
+  assert.match(forwarded.body, /Your offer to be an ally/);
+  assert.doesNotMatch(forwarded.body, /^>/m);
+  assert.deepEqual(forwarded.cc.map(a => a.address), ["marci@optimisticlabs.com", "liz@optimisticlabs.com"],
+    "a Cc list wrapped mid-address is rejoined");
+});
+
+test("the person is found even when the forwarded message is from a teammate", () => {
+  const parsed = splitForward("Faith lab\n\n" + INTERNAL_CHAIN);
+  assert.equal(deepestFrom(parsed.forwarded.body), "leah@fuentelatina.org");
+  assert.equal(externalPersonEmail(parsed), "leah@fuentelatina.org");
+  assert.deepEqual(outsideParticipants(parsed).map(a => a.address), ["leah@fuentelatina.org"]);
+});
+
+test("a client forwarding someone they refer: both outsiders are known, the model chooses, nothing is lost", () => {
+  const referral = [
+    "---------- Forwarded message ---------",
+    "From: Pat Client <pat@bigchurch.org>", "Date: Mon, Nov 9, 2026", "Subject: Fwd: Our retreat",
+    "To: Aliza Goodman <aliza@optimisticlabs.com>", "",
+    "Aliza, you should talk to Dana. She is planning a board retreat.", "",
+    "---------- Forwarded message ---------",
+    "From: Dana Whitfield <dana@riverchurch.org>", "Subject: Our retreat", "",
+    "We are planning a retreat this spring, around $40,000."
+  ].join("\n");
+  const parsed = splitForward("Referral from Pat\n\n" + referral);
+  assert.deepEqual(outsideParticipants(parsed).map(a => a.address), ["pat@bigchurch.org", "dana@riverchurch.org"]);
+  assert.equal(deepestFrom(parsed.forwarded.body), "dana@riverchurch.org");
+  // The model names the referred person; the other outsider is shown, not lost.
+  const p = planIntake({ ctx: ctxOf("Admin", [], "liz"), parsed, data: dataOf(),
+    extraction: { ...EXTRACTION, person: { ...EXTRACTION.person, email: "dana@riverchurch.org" } }, scope: null });
+  assert.equal(p.person.email, "dana@riverchurch.org");
+  assert.deepEqual(p.others.map(o => o.address), ["pat@bigchurch.org"]);
+  assert.match(buildReply({ kind: "plan", mode: "dry-run", plan: p }).text, /Also in the thread: Pat Client\. Only .* was added/);
+});
+
+test("when the model names no one, the server falls back to the chain's own outsider", () => {
+  const parsed = splitForward("Faith lab\n\n" + INTERNAL_CHAIN);
+  const p = planIntake({ ctx: ctxOf("Admin", [], "liz"), parsed, data: dataOf(),
+    extraction: { ...EXTRACTION, person: { ...EXTRACTION.person, email: "" } }, scope: null });
+  assert.equal(p.outcome, "ready");
+  assert.equal(p.person.email, "leah@fuentelatina.org");
+});
+
+test("no-reply and calendar addresses are never offered as the person", () => {
+  const parsed = splitForward("x\n\n---------- Forwarded message ---------\nFrom: Google Calendar <calendar-notification@google.com>\nSubject: Invitation\nTo: Seth <seth@optimisticlabs.com>\n\nSee also noreply@zoom.us and Dana <dana@riverchurch.org>");
+  assert.deepEqual(outsideParticipants(parsed).map(a => a.address), ["dana@riverchurch.org"]);
+});
+
+test("a very long thread is cut from the end, so the headers and newest messages survive", () => {
+  const long = "---------- Forwarded message ---------\nFrom: Dana <dana@riverchurch.org>\nSubject: x\n\nNEWEST\n" + "filler line\n".repeat(5000);
+  const { forwarded } = splitForward(long);
+  assert.equal(forwarded.body.length <= MAX_TEXT, true);
+  assert.match(forwarded.body, /^NEWEST/);
+});
+
+test("the whole flow: a forwarded internal chain reaches a plan for the outsider, not a needs-contact stop", async () => {
+  const raw = mime({ note: "faith lab test", id: "<chain@x>", fwd: INTERNAL_CHAIN });
+  const { out, sent } = await run(raw, { extraction: { ...EXTRACTION, person: LEAH, company: { name: "Fuente Latina", website: "fuentelatina.org" }, deal: { ...EXTRACTION.deal, name: "Fuente Latina reconnection" } } });
+  assert.equal(out.status, "done");
+  assert.equal(out.plan.person.email, "leah@fuentelatina.org");
+  assert.match(sent[0].text, /Leah Soibel, leah@fuentelatina\.org/);
+  assert.doesNotMatch(sent[0].text, /couldn't find a contact/);
 });
 
 /* ---------- reply ---------- */

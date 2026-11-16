@@ -71,7 +71,7 @@ Each inbound email runs through seven steps in the intake Lambda; any step can s
 1. **Dedupe.** Key on the `Message-ID` header. If an INBOUND record already exists, stop. SES can deliver the same message twice, and Gmail retries.
 2. **Authenticate the sender.** Require a DKIM pass signed by `optimisticlabs.com` with DMARC alignment. SPF is not checked, because the Workspace routing hop changes the sending server. Then resolve the `From` address to an active PERSON with `identity.mjs` (`resolvePerson`, `active !== false`). Fail either check and the message is dropped silently, with no reply.
 3. **Build the forwarder's context.** Call `buildContext` for that PERSON so `ctx.role`, `ctx.labs` and `ctx.can` are exactly what they would get in the browser. Contributors stop here with a short reply, since the portal gives them no Pipeline access today.
-4. **Parse the MIME.** Separate the forwarder's note from the forwarded block, pull the original sender, date, subject, cc list and the signature block. Strip quoted history beyond the forwarded message and cap text at about 30,000 characters.
+4. **Parse the MIME.** Separate the forwarder's note from the forwarded block, pull the original sender, date, subject, cc list and the signature block. Keep quoted history and nested forwards, with the `>` markers removed, because the person a lead is about is often not the author of the forwarded message (a teammate's internal reply that quotes an outsider, or a client forwarding someone they refer to us). Cap text at about 30,000 characters, cut from the end.
 5. **Classify and extract with Claude.** One call, no tools, structured JSON output, using the shared model constant. It returns the intent (`pipeline.add` or `unknown`) and a fixed schema:
    - person: first and last name, email, phone, title
    - company: name, website (from the email domain unless it is a free-mail domain)
@@ -109,7 +109,8 @@ Every case below resolves to "create", "create and flag", "hold and flag" or "st
 | Contact exists but is outside the forwarder's scope | Treat as not found, as `labScope` does elsewhere (it returns 404, never confirms existence). A Lab Leader gets a new CONTACT; the possible duplicate is recorded where only Admins see it. |
 | Company match by domain | Reuse in scope; flag "company matched by domain" since domains can be shared (a diocese and its parishes). |
 | Free-mail sender (gmail.com, outlook.com and similar) | No company from the domain. Use a company named in the note or the signature; otherwise create the deal with the person only. Fine at Lead. |
-| Several external people in the thread | v1 picks the original sender of the forwarded message; the others go in the deal summary by name. |
+| Several external people in the thread | v1 adds one. The model picks the person the thread is about (for a referral, the person being introduced; the note wins), the others go in the deal summary by name, and the reply lists them under "Also in the thread". |
+| Forwarded message is from a teammate | The thread is searched for the outsider: the nested forward or quoted email that names them. If the model names no one, the server falls back to the author of the oldest message in the chain. |
 | An open deal the forwarder can see already links this contact | Still create the new deal, flagged "possible duplicate of D-0xx". Updating existing deals is a later skill. |
 | Forwarder is the only external address (they wrote the email) | Use the first `To` recipient outside `optimisticlabs.com` as the person. |
 | Amount stated as a range or "about" | Store the low end, note the range in the summary. |

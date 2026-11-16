@@ -18,6 +18,8 @@ function planLines(plan) {
     `${pad("Deal")}${d.name}, ${d.amountStated ? money(d.amount) : "no amount stated"}, source ${d.source}`
   ];
   if (d.summary) lines.push("", d.summary);
+  if (plan.others?.length)
+    lines.push("", `Also in the thread: ${plan.others.map(a => a.name || a.address).join(", ")}. Only ${p.name} was added as the contact.`);
   return lines;
 }
 

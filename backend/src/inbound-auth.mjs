@@ -12,15 +12,16 @@
    trusted, and only its first occurrence — see firstHeader's note. Anything
    else a sender includes is ignored.
 
-   ASSUMPTION TO CONFIRM IN PHASE 1: the exact shape of that header (and the
-   X-SES-Spam/Virus verdicts) is read from SES's documented behaviour, not from
-   a message captured in this account. The dry run logs which checks passed or
-   failed for every message, and the phase gate requires a real forward to
-   pass and a spoofed one to fail before anything is created. */
+   CONFIRMED AGAINST REAL MAIL (Nov 16, 2026): SES's header reads
+   "Authentication-Results: amazonses.com; spf=pass …; dkim=<result>
+   header.i=@<domain>; dmarc=pass header.from=<domain>", alongside
+   X-SES-Spam-Verdict and X-SES-Virus-Verdict. The signer arrives as
+   header.i, not header.d, which is why both are read. A DKIM result of
+   "permerror" there means the signing key is missing or malformed in DNS. */
 
-import { allHeaders } from "./inbound-parse.mjs";
+import { allHeaders, COMPANY_DOMAIN } from "./inbound-parse.mjs";
+export { COMPANY_DOMAIN };
 
-export const COMPANY_DOMAIN = "optimisticlabs.com";
 const AUTHSERV = "amazonses.com";
 
 const domainOf = address => String(address || "").toLowerCase().split("@")[1] || "";
