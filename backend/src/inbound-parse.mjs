@@ -11,6 +11,7 @@
 import { simpleParser } from "mailparser";
 
 export const MAX_TEXT = 30_000;
+export const COMPANY_DOMAIN = "optimisticlabs.com";
 
 /* Gmail writes "---------- Forwarded message ---------"; Outlook writes
    "-----Original Message-----" or a bare "From:/Sent:/To:/Subject:" block
@@ -31,13 +32,69 @@ const addrOf = raw => {
 const addrList = raw =>
   String(raw || "").split(/,(?![^<]*>)/).map(addrOf).filter(Boolean);
 
-/* Quoted history past the forwarded message is noise that costs tokens and
-   drags in third parties: drop "On … wrote:" trailers and ">" quoting. */
-function stripQuoted(body) {
-  const lines = body.split(/\r?\n/);
-  const cut = lines.findIndex(l => /^\s*On .{5,200}wrote:\s*$/i.test(l));
-  return (cut === -1 ? lines : lines.slice(0, cut))
-    .filter(l => !/^\s*>/.test(l)).join("\n").trim();
+/* Quoted history is KEPT. The person a lead is about is often not the author
+   of the message that was forwarded: a teammate forwards an internal reply
+   ("Sounds great!") that quotes an outsider's original email, or a client
+   forwards a message from someone they are referring to us. Cutting at the
+   first "On … wrote:" would drop exactly the part that names them.
+
+   What this does instead is make the quoted text readable — leading ">"
+   markers removed, runs of blank lines collapsed — and cap the total. Nested
+   forwards then read like any other forward, which is how the model and the
+   participant scan below find the outsider. The cap cuts from the END, so
+   the newest messages and the forwarded headers survive a very long thread. */
+const FILTERED = /^(no-?reply|donotreply|do-not-reply|mailer-daemon|postmaster|notifications?|calendar-notification)@/i;
+
+function tidyBody(body) {
+  return String(body || "")
+    .split(/\r?\n/).map(l => l.replace(/^(?:\s*>)+ ?/, ""))
+    .join("\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, MAX_TEXT);
+}
+
+/** Every address in the thread's text, in order of first appearance, with the
+ *  name written next to it where there is one. Used to tell the model who is
+ *  in the thread, and to find the outsider when it names no one. */
+export function addressesIn(text) {
+  const seen = new Map();
+  for (const m of String(text || "").matchAll(/(?:"?([^"<>\n,;]{1,80}?)"?\s*)?<([^<>\s@]+@[^<>\s@]+\.[^<>\s@]+)>|([^\s<>,;:()"']+@[^\s<>,;:()"']+\.[a-z]{2,})/gi)) {
+    const address = String(m[2] || m[3]).toLowerCase().replace(/[.,;:]+$/, "");
+    if (!address || FILTERED.test(address)) continue;
+    const name = (m[1] || "").replace(/^(from|to|cc|on|date|sent):\s*/i, "").replace(/\s+/g, " ").trim();
+    if (!seen.has(address)) seen.set(address, { name, address });
+    else if (name && !seen.get(address).name) seen.get(address).name = name;
+  }
+  return [...seen.values()];
+}
+
+export const isOutside = address => !!address && !address.endsWith("@" + COMPANY_DOMAIN) && !address.endsWith("." + COMPANY_DOMAIN);
+
+/** Everything in the thread the person could be: the outside addresses in the
+ *  forwarded headers and body, in order of first appearance. */
+export function outsideParticipants(parsed) {
+  const f = parsed.forwarded;
+  if (!f) return [];
+  const headerAddrs = [f.from, ...f.to, ...f.cc].filter(Boolean);
+  const text = `${f.body}`;
+  const merged = new Map();
+  for (const a of [...headerAddrs, ...addressesIn(text)]) {
+    if (!isOutside(a.address) || FILTERED.test(a.address)) continue;
+    if (!merged.has(a.address)) merged.set(a.address, { name: a.name || "", address: a.address });
+    else if (a.name && !merged.get(a.address).name) merged.get(a.address).name = a.name;
+  }
+  return [...merged.values()];
+}
+
+/** The address on the LAST "From:" line in the text: the author of the oldest
+ *  message in a forwarded chain, which is who an introduction is about. */
+export function deepestFrom(text) {
+  let last = null;
+  for (const line of String(text || "").split("\n")) {
+    const m = /^\s*From:\s*(.+)$/i.exec(line);
+    if (!m) continue;
+    const a = addressesIn(m[1])[0];
+    if (a) last = a.address;
+  }
+  return last;
 }
 
 /** Splits a plain-text forward into { note, forwarded }. `forwarded` is null
@@ -55,13 +112,15 @@ export function splitForward(text) {
   for (; i < lines.length; i++) {
     const h = HEADER_LINE.exec(lines[i]);
     if (h) { lastKey = h[1].toLowerCase(); headers[lastKey] = h[2].trim(); continue; }
-    // A long To/Cc list wraps onto an indented continuation line.
-    if (lastKey && /^\s+\S/.test(lines[i]) && lines[i].includes("@")) { headers[lastKey] += " " + lines[i].trim(); continue; }
+    // A long To/Cc list wraps onto a continuation line — indented in some
+    // clients, flush left (even mid-address) in Gmail's plain-text forward.
+    if (lastKey && ["from", "to", "cc", "reply-to"].includes(lastKey) && lines[i].trim() && lines[i].includes("@"))
+      { headers[lastKey] += lines[i].startsWith(" ") || lines[i].startsWith("\t") ? " " + lines[i].trim() : lines[i].trim(); continue; }
     if (!lines[i].trim() && lastKey) { i++; break; }
     if (!lastKey && !lines[i].trim()) continue;
     break;
   }
-  const body = stripQuoted(lines.slice(i).join("\n"));
+  const body = tidyBody(lines.slice(i).join("\n"));
   return {
     note,
     forwarded: {
@@ -70,7 +129,7 @@ export function splitForward(text) {
       subject: headers.subject || "",
       to: addrList(headers.to),
       cc: addrList(headers.cc),
-      body: body.slice(0, MAX_TEXT)
+      body
     }
   };
 }
@@ -104,7 +163,7 @@ export async function parseInbound(raw) {
       subject: inner.subject || "",
       to: (inner.to?.value || []).map(a => ({ name: a.name || "", address: String(a.address || "").toLowerCase() })),
       cc: (inner.cc?.value || []).map(a => ({ name: a.name || "", address: String(a.address || "").toLowerCase() })),
-      body: stripQuoted(inner.text || "").slice(0, MAX_TEXT)
+      body: tidyBody(inner.text || "")
     };
   } else {
     ({ note, forwarded } = splitForward(mail.text || ""));

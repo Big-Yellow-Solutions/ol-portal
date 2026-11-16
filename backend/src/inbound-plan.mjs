@@ -13,6 +13,7 @@
 import { inScope } from "./contacts.mjs";
 import { SOURCES } from "./inbound-extract.mjs";
 import { COMPANY_DOMAIN } from "./inbound-auth.mjs";
+import { deepestFrom, isOutside, outsideParticipants } from "./inbound-parse.mjs";
 
 export const FREE_MAIL = new Set([
   "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "ymail.com",
@@ -69,13 +70,22 @@ export function resolveLab({ ctx, labs, note, hint }) {
   return { lab: null, how: "held" };
 }
 
-/** The one external person: the original sender of the forwarded message; if
- *  that is a teammate (they wrote the email), the first outside recipient. */
+/** The server's own pick of the one outside person, for when the model names
+ *  none. The chain can be nested either way — a teammate forwarding an
+ *  outsider, a teammate forwarding a teammate's reply that quotes an outsider,
+ *  a client forwarding someone they refer to us — so in order:
+ *    1. the forwarded message's own sender, if outside;
+ *    2. the author of the oldest message in the chain (the last "From:" line),
+ *       if outside: who an introduction is about;
+ *    3. the first outside recipient (the forwarder wrote the email);
+ *    4. any outside address in the thread. */
 export function externalPersonEmail(parsed) {
   const f = parsed.forwarded;
-  const outside = a => a && a.address && !a.address.endsWith("@" + COMPANY_DOMAIN) && !a.address.endsWith("." + COMPANY_DOMAIN);
-  if (outside(f?.from)) return f.from.address;
-  return [...(f?.to || []), ...(f?.cc || [])].find(outside)?.address || "";
+  if (isOutside(f?.from?.address)) return f.from.address;
+  const deepest = deepestFrom(f?.body);
+  if (isOutside(deepest)) return deepest;
+  return [...(f?.to || []), ...(f?.cc || [])].find(a => isOutside(a.address))?.address
+    || outsideParticipants(parsed)[0]?.address || "";
 }
 
 const nameOf = p => [p.firstName, p.lastName].filter(Boolean).join(" ").trim();
@@ -143,6 +153,9 @@ export function planIntake({ ctx, parsed, extraction: x, data, scope }) {
     lab: lab.lab, labName, labHow: lab.how,
     person, company,
     deal: { name: dealName, amount: x.deal.amount ?? 0, amountStated: x.deal.amount != null, source: SOURCES.includes(x.deal.source) ? x.deal.source : "Inbound", stage: "Lead", summary: x.deal.summary, subject },
-    flags, outOfScopeDuplicate, ambiguities: x.ambiguities
+    flags, outOfScopeDuplicate, ambiguities: x.ambiguities,
+    // Other outsiders in the thread: not added in v1, but the forwarder should
+    // see they exist (the deal summary names them).
+    others: outsideParticipants(parsed).filter(a => a.address !== email).slice(0, 5)
   };
 }
