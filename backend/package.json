@@ -21,6 +21,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1129.0",
     "aws-jwt-verify": "^5.2.1",
     "jose": "^6.2.12",
-    "jsonwebtoken": "^9.0.3"
+    "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.14.3"
   }
 }
