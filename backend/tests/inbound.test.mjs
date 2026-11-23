@@ -639,3 +639,27 @@ test("a mode that doesn't exist is refused rather than guessed at", async () => 
   try { await assert.rejects(handler({ Records: [] }), /not a mode/); }
   finally { if (prev === undefined) delete process.env.INBOUND_MODE; else process.env.INBOUND_MODE = prev; }
 });
+
+/* ---------- the model call: the first real forward died on a cut-off answer ---------- */
+const { requestParams, readResponse, MAX_TOKENS } = await import("../src/inbound-extract.mjs");
+
+test("the extraction request leaves room for thinking AND the answer, and asks for little thinking", () => {
+  const r = requestParams("hi");
+  assert.ok(r.max_tokens >= 8000, "2048 was spent on thinking and cut the JSON off mid-string");
+  assert.equal(r.max_tokens, MAX_TOKENS);
+  assert.equal(r.output_config.effort, "low");
+  assert.equal(r.output_config.format.type, "json_schema");
+  assert.equal(r.messages[0].content, "hi");
+});
+
+test("an answer cut off by the token cap says so, instead of failing as a JSON parse error", () => {
+  assert.throws(
+    () => readResponse({ stop_reason: "max_tokens", content: [{ type: "text", text: '{"intent":"pipeline.add","person":{"firstName":"Da' }] }),
+    /cut off at the \d+-token limit/);
+});
+
+test("a refusal reads as no intent, and a normal answer parses (thinking blocks are skipped)", () => {
+  assert.deepEqual(readResponse({ stop_reason: "refusal", content: [] }), {});
+  const r = readResponse({ stop_reason: "end_turn", content: [{ type: "thinking", thinking: "" }, { type: "text", text: '{"intent":"unknown"}' }] });
+  assert.equal(r.intent, "unknown");
+});
