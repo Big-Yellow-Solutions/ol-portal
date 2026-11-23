@@ -132,6 +132,30 @@ export const evidenceOf = parsed =>
   [parsed.note, parsed.forwarded?.from?.address, ...(parsed.forwarded?.to || []).map(a => a.address),
     ...(parsed.forwarded?.cc || []).map(a => a.address), parsed.forwarded?.subject, parsed.forwarded?.body].join("\n");
 
+/* The request, kept in one place so a test can pin it. Two settings matter:
+   - max_tokens counts thinking as well as the answer. Sonnet thinks by
+     default, so a small cap is spent on reasoning and the JSON is cut off
+     mid-string (the first real forward died at 346 characters under 2048).
+     16000 leaves room for both; the schema keeps the answer itself short.
+   - effort "low": this is extraction into a fixed schema, not reasoning, so
+     the model should spend little on thinking. */
+export const MAX_TOKENS = 16000;
+export const requestParams = userText => ({
+  model: MODEL, max_tokens: MAX_TOKENS, system: SYSTEM,
+  output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
+  messages: [{ role: "user", content: userText }]
+});
+
+/** The model's answer as an object. A refusal reads as "no intent"; an answer
+ *  cut off by the token cap is an error that says so, rather than a JSON parse
+ *  failure that doesn't. */
+export function readResponse(response) {
+  if (response.stop_reason === "refusal") return {};
+  if (response.stop_reason === "max_tokens")
+    throw new Error(`the model's answer was cut off at the ${MAX_TOKENS}-token limit`);
+  return JSON.parse(response.content.find(x => x.type === "text")?.text || "{}");
+}
+
 /** The one model call. `labs` is [{ id, name }] — what the forwarder could
  *  choose from — so the hint can only be a real lab id. */
 export async function extract(parsed, labs, { complete } = {}) {
@@ -145,13 +169,7 @@ export async function extract(parsed, labs, { complete } = {}) {
 
   const call = complete || (async () => {
     const c = await client();
-    const response = await c.messages.create({
-      model: MODEL, max_tokens: 2048, system: SYSTEM,
-      output_config: { format: { type: "json_schema", schema: SCHEMA } },
-      messages: [{ role: "user", content: userText }]
-    });
-    if (response.stop_reason === "refusal") return {};
-    return JSON.parse(response.content.find(x => x.type === "text")?.text || "{}");
+    return readResponse(await c.messages.create(requestParams(userText)));
   });
 
   try {
