@@ -94,6 +94,32 @@ export async function nextId(pk, prefix, match) {
   return prefix + String(max + 1).padStart(3, "0");
 }
 
+/* Create a record under the next free id without ever overwriting one.
+   nextId is max+1 over a read, so two creates at once (two people saving a
+   deal, or two forwarded emails landing together) can compute the same id, and
+   a plain put would silently replace the first record with the second. This
+   writes with attribute_not_exists and, on a clash, moves to the next number
+   rather than re-reading: a Query is eventually consistent and may not show
+   the row that just beat us. `build(id)` returns the item (without pk/sk
+   concerns beyond sk = id). Returns the item written. */
+export async function putNew(pk, prefix, build, match) {
+  const first = await nextId(pk, prefix, match);
+  let n = parseInt(first.slice(prefix.length), 10);
+  for (let attempt = 0; attempt < 8; attempt++, n++) {
+    const id = prefix + String(n).padStart(3, "0");
+    const item = build(id);
+    try {
+      await doc.send(new PutCommand({
+        TableName: TABLE, Item: item, ConditionExpression: "attribute_not_exists(sk)"
+      }));
+      return item;
+    } catch (err) {
+      if (err.name !== "ConditionalCheckFailedException") throw err;
+    }
+  }
+  throw new Error(`could not allocate a free ${pk} id`);
+}
+
 /* ---------- document kinds (Contributor MSA PRD) ----------
 
    Every agreement the portal executes is a CONTRACT record; `docKind` says

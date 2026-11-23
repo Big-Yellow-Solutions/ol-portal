@@ -302,6 +302,7 @@ const CHIP: Record<string, string> = {
   approval: "Approval",
   proposal: "Proposal",
   invoice: "Invoice",
+  intake: "From email",
 };
 
 export const notificationChip = (kind: string) => CHIP[kind] ?? kind;

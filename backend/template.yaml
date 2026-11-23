@@ -39,10 +39,13 @@ Parameters:
   InboundMode:
     Type: String
     Default: dry-run
-    AllowedValues: [dry-run]
+    AllowedValues: [dry-run, live]
     Description: >-
       Email intake mode. dry-run records and replies but writes nothing to
-      Pipeline. "live" is added to AllowedValues by the phase that implements it.
+      Pipeline. live also creates the company, person and Lead deal, for Admins
+      only (LIVE_ROLES in inbound.mjs); everyone else still gets the dry-run
+      answer. The deploy passes it from the INBOUND_MODE repository variable
+      and defaults to dry-run when that is unset.
   InboundRecipient:
     Type: String
     Default: theoptimist@in.optimisticlabs.com
