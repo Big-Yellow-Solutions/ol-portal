@@ -67,7 +67,8 @@ const TAB = {
   assignment: "work",
   approval: "work",
   proposal: "work",
-  invoice: "work"
+  invoice: "work",
+  intake: "work"
 };
 
 export const NOTIF_KINDS = Object.keys(TAB);

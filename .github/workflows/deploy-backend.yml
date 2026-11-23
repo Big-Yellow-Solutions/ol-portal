@@ -93,4 +93,4 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
-            --parameter-overrides "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs WorkosTokenIssuer=https://auth.optimisticlabs.com/user_management/client_01M10FCEF9TX4N3XTVRZYJV1NR AlertEmail=${{ vars.ALERT_EMAIL }}"
+            --parameter-overrides "AuthProvider=workos WorkosClientId=client_01M10FCEF9TX4N3XTVRZYJV1NR WorkosSecretId=WorkOs WorkosTokenIssuer=https://auth.optimisticlabs.com/user_management/client_01M10FCEF9TX4N3XTVRZYJV1NR AlertEmail=${{ vars.ALERT_EMAIL }} InboundMode=${{ vars.INBOUND_MODE || 'dry-run' }}"

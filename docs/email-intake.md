@@ -1,4 +1,4 @@
-# The Optimist's inbox: Phase 1 runbook (dry run)
+# The Optimist's inbox: runbook (Phase 1 dry run, Phase 2 live for Admins)
 
 Design: [email-intake-design.md](email-intake-design.md). Phase 1 receives real
 forwards, authenticates the sender, extracts with Claude and replies with what
@@ -49,12 +49,54 @@ dry run counts for anything:
 Dry-run replies right on lab, person and company for at least 9 in 10 of 15 to
 20 real forwards; DKIM passes after the routing hop; spoofed mail is dropped.
 
+## Phase 2: going live (Admins only)
+
+Live mode creates the company, the person and a Lead deal from a forward,
+through the same handlers the browser uses (so lab scope and validation are
+identical), in the forwarder's name. It is switched by one repository variable,
+not by code.
+
+**Turn on:** repository Settings, Secrets and variables, Variables: set
+`INBOUND_MODE` to `live`, then re-run the *Deploy backend* workflow.
+**Turn off (rollback):** set it to `dry-run` (or delete it) and re-run the
+workflow. Records already created stay; nothing deletes them.
+
+Who gets what in live mode:
+
+| Forwarder / situation | Result |
+| --- | --- |
+| Admin, lab settled (note, then model hint) | Records created. Reply starts "Added to Pipeline" with a link to the deal. |
+| Admin, no lab settled | Nothing written. Reply asks them to forward again with the lab in the note. (The "pick a lab" strip is Phase 3.) |
+| Lab Leader | Nothing written. Reply shows what would have been added and says email intake is on for Admins first. Opened up in Phase 3 (`LIVE_ROLES` in `inbound.mjs`). |
+| Contributor, spoofed or unknown sender | Unchanged from Phase 1. |
+
+What a created deal carries: `origin` (via email, the INBOUND row id, who
+forwarded it, when, the subject and a short summary) and `flags` (codes such as
+`company-by-domain`, `possible-duplicate`, `lab-guessed`). A flagged deal also
+rings the forwarder's bell and the reply lists what to address. There is no
+banner or "Mark addressed" button yet; that is Phase 3, so for now the flags are
+visible in the reply and the bell only. Every create writes an AUDIT row
+(`pipeline.email-intake`, `dryRun: false`, with the ids).
+
+**If something goes wrong:** a create that fails partway leaves what it already
+made (there is no transaction). The reply says only part was added, and the
+INBOUND row has `status: failed` and `created: { companyId, contactId, dealId }`
+listing exactly what to clean up. Find it in DynamoDB under `pk = INBOUND`, or
+by the `inbound.done` / `inbound.reply-failed` log lines.
+
+**Ids can no longer collide.** `createDeal`, `createCompany` and `createContact`
+now write with `attribute_not_exists` and move to the next number if an id is
+taken, so two forwards landing together cannot overwrite each other's deal.
+
+**Gate to Phase 3:** a week with no duplicate or wrong-lab records that needed
+manual cleanup.
+
 ## Known limits
 
 - **Reserved concurrency.** The design calls for 1. Lambda requires 10
   unreserved executions account-wide and the account quota is 10, so a
   reservation is rejected. `InboundReservedConcurrency` defaults to 0
-  (unreserved). Dry run doesn't need it; raise the quota before Phase 2.
+  (unreserved). Id allocation no longer depends on it (see Phase 2), so live mode is safe without it; raise the quota when convenient.
 - **Dedupe** uses a marker row (`INBOUND_MSG`, keyed by a hash of the
   Message-ID) because the `INBOUND` sort key is arrival time.
 - **Model constant.** `models.mjs` is new; `optimist.mjs` and `guides.mjs` still

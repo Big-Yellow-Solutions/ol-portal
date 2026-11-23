@@ -500,3 +500,142 @@ test("a sender over 30 intakes an hour is ignored with no reply", async () => {
   assert.equal(out.reason, "sender-rate-limit");
   assert.equal(sent.length, 0);
 });
+
+/* ---------- Phase 2: live mode creates records ---------- */
+const { putNew } = await import("../src/util.mjs");
+
+const live = async fn => {
+  const prev = { m: process.env.INBOUND_MODE, f: process.env.FRONTEND_URL };
+  process.env.INBOUND_MODE = "live"; process.env.FRONTEND_URL = "https://portal.test";
+  try { return await fn(); }
+  finally {
+    if (prev.m === undefined) delete process.env.INBOUND_MODE; else process.env.INBOUND_MODE = prev.m;
+    if (prev.f === undefined) delete process.env.FRONTEND_URL; else process.env.FRONTEND_URL = prev.f;
+  }
+};
+const nothingCreated = () => ofType("DEAL").length + ofType("CONTACT").length + ofType("COMPANY").length === 0;
+
+test("live: an Admin's forward creates the company, person and Lead deal, linked, in the forwarder's name", () => live(async () => {
+  const { out, sent } = await run(mime());
+  assert.equal(out.status, "done");
+  const [company] = ofType("COMPANY"), [contact] = ofType("CONTACT"), [deal] = ofType("DEAL");
+  assert.equal(company.name, "River Church");
+  assert.equal(contact.email, "dana@riverchurch.org");
+  assert.equal(contact.companyId, company.sk);
+  assert.equal(company.contactId, contact.sk);
+  assert.equal(deal.stage, "Lead");
+  assert.equal(deal.lab, "faith");
+  assert.equal(deal.owner, "liz@optimisticlabs.com");
+  assert.equal(deal.dealOwner, "liz@optimisticlabs.com");
+  assert.equal(deal.source, "Referral");
+  assert.equal(deal.amount, 40000);
+  assert.equal(deal.companyId, company.sk);
+  assert.equal(deal.contactId, contact.sk);
+  assert.match(deal.close, /^\d{4}-\d{2}-\d{2}$/);
+  assert.equal(deal.origin.via, "email");
+  assert.equal(deal.origin.forwardedBy, "liz@optimisticlabs.com");
+  assert.deepEqual(deal.flags, []);
+  const [row] = ofType("INBOUND");
+  assert.equal(deal.origin.inboundId, row.sk);
+  assert.equal(company.origin.inboundId, row.sk);
+  assert.deepEqual(row.created, { companyId: company.sk, contactId: contact.sk, dealId: deal.sk });
+  assert.equal(row.dryRun, false);
+  assert.match(sent[0].text, /^Added to Pipeline \(Optimistic Faith, Lead\)/);
+  assert.match(sent[0].text, new RegExp(`https://portal.test/pipeline\\?deal=${deal.sk}`));
+  assert.equal(ofType("AUDIT")[0].detail.dealId, deal.sk);
+  assert.equal(ofType("AUDIT")[0].detail.dryRun, false);
+}));
+
+test("live: a flagged deal is created, carries its flags, and rings the forwarder's bell", () => live(async () => {
+  seed("COMPANY", "CO-001", { name: "River Church Inc", website: "riverchurch.org" });
+  const { sent } = await run(mime());
+  const [deal] = ofType("DEAL");
+  assert.deepEqual(deal.flags, ["company-by-domain"]);
+  assert.equal(deal.companyId, "CO-001");
+  assert.equal(ofType("COMPANY").length, 1, "the matched company is reused, not duplicated");
+  const bell = ofType("NOTIF#liz@optimisticlabs.com");
+  assert.equal(bell.length, 1);
+  assert.equal(bell[0].kind, "intake");
+  assert.equal(bell[0].href, `/pipeline?deal=${deal.sk}`);
+  assert.match(sent[0].text, /To address:/);
+}));
+
+test("live: an existing person is reused and only blank fields are filled in", () => live(async () => {
+  seed("CONTACT", "CT-001", { name: "Dana Whitfield", email: "dana@riverchurch.org", title: "Director", phone: "", createdBy: "liz@optimisticlabs.com" });
+  await run(mime());
+  assert.equal(ofType("CONTACT").length, 1);
+  const c = ofType("CONTACT")[0];
+  assert.equal(c.title, "Director", "what someone already typed is never overwritten");
+  assert.equal(c.phone, "555-123-4567", "a blank is filled");
+  assert.equal(ofType("DEAL")[0].contactId, "CT-001");
+}));
+
+test("live: a malformed phone from a signature doesn't cost the lead", () => live(async () => {
+  const x = { ...EXTRACTION, person: { ...EXTRACTION.person, phone: "call me!" } };
+  const { out } = await run(mime(), { extraction: x });
+  assert.equal(out.status, "done");
+  assert.equal(ofType("CONTACT")[0].email, "dana@riverchurch.org");
+  assert.ok(!ofType("CONTACT")[0].phone);
+  assert.equal(ofType("DEAL").length, 1);
+}));
+
+test("live: a Lab Leader gets the plan and an honest 'not yet' — nothing is written", () => live(async () => {
+  const { out, sent } = await run(mime({ from: "Aliza <aliza@optimisticlabs.com>", id: "<ll@x>" }));
+  assert.equal(out.kind, "not-yet");
+  assert.ok(nothingCreated());
+  assert.match(sent[0].text, /switched on for Admins first, so nothing was added/);
+  assert.match(sent[0].text, /River Church/);
+  assert.equal(ofType("AUDIT")[0].detail.dryRun, true);
+}));
+
+test("live: an Admin intake with no lab settled is held, nothing is written, and the reply says how to fix it", () => live(async () => {
+  const x = { ...EXTRACTION, deal: { ...EXTRACTION.deal, labHint: null } };
+  const { out, sent } = await run(mime({ note: "Referral from Aliza." }), { extraction: x });
+  assert.equal(out.kind, "held");
+  assert.ok(nothingCreated());
+  assert.match(sent[0].text, /which lab this is for/);
+  assert.match(sent[0].text, /Faith lab\./);
+}));
+
+test("live: other roles and rejected mail still write nothing", () => live(async () => {
+  await run(mime({ from: "Sam <sam@optimisticlabs.com>", id: "<s@x>" }));
+  await run(mime({ auth: "X-Foo: bar", id: "<sp@x>" }));
+  assert.ok(nothingCreated());
+}));
+
+test("live: a new deal never takes an id that is already in use", () => live(async () => {
+  seed("DEAL", "D-001", { client: "Existing", lab: "faith", stage: "Lead" });
+  await run(mime());
+  assert.equal(rows.get(k("DEAL", "D-001")).client, "Existing");
+  assert.ok(rows.has(k("DEAL", "D-002")));
+}));
+
+test("putNew moves past an id that is taken instead of overwriting it, even when the read missed it", async () => {
+  seed("DEAL", "D-001", { client: "kept" });
+  seed("DEAL", "D-002", { client: "kept too" });
+  // The match filter hides every row, so nextId proposes D-001: the stale-read case.
+  const made = await putNew("DEAL", "D-", id => ({ pk: "DEAL", sk: id, client: "new" }), () => false);
+  assert.equal(made.sk, "D-003");
+  assert.equal(rows.get(k("DEAL", "D-001")).client, "kept");
+  assert.equal(rows.get(k("DEAL", "D-002")).client, "kept too");
+});
+
+test("live: a create that fails partway says so, keeps the ids, and the message is not retried blindly", () => live(async () => {
+  const x = { ...EXTRACTION, person: { ...EXTRACTION.person, email: "not-an-email" } };
+  const { out, sent } = await run(mime(), { extraction: x });
+  assert.equal(out.status, "failed");
+  assert.equal(ofType("COMPANY").length, 1, "the company made before the failure stays");
+  assert.equal(ofType("DEAL").length, 0);
+  const [row] = ofType("INBOUND");
+  assert.equal(row.status, "failed");
+  assert.equal(row.created.companyId, ofType("COMPANY")[0].sk);
+  assert.match(sent[0].text, /only part of this was added/);
+}));
+
+test("a mode that doesn't exist is refused rather than guessed at", async () => {
+  const { handler } = await import("../src/inbound.mjs");
+  const prev = process.env.INBOUND_MODE;
+  process.env.INBOUND_MODE = "yolo";
+  try { await assert.rejects(handler({ Records: [] }), /not a mode/); }
+  finally { if (prev === undefined) delete process.env.INBOUND_MODE; else process.env.INBOUND_MODE = prev; }
+});

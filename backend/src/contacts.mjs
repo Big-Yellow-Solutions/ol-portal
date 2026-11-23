@@ -19,7 +19,7 @@
    import wrote a phone on 16 of them, and the "Main line" contact it created
    for each reads it from there — but no company form shows them. */
 
-import { resp, today, get, put, del, listType, nextId } from "./util.mjs";
+import { resp, today, get, put, del, listType, putNew } from "./util.mjs";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Allows an optional leading "+" for international numbers, plus digits and
@@ -140,7 +140,10 @@ export async function listCompanies(ctx) {
   return resp(200, items.map(companyView));
 }
 
-export async function createCompany(ctx, body) {
+/* `extra` is for server-side callers (the email intake records where a record
+   came from). It never comes from the request body, and the fields computed
+   here win over it. */
+export async function createCompany(ctx, body, extra = {}) {
   if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to add companies" });
   const b = body || {};
   const name = str(b.name, 200);
@@ -155,9 +158,9 @@ export async function createCompany(ctx, body) {
   if (b.contactId && (!(await get("CONTACT", b.contactId)) || !inScope(scope, "contacts", b.contactId)))
     return resp(400, { error: "unknown contact" });
 
-  const id = await nextId("COMPANY", "CO-");
   const stamp = today();
-  const company = {
+  const company = await putNew("COMPANY", "CO-", id => ({
+    ...extra,
     pk: "COMPANY", sk: id, name, kind: str(b.kind, 200),
     website: website.value, address: cleanAddress(b.address),
     phone: str(b.phone, 40), email: email.value,
@@ -166,8 +169,7 @@ export async function createCompany(ctx, body) {
     // points at it — see labScope.
     createdBy: ctx.me.sk,
     created: stamp, updated: stamp
-  };
-  await put(company);
+  }));
   return resp(201, companyView(company));
 }
 
@@ -217,7 +219,7 @@ export async function listContacts(ctx) {
   return resp(200, items.map(({ pk, sk, ...rest }) => ({ id: sk, ...rest })));
 }
 
-export async function createContact(ctx, body) {
+export async function createContact(ctx, body, extra = {}) {
   if (!ctx.can.manageContacts()) return resp(403, { error: "Not allowed to add contacts" });
   const b = body || {};
   const name = str(b.name, 200);
@@ -230,16 +232,15 @@ export async function createContact(ctx, body) {
   if (b.companyId && (!(await get("COMPANY", b.companyId)) || !inScope(scope, "companies", b.companyId)))
     return resp(400, { error: "unknown company" });
 
-  const id = await nextId("CONTACT", "CT-");
   const stamp = today();
-  const contact = {
+  const contact = await putNew("CONTACT", "CT-", id => ({
+    ...extra,
     pk: "CONTACT", sk: id, name, title: str(b.title, 120),
     companyId: b.companyId || null,
     phone: phone.value, email: email.value,
     createdBy: ctx.me.sk,
     created: stamp, updated: stamp
-  };
-  await put(contact);
+  }));
   // A newly-created contact becomes its company's primary contact when it
   // doesn't have one yet — mirrors the design's inline-create behavior.
   if (contact.companyId) {

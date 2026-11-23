@@ -24,7 +24,7 @@ function planLines(plan) {
 }
 
 /** `mode` is "dry-run" or "live". Returns { subject, text, html }. */
-export function buildReply({ kind, plan, mode, reviewUrl, subject = "" }) {
+export function buildReply({ kind, plan, mode, reviewUrl, subject = "", partial = false }) {
   const re = subject ? `Re: ${subject}` : "Your forward to the Optimist";
   const dry = mode === "dry-run";
   let body;
@@ -45,7 +45,19 @@ export function buildReply({ kind, plan, mode, reviewUrl, subject = "" }) {
       body = ["You've forwarded a lot in the last hour, so I've paused. Try again a little later."];
       break;
     case "failed":
-      body = ["Something went wrong reading that message, and nothing was added. Please try forwarding it again in a minute."];
+      body = partial
+        ? ["Something went wrong partway through, so only part of this was added to Pipeline.",
+          "Check Pipeline before forwarding it again, so it isn't added twice. The team has the details."]
+        : ["Something went wrong reading that message, and nothing was added. Please try forwarding it again in a minute."];
+      break;
+    // Live mode, but this forward can't be added yet. Nothing was written.
+    case "held":
+      body = ["I need to know which lab this is for before I can add it to Pipeline, so nothing was added.",
+        "Forward it again with the lab in a note above the forward, for example: \"Faith lab.\"", "", ...planLines(plan)];
+      break;
+    case "not-yet":
+      body = ["Adding leads from email is switched on for Admins first, so nothing was added.",
+        `This is what I would have added to Pipeline (${plan.labName}, ${plan.deal.stage}):`, "", ...planLines(plan)];
       break;
     default: { // "plan"
       const where = plan.outcome === "held" ? "no lab chosen yet" : `${plan.labName}, ${plan.deal.stage}`;

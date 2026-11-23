@@ -9,11 +9,12 @@
      4 parse MIME  5 classify + extract (Claude)  6 match and plan
      7 record, notify, reply
 
-   INBOUND_MODE=dry-run (the Phase 1 default) runs all seven but writes
-   nothing to Pipeline: the INBOUND log row is the only write, and the reply
-   says what it WOULD have created. "live" is not implemented yet — it is the
-   next phase, and refusing to start in it is deliberate rather than letting a
-   half-built create path run against production.
+   INBOUND_MODE=dry-run (the default) runs all seven but writes nothing to
+   Pipeline: the INBOUND log row is the only write, and the reply says what it
+   WOULD have created. INBOUND_MODE=live (Phase 2) also creates the company,
+   person and Lead deal through the same handlers the browser uses, for the
+   roles in LIVE_ROLES only; anyone else, and any intake that can't settle a
+   lab, still gets the dry-run answer and nothing is written.
 
    Mail never touches API Gateway or the WorkOS authorizer. The verified
    sender is the credential, and buildContext turns it into the same
@@ -30,6 +31,7 @@ import { parseInbound } from "./inbound-parse.mjs";
 import { authenticateSender } from "./inbound-auth.mjs";
 import { extract } from "./inbound-extract.mjs";
 import { planIntake } from "./inbound-plan.mjs";
+import { executePlan } from "./inbound-create.mjs";
 import { buildReply } from "./inbound-reply.mjs";
 
 const s3 = new S3Client({});
@@ -38,6 +40,9 @@ export const TTL_DAYS = 90;
 export const PER_SENDER_PER_HOUR = 30;
 export const PER_INBOX_PER_DAY = 200;
 const mode = () => (process.env.INBOUND_MODE || "dry-run");
+/* Who may create records by email. Phase 2 is Admins only; Lab Leaders join in
+   Phase 3, once the flag banner and "pick a lab" strip exist for them. */
+export const LIVE_ROLES = ["Admin"];
 
 const log = (message, detail) => console.log(JSON.stringify({ level: "info", message, ...detail }));
 const masked = a => { const [l = "", d = ""] = String(a).split("@"); return `${l.slice(0, 1)}***@${d}`; };
@@ -74,11 +79,9 @@ async function claim(hash, now) {
   }
 }
 
+const inboundSk = (now, hash) => `${now.toISOString()}#${hash.slice(0, 12)}`;
 async function record(now, hash, fields) {
-  await put({
-    pk: "INBOUND", sk: `${now.toISOString()}#${hash.slice(0, 12)}`,
-    ...fields, ttl: ttl(now)
-  });
+  await put({ pk: "INBOUND", sk: inboundSk(now, hash), ...fields, ttl: ttl(now) });
 }
 
 /** Everything after the raw message is in hand. `deps` exist so tests can run
@@ -145,20 +148,33 @@ export async function processMessage(raw, { s3Key = "", now = new Date(), deps =
     ]);
     const plan = planIntake({ ctx, parsed, extraction, data: { labs, contacts, companies, deals }, scope });
 
-    // 7. Record, reply.
-    const kind = plan.outcome === "needs-contact" ? "needs-contact" : plan.outcome === "unknown-intent" ? "unknown-intent" : "plan";
-    const replyError = await reply(buildReply({ kind, plan, mode: mode(), subject: parsed.subject }));
+    // 7. Create (live mode, allowed roles, a settled lab), record, reply.
+    const live = mode() === "live";
+    const mayCreate = live && LIVE_ROLES.includes(ctx.role) && plan.outcome === "ready";
+    let kind = plan.outcome === "needs-contact" ? "needs-contact" : plan.outcome === "unknown-intent" ? "unknown-intent" : "plan";
+    let made = null;
+    if (mayCreate) {
+      made = await executePlan({ ctx, plan, inboundId: inboundSk(now, hash), receivedAt: now, subject: parsed.subject });
+    } else if (live && kind === "plan") {
+      kind = plan.outcome === "held" ? "held" : "not-yet";
+    }
+    const reviewUrl = made ? `${process.env.FRONTEND_URL}/pipeline?deal=${made.deal.id}` : undefined;
+    const replyError = await reply(buildReply({ kind, plan, mode: made ? "live" : "dry-run", reviewUrl, subject: parsed.subject }));
     await record(now, hash, {
       ...base2, intent: extraction.intent, status: plan.outcome === "ready" || plan.outcome === "held" ? "done" : "ignored",
-      reason: plan.outcome, plan: kind === "plan" ? slimPlan(plan) : undefined, replyError
+      reason: plan.outcome, plan: plan.person ? slimPlan(plan) : undefined, created: made?.created, replyError
     });
-    await writeAudit(ctx.me.sk, "pipeline.email-intake", { dryRun: mode() === "dry-run", outcome: plan.outcome, lab: plan.lab || null });
-    log("inbound.done", { personKey: ctx.me.sk, outcome: plan.outcome, flags: plan.flags.map(f => f.code) });
-    return { status: "done", plan, kind };
+    await writeAudit(ctx.me.sk, "pipeline.email-intake", {
+      dryRun: !made, outcome: plan.outcome, lab: plan.lab || null, ...(made ? { ...made.created } : {})
+    });
+    log("inbound.done", { personKey: ctx.me.sk, outcome: plan.outcome, created: !!made, flags: plan.flags.map(f => f.code) });
+    return { status: "done", plan, kind, created: made?.created };
   } catch (err) {
     console.error(JSON.stringify({ level: "error", message: err.message, stack: err.stack }));
-    const replyError = await reply(buildReply({ kind: "failed", mode: mode(), subject: parsed.subject }));
-    await record(now, hash, { ...base2, status: "failed", reason: String(err.message).slice(0, 300), replyError });
+    // A create that died halfway leaves what it made; say so, and keep the ids.
+    const partial = !!err.created && Object.keys(err.created).length > 0;
+    const replyError = await reply(buildReply({ kind: "failed", partial, mode: mode(), subject: parsed.subject }));
+    await record(now, hash, { ...base2, status: "failed", reason: String(err.message).slice(0, 300), created: err.created, replyError });
     return { status: "failed" };
   }
 }
@@ -174,8 +190,8 @@ const slimPlan = p => ({
 });
 
 export const handler = async event => {
-  if (mode() !== "dry-run")
-    throw new Error(`INBOUND_MODE=${mode()} is not implemented yet; only dry-run is supported`);
+  if (mode() !== "dry-run" && mode() !== "live")
+    throw new Error(`INBOUND_MODE=${mode()} is not a mode; use dry-run or live`);
   for (const rec of event.Records || []) {
     const key = decodeURIComponent(rec.s3.object.key.replace(/\+/g, " "));
     if (!key.startsWith("inbound/")) continue;
